@@ -8,7 +8,7 @@ import { newQueryable, type Built, type Query } from './query.ts';
 import { REF, Scope, type Ref } from './ref.ts';
 import type { AnySchema, EntityKey } from './relations.ts';
 import type { Entity, Insert, Row, ValueOf } from './schema.ts';
-import { refEntity, type Interceptors, type WriteEvent } from './interceptor.ts';
+import { Interceptors, refEntity, type WriteEvent } from './interceptor.ts';
 import { execute, query, type Context } from './session.ts';
 
 type EntityOf<S extends AnySchema, K extends EntityKey<S>> = S['entities'][K];
@@ -393,6 +393,8 @@ interface WriteState {
   readonly hard?: boolean;
   /** entity(row) 带了版本条件：一行都没更新到说明被别人改过，要抛错 */
   readonly versionGuard?: boolean;
+  /** expectRows：改到的行数必须是 count，否则抛 error(实际行数) */
+  readonly expect?: { readonly count: number; readonly error: (affected: number) => Error };
 }
 
 abstract class Filtered {
@@ -433,6 +435,8 @@ abstract class Filtered {
 
   async execute(): Promise<number> {
     const affected = (await execute(this.ctx, this.toSQL())).affected;
+    const expect = this.state.expect;
+    if (expect && affected !== expect.count) throw expect.error(affected);
     await this.ctx.interceptors.afterWrite({
       kind: this.verb as WriteEvent['kind'],
       entity: this.ctx.schema.entities[this.key]!,
@@ -465,6 +469,22 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       this.key as K,
       this.state,
       fn as (r: any) => Record<string, unknown>,
+    );
+  }
+
+  /**
+   * 改到的行数必须是 count，否则抛 error(实际行数)（在事务里就整个回滚）。带状态条件的更新用它：改到 0 行说明已被别人处理
+   * ```ts
+   * await tx.update(WorkItem).set({ state: 'done' }).where((w) => [w.id.eq(id), w.state.eq('open')])
+   *   .expectRows(1, () => new AlreadyHandled(id)).execute()
+   * ```
+   */
+  expectRows(count: number, error: (affected: number) => Error): Updatable<S, K> {
+    return new Updatable(
+      this.ctx,
+      this.key as K,
+      { ...this.state, expect: { count, error } },
+      this.values,
     );
   }
 
@@ -624,6 +644,11 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     return new Deletable(this.ctx, this.key as K, { ...this.state, all: true });
   }
 
+  /** 删到的行数必须是 count，否则抛 error(实际行数)（在事务里就整个回滚）；同 Updatable 的 expectRows */
+  expectRows(count: number, error: (affected: number) => Error): Deletable<S, K> {
+    return new Deletable(this.ctx, this.key as K, { ...this.state, expect: { count, error } });
+  }
+
   /** 删除后返回这些列（已解码）；逻辑删除时返回被标记的行。见 Returning */
   returning(): Returning<Row<EntityOf<S, K>>>;
   returning<C extends keyof Row<EntityOf<S, K>> & string>(
@@ -669,5 +694,40 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     checkAliases(node);
     const w = new SqlWriter();
     return { sql: this.ctx.dialect.delete(node, w), params: w.params };
+  }
+}
+
+/**
+ * 锁住一行（Db.lock）：没有行锁的库（SQLite）用一条把主键写回自己的 UPDATE 拿到写锁。
+ * 不经拦截器（不加租户条件、不改更新时间）、不动版本列：锁不改任何数据
+ */
+export class LockRow extends Filtered {
+  protected readonly verb = 'lock';
+
+  constructor(ctx: Context, key: string, where: (r: any) => Cond) {
+    super(ctx, key, { where: [where], all: false });
+  }
+
+  protected override interceptors(): Interceptors {
+    return Interceptors.none;
+  }
+
+  override async execute(): Promise<number> {
+    return (await execute(this.ctx, this.toSQL())).affected;
+  }
+
+  toSQL(): Statement {
+    const { root, where } = this.scope();
+    const entity = this.ctx.schema.entities[this.key]!;
+    const column = entity.columnNames[entity.primaryKey[0]!]!;
+    const self: Node = { k: 'col', alias: root[REF].alias, name: column };
+    const node = {
+      from: { table: entity.table, alias: root[REF].alias },
+      set: [{ column, e: self }],
+      where,
+    };
+    checkAliases(node);
+    const w = new SqlWriter();
+    return { sql: this.ctx.dialect.update(node, w), params: w.params };
   }
 }

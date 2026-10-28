@@ -120,6 +120,11 @@ export class Interceptors {
     this.list = list;
   }
 
+  /** 所有拦截器的名字（全部关掉时用） */
+  names(): string[] {
+    return this.list.map((i) => i.name);
+  }
+
   without(names: readonly string[]): Interceptors {
     return names.length === 0
       ? this

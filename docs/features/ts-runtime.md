@@ -1,4 +1,4 @@
-# TS：流式读取、取消、嵌套事务、`await using`、只读事务
+# TS：流式读取、取消、嵌套事务、`await using`、提交后的回调与锁、只读事务
 
 ## 流式读取 `stream()`
 
@@ -53,6 +53,27 @@ await tx.commit(); // 提交之后再离开作用域是安全的（回滚是空�
 ```
 
 `begin()` 用驱动现有的回调式事务实现：回调里等一个"提交 / 回滚"的决定，决定下来回调才返回，驱动随即提交或回滚，所以各库行为与 `transaction()` 完全一致。`commit()` / `rollback()` 只能各用一次，已结束再 `commit()` 报错。
+
+## 提交后的回调、锁一行、改到的行数
+
+```ts
+await db.transaction(async (tx) => {
+  if (!(await tx.lock(Instance, id))) throw new NotFound(id); // 锁住这一行直到事务结束；返回它在不在
+  await tx
+    .update(WorkItem)
+    .set({ state: 'done' })
+    .where((w) => [w.id.eq(itemId), w.state.eq('open')])
+    .expectRows(1, () => new AlreadyHandled(itemId)) // 改到的不是 1 行就抛这个错，整个事务回滚
+    .execute();
+  tx.afterCommit(() => notify(itemId)); // 提交之后才执行；回滚了不执行
+});
+```
+
+- `afterCommit` / `afterRollback` 只能在事务里调用。保存点（嵌套事务）里登记的：保存点成功就并进外层，跟着外层提交或回滚；
+  保存点回滚时丢掉它登记的提交后的事、马上执行它登记的回滚后的事。提交后的钩子出错时数据已经提交，错误抛给发起事务的调用方，别的钩子照常执行。
+- `lock(实体, 主键)`：有行锁的库是 `SELECT … FOR UPDATE`；SQLite 没有行锁，写成一条把主键写回自己的 `UPDATE`，让延迟事务马上拿到写锁
+  （否则两个事务都先读后写会互相等）。锁不经拦截器（不加租户条件、不改更新时间）、不动版本列。
+- `expectRows(行数, 错误)`：`update`、`delete` 上用，带状态条件的更新改到 0 行说明已被别人处理。
 
 ## 只读事务
 

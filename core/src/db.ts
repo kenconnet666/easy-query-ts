@@ -8,11 +8,13 @@
  */
 import type { Statement } from './dialect.ts';
 import { columnRules, Interceptors, type Interceptor } from './interceptor.ts';
-import { Deletable, Insertable, Updatable } from './mutation.ts';
+import { Deletable, Insertable, LockRow, Updatable } from './mutation.ts';
 import {
   cteEntity,
+  keyCondition,
   newQueryable,
   recursiveCteEntity,
+  type KeyInput,
   type Query,
   type Queryable,
 } from './query.ts';
@@ -28,6 +30,8 @@ import {
   type ExecutionEvent,
   type Session,
   type TransactionOptions,
+  newTransactionHooks,
+  runHooks,
 } from './session.ts';
 
 /** 实体对象在 schema 里的键 */
@@ -433,10 +437,74 @@ export class Db<S extends AnySchema> {
         );
       return this.nested(work);
     }
-    return this.adapter.driver.transaction(
-      (session: Session) => work(new Db({ ...this.ctx, session }, this.adapter, this.keys, true)),
-      options,
-    );
+    const hooks = newTransactionHooks();
+    let result: T;
+    try {
+      result = await this.adapter.driver.transaction(
+        (session: Session) =>
+          work(new Db({ ...this.ctx, session, hooks }, this.adapter, this.keys, true)),
+        options,
+      );
+    } catch (error) {
+      // 回滚后的钩子出错不盖住原来的错误
+      await runHooks(hooks.frames[0]!.rollback).catch(() => undefined);
+      throw error;
+    }
+    await runHooks(hooks.frames[0]!.commit);
+    return result;
+  }
+
+  /**
+   * 事务提交之后执行（发通知、发消息、清缓存）：回滚了就不执行；登记在保存点（嵌套事务）里、保存点回滚了的也不执行。
+   * 必须在事务里调用。fn 出错时数据已经提交，错误抛给发起事务的调用方
+   * ```ts
+   * await db.transaction(async (tx) => {
+   *   await tx.insert(Order).values(order).execute();
+   *   tx.afterCommit(() => mailer.send(order));
+   * });
+   * ```
+   */
+  afterCommit(fn: () => unknown): void {
+    this.frame('afterCommit').commit.push(fn);
+  }
+
+  /** 事务（或登记它的保存点）回滚之后执行：撤销事务外做的事（删上传的文件这类）。必须在事务里调用；fn 出错不盖住原来的错误 */
+  afterRollback(fn: () => unknown): void {
+    this.frame('afterRollback').rollback.push(fn);
+  }
+
+  private frame(what: string) {
+    const frames = this.ctx.hooks?.frames;
+    if (!frames) throw new Error(`${what}() must be called inside a transaction`);
+    return frames[frames.length - 1]!;
+  }
+
+  /**
+   * 锁住一行直到事务结束，返回这一行在不在。同一行的写入（或同样先锁它的事务）在这里排队，之后读到的都是对方提交后的数据：
+   * 流程实例、账户这类"聚合根"，每个改它的操作先锁它，并发的两个操作不会都以为对方还没做。
+   * 有行锁的库用 SELECT … FOR UPDATE；SQLite 用一条把主键写回自己的 UPDATE 拿到写锁。不经拦截器、不动版本列
+   * ```ts
+   * await db.transaction(async (tx) => {
+   *   if (!(await tx.lock(Instance, id))) throw new NotFound(id);
+   *   const instance = await tx.queryable(Instance).findOrThrow(id);
+   * });
+   * ```
+   */
+  async lock<E extends SchemaEntity<S>>(entity: E, key: KeyInput<E>): Promise<boolean> {
+    if (!this.inTransaction) {
+      throw new Error('lock() must be called inside a transaction: the lock lasts until it ends');
+    }
+    const name = this.key<string>(entity);
+    const where = (row: any) => keyCondition(this.ctx.schema.entities[name]!, key, row);
+    if (!this.ctx.dialect.rowLocks) {
+      return (await new LockRow(this.ctx, name, where).execute()) > 0;
+    }
+    const rows = await newQueryable(this.ctx, name)
+      .noInterceptor(...this.ctx.interceptors.names())
+      .where(where)
+      .forUpdate()
+      .toList();
+    return rows.length > 0;
   }
 
   /** 嵌套事务：SAVEPOINT，成功则释放，失败则回滚到保存点 */
@@ -445,11 +513,20 @@ export class Db<S extends AnySchema> {
     const name = `eqts_sp_${++this.savepoints.n}`;
     await execute(this.ctx, { sql: dialect.savepoint(name), params: [] });
     const release = dialect.releaseSavepoint(name);
+    // 保存点里登记的钩子另起一帧：成功并进外层，回滚则丢掉提交后的、执行回滚后的
+    const frames = this.ctx.hooks!.frames;
+    const frame = { commit: [] as (() => unknown)[], rollback: [] as (() => unknown)[] };
+    frames.push(frame);
     try {
       const result = await work(this);
       if (release) await execute(this.ctx, { sql: release, params: [] });
+      frames.pop();
+      frames[frames.length - 1]!.commit.push(...frame.commit);
+      frames[frames.length - 1]!.rollback.push(...frame.rollback);
       return result;
     } catch (error) {
+      frames.pop();
+      await runHooks(frame.rollback).catch(() => undefined);
       // 回滚本身失败（比如连接已断）不能盖住原来的错误
       try {
         await execute(this.ctx, { sql: dialect.rollbackToSavepoint(name), params: [] });
@@ -481,14 +558,21 @@ export class Db<S extends AnySchema> {
       decide = resolve;
     });
     let finished!: Promise<void>;
+    const hooks = newTransactionHooks();
     const transaction = await new Promise<Transaction<S>>((resolve, reject) => {
       finished = this.adapter.driver
         .transaction(async (session: Session) => {
           resolve(
-            new Transaction({ ...this.ctx, session }, this.adapter, this.keys, {
+            new Transaction({ ...this.ctx, session, hooks }, this.adapter, this.keys, {
               finish: async (commit) => {
                 decide(commit);
-                await finished;
+                try {
+                  await finished;
+                } catch (error) {
+                  await runHooks(hooks.frames[0]!.rollback).catch(() => undefined);
+                  throw error;
+                }
+                await runHooks(hooks.frames[0]![commit ? 'commit' : 'rollback']);
               },
             }),
           );
@@ -561,6 +645,7 @@ export function createDb<S extends AnySchema>(options: DbOptions<S>): Db<S> {
     log: options.log,
     onExecute: options.onExecute,
     signal: undefined,
+    hooks: undefined,
     // 列修饰器驱动的内置规则在前，用户的拦截器在后
     interceptors: new Interceptors([...columnRules(), ...(options.interceptors ?? [])]),
   };

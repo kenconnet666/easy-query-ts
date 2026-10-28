@@ -123,6 +123,11 @@ export class SqliteDialect extends Dialect {
   override forUpdate(): string {
     return '';
   }
+
+  /** 没有行锁：Db.lock 改用一条写语句，让事务马上拿到写锁（延迟事务在第一次写之前只有读锁） */
+  override get rowLocks(): boolean {
+    return false;
+  }
 }
 
 export interface SqliteOptions {

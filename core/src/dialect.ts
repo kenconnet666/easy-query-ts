@@ -215,6 +215,11 @@ export abstract class Dialect {
   }
 
   /** 行锁子句。wait：nowait 立即报错、skip 跳过被锁的行（MySQL 8.0.1+、PG 的写法） */
+  /** 有行锁：Db.lock 用 SELECT … FOR UPDATE；没有时（SQLite）用一条把主键写回自己的 UPDATE 拿到写锁 */
+  get rowLocks(): boolean {
+    return true;
+  }
+
   forUpdate(wait?: 'nowait' | 'skip'): string {
     return ' FOR UPDATE' + (wait === 'nowait' ? ' NOWAIT' : wait === 'skip' ? ' SKIP LOCKED' : '');
   }

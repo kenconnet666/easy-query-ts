@@ -71,6 +71,35 @@ export interface Context {
   readonly interceptors: Interceptors;
   /** 取消信号：已取消的信号让新语句直接失败，执行中取消则不再等待结果（见 Db.withSignal） */
   readonly signal: AbortSignal | undefined;
+  /** 事务结束后要做的事（Db.afterCommit / afterRollback）；不在事务里时没有 */
+  readonly hooks: TransactionHooks | undefined;
+}
+
+/** 事务结束后要做的事：一层一帧，保存点（嵌套事务）成功时并进外层，失败时丢掉它登记的提交后的事 */
+export interface TransactionHooks {
+  readonly frames: { readonly commit: (() => unknown)[]; readonly rollback: (() => unknown)[] }[];
+}
+
+/** 新的一组事务钩子 */
+export const newTransactionHooks = (): TransactionHooks => ({
+  frames: [{ commit: [], rollback: [] }],
+});
+
+/**
+ * 依次执行钩子，都执行完再抛出其中的错误（一个就是它，几个就是 AggregateError）。
+ * 提交后的钩子出错时数据已经提交：错误抛给调用方，提示"已提交，但后续动作失败了"
+ */
+export async function runHooks(hooks: readonly (() => unknown)[]): Promise<void> {
+  const errors: unknown[] = [];
+  for (const hook of hooks) {
+    try {
+      await hook();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, 'transaction hooks failed');
 }
 
 export function query(ctx: Context, statement: Statement): Promise<Record<string, unknown>[]> {

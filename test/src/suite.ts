@@ -420,6 +420,78 @@ export function liveSuite(
         33,
       );
     });
+
+    it('lock() serializes read-modify-write on the same row and reports whether it exists', async () => {
+      const { db } = await seeded();
+      const bump = () =>
+        db.transaction(async (tx) => {
+          assert.equal(await tx.lock(User, 1), true);
+          const { age } = await tx.queryable(User).findOrThrow(1);
+          await new Promise((r) => setTimeout(r, 5));
+          await tx
+            .update(User)
+            .set({ age: (age ?? 0) + 1 })
+            .where((u) => u.id.eq(1))
+            .execute();
+        });
+      await Promise.all([bump(), bump(), bump()]);
+      assert.equal((await db.queryable(User).findOrThrow(1)).age, 33);
+      assert.equal(await db.transaction((tx) => tx.lock(User, -1)), false);
+    });
+
+    it('afterCommit runs after commit only; afterRollback after rollback only', async () => {
+      const { db } = await seeded();
+      const seen: string[] = [];
+      await db.transaction(async (tx) => {
+        tx.afterCommit(() => seen.push('committed'));
+        tx.afterRollback(() => seen.push('rolled back'));
+        await tx
+          .update(User)
+          .set({ age: 5 })
+          .where((u) => u.id.eq(1))
+          .execute();
+        assert.deepEqual(seen, []);
+      });
+      await assert.rejects(
+        db.transaction(async (tx) => {
+          tx.afterCommit(() => seen.push('never'));
+          tx.afterRollback(() => seen.push('undone'));
+          throw new Error('boom');
+        }),
+        /boom/,
+      );
+      assert.deepEqual(seen, ['committed', 'undone']);
+    });
+
+    it('expectRows throws its error and rolls back when the update hits another number of rows', async () => {
+      const { db } = await seeded();
+      const handled = (affected: number) => new Error(`already handled (${affected})`);
+      await db.transaction((tx) =>
+        tx
+          .update(User)
+          .set({ age: 7 })
+          .where((u) => u.id.eq(1))
+          .expectRows(1, handled)
+          .execute(),
+      );
+      await assert.rejects(
+        db.transaction(async (tx) => {
+          await tx
+            .update(User)
+            .set({ age: 8 })
+            .where((u) => u.id.eq(1))
+            .execute();
+          await tx
+            .update(User)
+            .set({ age: 9 })
+            .where((u) => u.id.eq(-1))
+            .expectRows(1, handled)
+            .execute();
+        }),
+        /already handled \(0\)/,
+      );
+      assert.equal((await db.queryable(User).findOrThrow(1)).age, 7);
+    });
   });
 
   describe(`${name}: upsert and interceptors`, () => {

@@ -130,8 +130,8 @@ function isKeyObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-/** 主键等于给定值的条件 */
-function keyCondition(entity: Entity, key: unknown, row: Columns): Cond {
+/** 主键等于给定值的条件（按主键筛选、Db.lock 共用） */
+export function keyCondition(entity: Entity, key: unknown, row: Columns): Cond {
   const columns = entity.primaryKey;
   if (columns.length === 0) throw new Error(`${entity.table} has no primary key`);
   if (!isKeyObject(key)) {
