@@ -6,19 +6,19 @@ TS 版的状态按 `packages/easy-query/core/src` 的实现核过。"写法不�
 
 ## 查询与执行
 
-| Java                                                                  | TS                                                              | 状态 | 说明                                                        |
-| --------------------------------------------------------------------- | --------------------------------------------------------------- | ---- | ----------------------------------------------------------- |
-| `toList`                                                              | `toList()`                                                      | ✓    |                                                             |
-| `firstOrNull` / `singleOrNull`                                        | `first()`（没有时 undefined）/ `single()`（不是恰好一行就抛错） | ≈    |                                                             |
-| `firstNotNull` / `singleNotNull` / `required()`（没有就抛带说明的错） | —                                                               | ✗    | 补 `firstOrThrow(message)` 一类，接口层"查不到就 404"最常用 |
-| `findOrNull(id)` / `findNotNull(id)`、`whereById` / `whereByIds`      | —                                                               | ✗    | 按主键查，复合主键也要支持                                  |
-| `toPageResult`                                                        | `toPage(page, size)` → `{ rows, total, page, size }`            | ✓    | 与组件库的 `useTableQuery` 对接见下                         |
-| `toStreamResult` / `streamBy` / `forEach`                             | `stream()`（`for await`）                                       | ✓    |                                                             |
-| `toChunk` / `offsetChunk`                                             | `stream()`                                                      | ≈    | 分批处理用流式读取                                          |
-| `toMap` / `toMaps`                                                    | 行本来就是普通对象                                              | ≈    | 按某列建 Map 用 `new Map(rows.map(…))`                      |
-| `count` / `any` / 聚合（`sumOrNull`、`sumOrDefault`…）                | `count()`、`any()`、`sum`/`avg`/`max`/`min`                     | ≈    | 没有行时的返回值（null 还是 0）待核，写进文档               |
-| `toSQL`                                                               | `toSQL()`                                                       | ✓    |                                                             |
-| `cloneQueryable`                                                      | 查询对象不可变，天然可以复用                                    | ≈    |                                                             |
+| Java                                                                  | TS                                                              | 状态 | 说明                                          |
+| --------------------------------------------------------------------- | --------------------------------------------------------------- | ---- | --------------------------------------------- |
+| `toList`                                                              | `toList()`                                                      | ✓    |                                               |
+| `firstOrNull` / `singleOrNull`                                        | `first()`（没有时 undefined）/ `single()`（不是恰好一行就抛错） | ≈    |                                               |
+| `firstNotNull` / `singleNotNull` / `required()`（没有就抛带说明的错） | `firstOrThrow(message)` 抛 `NotFoundError`；`single()` 本来就抛 | ✓    | 2026-10-28 补                                 |
+| `findOrNull(id)` / `findNotNull(id)`、`whereById` / `whereByIds`      | —                                                               | ✗    | 按主键查，复合主键也要支持                    |
+| `toPageResult`                                                        | `toPage(page, size)` → `{ rows, total, page, size }`            | ✓    | 与组件库的 `useTableQuery` 对接见下           |
+| `toStreamResult` / `streamBy` / `forEach`                             | `stream()`（`for await`）                                       | ✓    |                                               |
+| `toChunk` / `offsetChunk`                                             | `stream()`                                                      | ≈    | 分批处理用流式读取                            |
+| `toMap` / `toMaps`                                                    | 行本来就是普通对象                                              | ≈    | 按某列建 Map 用 `new Map(rows.map(…))`        |
+| `count` / `any` / 聚合（`sumOrNull`、`sumOrDefault`…）                | `count()`、`any()`、`sum`/`avg`/`max`/`min`                     | ≈    | 没有行时的返回值（null 还是 0）待核，写进文档 |
+| `toSQL`                                                               | `toSQL()`                                                       | ✓    |                                               |
+| `cloneQueryable`                                                      | 查询对象不可变，天然可以复用                                    | ≈    |                                               |
 
 ## 条件、排序、分页
 
@@ -85,7 +85,7 @@ TS 版的状态按 `packages/easy-query/core/src` 的实现核过。"写法不�
 
 ## 缺口的先后（排进 ROADMAP 11b）
 
-1. 按主键查与查不到就抛错（`find`、`firstOrThrow`）——接口层天天用
+1. ~~按主键查与查不到就抛错~~（2026-10-28 已补）
 2. `whereObject` / `orderByObject` 的 TS 写法，对接组件库 `useTableQuery` 的筛选与排序参数——列表页
 3. 自关联的树：`toTreeList`、子树 / 祖先的便捷写法——部门、分类、流程引擎的组织
 4. 导航上的固定条件——"有效的子项"这类到处要写的条件

@@ -51,8 +51,16 @@ export type {
 } from './expr.ts';
 export { ListOf, ManyRef } from './ref.ts';
 export type { Ref, Selected } from './ref.ts';
-export { GroupedQueryable, Queryable } from './query.ts';
-export type { DerivedSchema, Group, JoinedRows, NullableKeys, Page, Query } from './query.ts';
+export { GroupedQueryable, NotFoundError, Queryable } from './query.ts';
+export type {
+  DerivedSchema,
+  Group,
+  JoinedRows,
+  KeyInput,
+  NullableKeys,
+  Page,
+  Query,
+} from './query.ts';
 export {
   BatchUpdate,
   Deletable,

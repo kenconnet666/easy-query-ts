@@ -9,6 +9,7 @@ import {
   aggregateCodec,
   codecs,
   condNode,
+  or,
   Expr,
   orderNodes,
   SUBQUERY,
@@ -100,6 +101,43 @@ export interface Page<T> {
 
 /** 所有查询（普通的、分组的）共用的类型：Db.with、union 等接受它 */
 export type Query<Out> = Executable<Out>;
+
+/** 查不到要的行（firstOrThrow、findOrThrow）：接口层据此回 404 */
+export class NotFoundError extends Error {
+  override readonly name = 'NotFoundError';
+}
+
+/**
+ * 主键的写法：单列主键是那一列的值，复合主键是 `{ 列: 值 }`。
+ * 列定义的类型上没有标出哪些是主键，所以类型只约束到"某一列的值或部分行"，少列、多给了值在运行时报错
+ */
+export type KeyInput<E extends Entity> = Row<E>[keyof Row<E>] | Partial<Row<E>>;
+
+type Columns = Record<string, Expr<unknown>>;
+
+/** 普通对象（复合主键的 `{ 列: 值 }`），不是 Date、Decimal 这类值对象 */
+function isKeyObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** 主键等于给定值的条件 */
+function keyCondition(entity: Entity, key: unknown, row: Columns): Cond {
+  const columns = entity.primaryKey;
+  if (columns.length === 0) throw new Error(`${entity.table} has no primary key`);
+  if (!isKeyObject(key)) {
+    if (columns.length > 1)
+      throw new Error(
+        `${entity.table} has a composite primary key; pass { ${columns.join(', ')} } instead of a single value`,
+      );
+    return row[columns[0]!]!.eq(key as never);
+  }
+  return columns.map((column) => {
+    if (!(column in key)) throw new Error(`primary key of ${entity.table} is missing '${column}'`);
+    return row[column]!.eq(key[column] as never);
+  });
+}
 
 /** 终结方法：各种查询共用 */
 abstract class Executable<Out> implements Subquery<Out> {
@@ -217,6 +255,13 @@ abstract class Executable<Out> implements Subquery<Out> {
     return (await this.limit(1).toList())[0];
   }
 
+  /** 第一行；没有时抛 NotFoundError（接口层"查不到就 404"用它；对应 Java 版的 firstNotNull），message 写给人看 */
+  async firstOrThrow(message?: string): Promise<Out> {
+    const rows = await this.limit(1).toList();
+    if (rows.length === 0) throw new NotFoundError(message ?? 'no row matched the query');
+    return rows[0]!;
+  }
+
   /** 恰好一行，否则抛错 */
   async single(): Promise<Out> {
     const rows = await this.limit(2).toList();
@@ -308,6 +353,47 @@ export class Queryable<
   /** 结果的形状：表达式、导航到的整行、toList 数组、嵌套对象都可以；结果类型据此推导 */
   select<X>(shape: (...refs: Refs) => X): Queryable<S, K, Selected<X>, Refs> {
     return new Queryable(this.ctx, { ...this.state, select: shape });
+  }
+
+  /**
+   * 按主键筛选（对应 Java 版的 whereById）：单列主键传值，复合主键传 `{ 列: 值 }`。
+   * ```ts
+   * db.queryable(User).whereKey(1)
+   * db.queryable(Member).whereKey({ tenantId: 1, id: 7 })
+   * ```
+   */
+  whereKey(key: KeyInput<S['entities'][K]>): Queryable<S, K, Out, Refs> {
+    const entity = this.ctx.schema.entities[this.state.key]!;
+    return this.with({
+      where: [...this.state.where, (root) => keyCondition(entity, key, root as Columns)],
+    });
+  }
+
+  /** 主键在这一组里（对应 whereByIds）：单列主键渲染成 IN，复合主键是几组条件的 OR；空数组时一行都不匹配 */
+  whereKeys(keys: readonly KeyInput<S['entities'][K]>[]): Queryable<S, K, Out, Refs> {
+    const entity = this.ctx.schema.entities[this.state.key]!;
+    return this.with({
+      where: [
+        ...this.state.where,
+        (root) => {
+          const row = root as Columns;
+          const [only, ...rest] = entity.primaryKey;
+          if (only !== undefined && rest.length === 0 && !keys.some(isKeyObject))
+            return keys.length ? row[only]!.in(keys as never) : or();
+          return or(...keys.map((key) => keyCondition(entity, key, row)));
+        },
+      ],
+    });
+  }
+
+  /** 按主键取一行（对应 findOrNull）；没有时 undefined。之前的 select、where 照样生效 */
+  find(key: KeyInput<S['entities'][K]>): Promise<Out | undefined> {
+    return this.whereKey(key).first();
+  }
+
+  /** 按主键取一行，没有时抛 NotFoundError（对应 findNotNull） */
+  findOrThrow(key: KeyInput<S['entities'][K]>, message?: string): Promise<Out> {
+    return this.whereKey(key).firstOrThrow(message);
   }
 
   /** 整行之外再带上导航：一对多是数组，多对一是对象（可空导航为 null） */
