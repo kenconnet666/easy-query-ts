@@ -94,3 +94,5 @@ export { SqlIdent } from './native.ts';
 export type { SqlTag } from './native.ts';
 export type * from './ast.ts';
 export { checkAliases } from './ast.ts';
+export { parseTableRequest } from './table.ts';
+export type { TableRequest, TableRequestInput } from './table.ts';

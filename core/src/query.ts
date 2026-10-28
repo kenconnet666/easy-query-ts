@@ -33,6 +33,7 @@ import type { AnySchema, EntityKey, Schema } from './relations.ts';
 import type { KeyOf } from './db.ts';
 import { Column, type Codec, type DerivedEntity, type Entity, type Row } from './schema.ts';
 import { refEntity } from './interceptor.ts';
+import { parseColumnText, resultColumn, type TableRequest } from './table.ts';
 import { query, streamRows, type Context } from './session.ts';
 
 /** 构建时求值的 lambda：单表查询收到一个表引用，join 之后按 join 顺序收到多个 */
@@ -394,6 +395,61 @@ export class Queryable<
   /** 按主键取一行，没有时抛 NotFoundError（对应 findNotNull） */
   findOrThrow(key: KeyInput<S['entities'][K]>, message?: string): Promise<Out> {
     return this.whereKey(key).firstOrThrow(message);
+  }
+
+  /**
+   * 按列表请求（`parseTableRequest`）筛选、排序、分页，返回一页（对应 Java 版的 whereObject / orderByObject，见 table.ts）。
+   * 表头筛选、关键字筛选与排序只认结果里的列；请求的排序排在查询自己的排序前面；带了 total 时不再数行数
+   */
+  async table(request: TableRequest): Promise<Page<Out>> {
+    const select = this.state.select;
+    const shapeOf = (refs: readonly unknown[]) => (select ? select(...refs) : refs[0]);
+    const filters = Object.entries(request.filters);
+    const searches = Object.entries(request.searches);
+    let query = this as Queryable<S, K, Out, Refs>;
+    if (filters.length || searches.length) {
+      query = query.with({
+        where: [
+          ...query.state.where,
+          (...refs) => {
+            const shape = shapeOf(refs);
+            return [
+              ...filters.map(([key, values]) => {
+                const column = resultColumn(shape, key, 'filter');
+                return column.in(values.map((text) => parseColumnText(column, text, key)) as never);
+              }),
+              ...searches.map(([key, text]) => {
+                const column = resultColumn(shape, key, 'search');
+                if ((column.codec?.kind ?? 'string') !== 'string')
+                  throw new Error(`cannot search by '${key}': only text columns can be searched`);
+                return (column as Expr<string>).like(text);
+              }),
+            ];
+          },
+        ],
+      });
+    }
+    if (request.sorts.length) {
+      query = query.with({
+        orderBy: [
+          (...refs) => {
+            const shape = shapeOf(refs);
+            return request.sorts.map(({ key, descending }) => {
+              const column = resultColumn(shape, key, 'sort');
+              return descending ? column.desc() : column;
+            });
+          },
+          ...query.state.orderBy,
+        ],
+      });
+    }
+    const { page, pageSize: size } = request;
+    if (request.total === undefined) return query.toPage(page, size);
+    const rows = await query
+      .limit(size)
+      .offset((page - 1) * size)
+      .toList();
+    return { rows, total: request.total, page, size };
   }
 
   /** 整行之外再带上导航：一对多是数组，多对一是对象（可空导航为 null） */
