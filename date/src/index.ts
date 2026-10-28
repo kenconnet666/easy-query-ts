@@ -15,25 +15,36 @@
  * await db.queryable(Event).where(e => e.day.ge(parseDate('2026-01-01'))).toList()
  * ```
  */
-import { CalendarDate, CalendarDateTime, fromDate, parseDate, Time, type ZonedDateTime } from '@internationalized/date'
-import { col, toDate, toDateText, utcText } from '@zerodep-dev/easy-query-ts'
+import {
+  CalendarDate,
+  CalendarDateTime,
+  fromDate,
+  parseDate,
+  Time,
+  type ZonedDateTime,
+} from '@internationalized/date';
+import { col, toDate, toDateText, utcText } from '@zerodep-dev/easy-query-ts';
 
 declare module '@zerodep-dev/easy-query-ts' {
   /** 让 year() / month() / day() 可以用在这些类型的列上 */
   interface TemporalExtensions {
-    calendarDate: CalendarDate
-    calendarDateTime: CalendarDateTime
-    zonedDateTime: ZonedDateTime
+    calendarDate: CalendarDate;
+    calendarDateTime: CalendarDateTime;
+    zonedDateTime: ZonedDateTime;
   }
 }
 
 function pad(n: number, width = 2): string {
-  return String(n).padStart(width, '0')
+  return String(n).padStart(width, '0');
 }
 
 /** 日期：库里的 DATE。读出不经过时区，写入是 'YYYY-MM-DD' */
 export function calendarDate() {
-  return col.custom<CalendarDate>('date', (raw) => parseDate(toDateText(raw)), (v) => v.toString())
+  return col.custom<CalendarDate>(
+    'date',
+    (raw) => parseDate(toDateText(raw)),
+    (v) => v.toString(),
+  );
 }
 
 /**
@@ -45,11 +56,20 @@ export function calendarDateTime() {
     'datetime',
     (raw) => {
       // 驱动给的文字按"UTC 读出的各个分量"取，就是原样存进去的墙上时间
-      const d = toDate(raw)
-      return new CalendarDateTime(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds())
+      const d = toDate(raw);
+      return new CalendarDateTime(
+        d.getUTCFullYear(),
+        d.getUTCMonth() + 1,
+        d.getUTCDate(),
+        d.getUTCHours(),
+        d.getUTCMinutes(),
+        d.getUTCSeconds(),
+        d.getUTCMilliseconds(),
+      );
     },
-    (v) => `${pad(v.year, 4)}-${pad(v.month)}-${pad(v.day)} ${pad(v.hour)}:${pad(v.minute)}:${pad(v.second)}.${pad(v.millisecond, 3)}`,
-  )
+    (v) =>
+      `${pad(v.year, 4)}-${pad(v.month)}-${pad(v.day)} ${pad(v.hour)}:${pad(v.minute)}:${pad(v.second)}.${pad(v.millisecond, 3)}`,
+  );
 }
 
 /**
@@ -57,7 +77,11 @@ export function calendarDateTime() {
  * 同一个时刻在不同机器、不同会话时区下读出的结果一致。
  */
 export function zonedDateTime(timeZone: string) {
-  return col.custom<ZonedDateTime>('datetime', (raw) => fromDate(toDate(raw), timeZone), (v) => utcText(v.toDate()))
+  return col.custom<ZonedDateTime>(
+    'datetime',
+    (raw) => fromDate(toDate(raw), timeZone),
+    (v) => utcText(v.toDate()),
+  );
 }
 
 /** 一天里的时刻：库里的 TIME，读出 Time（时分秒毫秒） */
@@ -66,10 +90,10 @@ export function timeOfDay() {
     'time',
     (raw) => {
       // 'HH:MM:SS' 或 'HH:MM:SS.fff'
-      const [hms = '', fraction = ''] = String(raw).split('.')
-      const [h = 0, m = 0, s = 0] = hms.split(':').map(Number)
-      return new Time(h, m, s, fraction === '' ? 0 : Math.round(Number(`0.${fraction}`) * 1000))
+      const [hms = '', fraction = ''] = String(raw).split('.');
+      const [h = 0, m = 0, s = 0] = hms.split(':').map(Number);
+      return new Time(h, m, s, fraction === '' ? 0 : Math.round(Number(`0.${fraction}`) * 1000));
     },
     (v) => `${pad(v.hour)}:${pad(v.minute)}:${pad(v.second)}`,
-  )
+  );
 }

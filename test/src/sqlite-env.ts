@@ -1,7 +1,7 @@
-import { DatabaseSync } from 'node:sqlite'
-import { createDb, type Statement } from '@zerodep-dev/easy-query-ts'
-import { schema, type TestEnv } from './fixture.ts'
-import { sqlite } from '@zerodep-dev/easy-query-ts-sqlite'
+import { DatabaseSync } from 'node:sqlite';
+import { createDb, type Statement } from '@zerodep-dev/easy-query-ts';
+import { schema, type TestEnv } from './fixture.ts';
+import { sqlite } from '@zerodep-dev/easy-query-ts-sqlite';
 
 const DDL = `
 CREATE TABLE t_company (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
@@ -18,14 +18,14 @@ CREATE TABLE t_role (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
 CREATE TABLE t_user_role (user_id INTEGER NOT NULL, role_id INTEGER NOT NULL, PRIMARY KEY (user_id, role_id));
 CREATE TABLE t_member (tenant_id INTEGER NOT NULL, id INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY (tenant_id, id));
 CREATE TABLE t_note (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, member_id INTEGER NOT NULL, body TEXT NOT NULL);
-`
+`;
 
 /** 建好表的内存库 */
 export async function memoryDb(): Promise<TestEnv> {
-  const database = new DatabaseSync(':memory:')
-  database.exec(DDL)
-  const statements: Statement[] = []
+  const database = new DatabaseSync(':memory:');
+  database.exec(DDL);
+  const statements: Statement[] = [];
   // bigInts：整数列按 bigint 读出，64 位整数（雪花 id）才不丢精度
-  const adapter = sqlite(database, { bigInts: true })
-  return { db: createDb({ schema, adapter, log: (s) => statements.push(s) }), statements, adapter }
+  const adapter = sqlite(database, { bigInts: true });
+  return { db: createDb({ schema, adapter, log: (s) => statements.push(s) }), statements, adapter };
 }

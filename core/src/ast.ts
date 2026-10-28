@@ -1,7 +1,7 @@
 /**
  * SQL 语法树。查询构建器产出它，方言（Dialect）把它渲染成 SQL 文本；与具体数据库无关。
  */
-import type { Codec } from './schema.ts'
+import type { Codec } from './schema.ts';
 
 export type Node =
   | { readonly k: 'col'; readonly alias: string; readonly name: string }
@@ -25,133 +25,199 @@ export type Node =
   | { readonly k: 'like'; readonly e: Node; readonly pattern: Node; readonly not: boolean }
   /** 方言函数表里的函数（upper、year …），由方言决定写法 */
   | { readonly k: 'fn'; readonly name: string; readonly args: readonly Node[] }
-  | { readonly k: 'agg'; readonly fn: AggregateFn; readonly arg: Node | undefined; readonly distinct: boolean }
-  | { readonly k: 'case'; readonly when: readonly (readonly [Node, Node])[]; readonly else: Node | undefined }
+  | {
+      readonly k: 'agg';
+      readonly fn: AggregateFn;
+      readonly arg: Node | undefined;
+      readonly distinct: boolean;
+    }
+  | {
+      readonly k: 'case';
+      readonly when: readonly (readonly [Node, Node])[];
+      readonly else: Node | undefined;
+    }
   | { readonly k: 'exists'; readonly q: SelectNode; readonly not: boolean }
   /** 窗口函数：fn OVER (PARTITION BY … ORDER BY … frame) */
-  | { readonly k: 'over'; readonly fn: Node; readonly partition: readonly Node[]; readonly order: readonly OrderNode[]; readonly frame: string | undefined }
+  | {
+      readonly k: 'over';
+      readonly fn: Node;
+      readonly partition: readonly Node[];
+      readonly order: readonly OrderNode[];
+      readonly frame: string | undefined;
+    }
   /** 标量子查询 */
-  | { readonly k: 'sub'; readonly q: SelectNode }
+  | { readonly k: 'sub'; readonly q: SelectNode };
 
-export type BinaryOp = '=' | '<>' | '>' | '>=' | '<' | '<=' | '+' | '-' | '*' | '/'
-export type AggregateFn = 'count' | 'sum' | 'avg' | 'max' | 'min'
+export type BinaryOp = '=' | '<>' | '>' | '>=' | '<' | '<=' | '+' | '-' | '*' | '/';
+export type AggregateFn = 'count' | 'sum' | 'avg' | 'max' | 'min';
 
 export interface TableRef {
-  readonly table: string
-  readonly alias: string
+  readonly table: string;
+  readonly alias: string;
   /** 派生表：FROM (子查询) alias；有它时 table 不用 */
-  readonly sub?: SelectNode
+  readonly sub?: SelectNode;
 }
 
 export interface Join extends TableRef {
   /** 连接方式；省略为 left（导航产生的隐式 join 都是 left） */
-  readonly kind?: 'inner' | 'left'
-  readonly on: Node
+  readonly kind?: 'inner' | 'left';
+  readonly on: Node;
 }
 
 export interface OrderNode {
-  readonly e: Node
-  readonly desc: boolean
+  readonly e: Node;
+  readonly desc: boolean;
 }
 
 export interface SelectNode {
-  readonly from: TableRef
-  readonly joins: readonly Join[]
-  readonly where: readonly Node[]
-  readonly groupBy: readonly Node[]
-  readonly having: readonly Node[]
-  readonly orderBy: readonly OrderNode[]
+  readonly from: TableRef;
+  readonly joins: readonly Join[];
+  readonly where: readonly Node[];
+  readonly groupBy: readonly Node[];
+  readonly having: readonly Node[];
+  readonly orderBy: readonly OrderNode[];
   /** 为空时渲染为 SELECT 1 */
-  readonly columns: readonly { readonly e: Node; readonly as: string }[]
-  readonly distinct: boolean
-  readonly limit: number | undefined
-  readonly offset: number | undefined
-  readonly forUpdate: boolean
+  readonly columns: readonly { readonly e: Node; readonly as: string }[];
+  readonly distinct: boolean;
+  readonly limit: number | undefined;
+  readonly offset: number | undefined;
+  readonly forUpdate: boolean;
   /** 行锁遇到被别人锁住的行怎么办：nowait 立即报错，skip 跳过那些行；省略为等待 */
-  readonly lockWait?: 'nowait' | 'skip' | undefined
+  readonly lockWait?: 'nowait' | 'skip' | undefined;
   /** GROUP BY 的方式：rollup 逐级小计加总计，cube 所有组合；省略为普通分组 */
-  readonly groupMode?: 'rollup' | 'cube' | undefined
+  readonly groupMode?: 'rollup' | 'cube' | undefined;
   /** 复合查询：本查询 UNION [ALL] 后面这些；各成员不带 orderBy / limit / offset（需要时包一层派生表） */
-  readonly unions?: readonly { readonly all: boolean; readonly q: SelectNode }[] | undefined
+  readonly unions?: readonly { readonly all: boolean; readonly q: SelectNode }[] | undefined;
   /** 本语句用到的 CTE（WITH），只放在最外层的语句上，按依赖顺序排好 */
-  readonly ctes?: readonly CteNode[] | undefined
+  readonly ctes?: readonly CteNode[] | undefined;
 }
 
 /** WITH [RECURSIVE] name (columns) AS (q) */
 export interface CteNode {
-  readonly name: string
-  readonly recursive: boolean
-  readonly columns: readonly string[]
-  readonly q: SelectNode
+  readonly name: string;
+  readonly recursive: boolean;
+  readonly columns: readonly string[];
+  readonly q: SelectNode;
 }
 
 export interface InsertNode {
-  readonly table: string
-  readonly columns: readonly string[]
-  readonly rows: readonly (readonly Node[])[]
-  readonly conflict: ConflictNode | undefined
+  readonly table: string;
+  readonly columns: readonly string[];
+  readonly rows: readonly (readonly Node[])[];
+  readonly conflict: ConflictNode | undefined;
   /** INSERT … SELECT：行来自这条查询（此时 rows 为空，columns 与查询的输出列按位置对应） */
-  readonly source?: SelectNode | undefined
+  readonly source?: SelectNode | undefined;
 }
 
 /** upsert：target 列冲突时，update 为空表示忽略这一行，否则用新值更新这些列 */
 export interface ConflictNode {
-  readonly target: readonly string[]
-  readonly update: readonly string[]
+  readonly target: readonly string[];
+  readonly update: readonly string[];
 }
 
 export interface UpdateNode {
-  readonly from: TableRef
-  readonly set: readonly { readonly column: string; readonly e: Node }[]
-  readonly where: readonly Node[]
+  readonly from: TableRef;
+  readonly set: readonly { readonly column: string; readonly e: Node }[];
+  readonly where: readonly Node[];
 }
 
 export interface DeleteNode {
-  readonly from: TableRef
-  readonly where: readonly Node[]
+  readonly from: TableRef;
+  readonly where: readonly Node[];
 }
 
 /** 访问一棵树里引用到的表别名与声明的表别名，用来发现跨查询误用的导航 */
-export function checkAliases(q: SelectNode | UpdateNode | DeleteNode, outer: ReadonlySet<string> = new Set()): void {
-  const declared = new Set(outer)
-  declared.add(q.from.alias)
+export function checkAliases(
+  q: SelectNode | UpdateNode | DeleteNode,
+  outer: ReadonlySet<string> = new Set(),
+): void {
+  const declared = new Set(outer);
+  declared.add(q.from.alias);
   // 派生表是独立的语句：只能引用它自己声明的表
-  if (q.from.sub) checkAliases(q.from.sub)
+  if (q.from.sub) checkAliases(q.from.sub);
   // 复合查询的每个成员都是独立的语句
-  if ('unions' in q) q.unions?.forEach((u) => checkAliases(u.q))
-  const joins = 'joins' in q ? q.joins : []
-  for (const j of joins) declared.add(j.alias)
+  if ('unions' in q) q.unions?.forEach((u) => checkAliases(u.q));
+  const joins = 'joins' in q ? q.joins : [];
+  for (const j of joins) declared.add(j.alias);
   const visit = (n: Node): void => {
     switch (n.k) {
       case 'col':
         if (!declared.has(n.alias)) {
-          throw new Error(`column ${n.alias}.${n.name} belongs to a table that is not part of this statement; a navigation from an outer query was used where only the current one is available (e.g. inside toList() filters or an update/delete)`)
+          throw new Error(
+            `column ${n.alias}.${n.name} belongs to a table that is not part of this statement; a navigation from an outer query was used where only the current one is available (e.g. inside toList() filters or an update/delete)`,
+          );
         }
-        return
-      case 'param': case 'lit': return
-      case 'raw': n.args.forEach(visit); return
-      case 'op': visit(n.l); visit(n.r); return
-      case 'and': case 'or': n.items.forEach(visit); return
-      case 'not': case 'null': visit(n.e); return
-      case 'in': visit(n.e); n.list.forEach(visit); return
-      case 'in_sub': visit(n.e); checkAliases(n.q); return
-      case 'eq_ns': visit(n.l); visit(n.r); return
-      case 'between': visit(n.e); visit(n.lo); visit(n.hi); return
-      case 'like': visit(n.e); visit(n.pattern); return
-      case 'fn': n.args.forEach(visit); return
-      case 'agg': if (n.arg) visit(n.arg); return
-      case 'case': n.when.forEach(([w, t]) => { visit(w); visit(t) }); if (n.else) visit(n.else); return
-      case 'over': visit(n.fn); n.partition.forEach(visit); n.order.forEach((o) => visit(o.e)); return
-      case 'exists': case 'sub': checkAliases(n.q, declared); return
+        return;
+      case 'param':
+      case 'lit':
+        return;
+      case 'raw':
+        n.args.forEach(visit);
+        return;
+      case 'op':
+        visit(n.l);
+        visit(n.r);
+        return;
+      case 'and':
+      case 'or':
+        n.items.forEach(visit);
+        return;
+      case 'not':
+      case 'null':
+        visit(n.e);
+        return;
+      case 'in':
+        visit(n.e);
+        n.list.forEach(visit);
+        return;
+      case 'in_sub':
+        visit(n.e);
+        checkAliases(n.q);
+        return;
+      case 'eq_ns':
+        visit(n.l);
+        visit(n.r);
+        return;
+      case 'between':
+        visit(n.e);
+        visit(n.lo);
+        visit(n.hi);
+        return;
+      case 'like':
+        visit(n.e);
+        visit(n.pattern);
+        return;
+      case 'fn':
+        n.args.forEach(visit);
+        return;
+      case 'agg':
+        if (n.arg) visit(n.arg);
+        return;
+      case 'case':
+        n.when.forEach(([w, t]) => {
+          visit(w);
+          visit(t);
+        });
+        if (n.else) visit(n.else);
+        return;
+      case 'over':
+        visit(n.fn);
+        n.partition.forEach(visit);
+        n.order.forEach((o) => visit(o.e));
+        return;
+      case 'exists':
+      case 'sub':
+        checkAliases(n.q, declared);
+        return;
     }
-  }
-  for (const j of joins) visit(j.on)
-  q.where.forEach(visit)
-  if ('set' in q) q.set.forEach((s) => visit(s.e))
+  };
+  for (const j of joins) visit(j.on);
+  q.where.forEach(visit);
+  if ('set' in q) q.set.forEach((s) => visit(s.e));
   if ('columns' in q) {
-    q.columns.forEach((c) => visit(c.e))
-    q.groupBy.forEach(visit)
-    q.having.forEach(visit)
-    q.orderBy.forEach((o) => visit(o.e))
+    q.columns.forEach((c) => visit(c.e));
+    q.groupBy.forEach(visit);
+    q.having.forEach(visit);
+    q.orderBy.forEach((o) => visit(o.e));
   }
 }

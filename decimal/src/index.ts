@@ -12,18 +12,18 @@
  * await db.update(Order).set(o => ({ amount: o.amount.times(2) })).where(o => o.amount.gt(new Decimal(5))).execute()
  * ```
  */
-import { Decimal } from 'decimal.js'
-import { col } from '@zerodep-dev/easy-query-ts'
+import { Decimal } from 'decimal.js';
+import { col } from '@zerodep-dev/easy-query-ts';
 
 declare module '@zerodep-dev/easy-query-ts' {
   /** 让 plus / minus / times / div、sum / avg 可以用在 Decimal 列上 */
   interface NumericExtensions {
-    decimalJs: Decimal
+    decimalJs: Decimal;
   }
 }
 
 /** 写入时接受的值：Decimal，或写 `times(2)` 这类运算时的 number / 数值文字 */
-type Writable = Decimal | number | string
+type Writable = Decimal | number | string;
 
 /**
  * 精确小数列。precision / scale 目前只是文档（建表由你自己的迁移负责）；以后做代码优先 DDL 时会用到。
@@ -35,5 +35,5 @@ export function decimalJs(_precision?: number, _scale?: number) {
     (raw) => new Decimal(String(raw)),
     // toFixed() 不带参数时给出完整的非科学计数法文字，大数和极小数都不会写成 1e+21
     (value) => (value instanceof Decimal ? value : new Decimal(value as Writable)).toFixed(),
-  )
+  );
 }
