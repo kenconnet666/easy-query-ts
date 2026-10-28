@@ -17,7 +17,7 @@ import {
   type Pred,
 } from './expr.ts';
 import type { AnySchema, EntityKey, Many, One, Relation } from './relations.ts';
-import type { Entity, Row, ValueOf } from './schema.ts';
+import type { AnyColumn, Entity, Row, ValueOf } from './schema.ts';
 
 export const REF: unique symbol = Symbol('eqts.ref');
 
@@ -129,7 +129,7 @@ export function makeRef(scope: Scope, key: string, alias: string, nullable: bool
   for (const [prop, column] of Object.entries(entity.columns)) {
     Object.defineProperty(ref, prop, {
       enumerable: true,
-      value: new Expr({ k: 'col', alias, name: entity.columnNames[prop]! }, column.codec),
+      value: columnExpr({ k: 'col', alias, name: entity.columnNames[prop]! }, column),
     });
   }
   const relations: Record<string, Relation> = scope.schema.relations[key] ?? {};
@@ -144,6 +144,13 @@ export function makeRef(scope: Scope, key: string, alias: string, nullable: bool
     });
   }
   return ref as AnyRef;
+}
+
+/** 读一列的表达式：列声明了 sqlConvert 的 read 时，用转换后的值（仍按列的类型解码） */
+function columnExpr(node: Node, column: AnyColumn): Expr<unknown> {
+  const raw = new Expr<unknown>(node, column.codec);
+  const read = column.options.sqlRead;
+  return read ? new Expr(read(raw).node, column.codec) : raw;
 }
 
 function joinOne(

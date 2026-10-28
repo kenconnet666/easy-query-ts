@@ -1,4 +1,5 @@
 import type { SelectNode } from './ast.ts';
+import type { Expr } from './expr.ts';
 
 /**
  * 实体与列的定义。列的 TS 类型、是否可空、是否由库生成都记在类型参数里，查询与插入的类型由它推导，不需要代码生成。
@@ -61,6 +62,10 @@ export interface ColumnOptions {
   readonly version?: boolean | undefined;
   /** 只在插入时写入，更新永远不碰（创建人、创建时间） */
   readonly insertOnly?: boolean | undefined;
+  /** 读这一列时在 SQL 里的转换（见 Column.sqlConvert） */
+  readonly sqlRead?: ((column: Expr<any>) => Expr<unknown>) | undefined;
+  /** 写进这一列的值在 SQL 里的转换（见 Column.sqlConvert） */
+  readonly sqlWrite?: ((value: Expr<any>) => Expr<unknown>) | undefined;
   // ---- 建表（createTables）用的元数据，查询和写入不看它们 ----
   /** 字符串列的长度，默认 255 */
   readonly length?: number | undefined;
@@ -168,6 +173,29 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
       encode: (v) => inner.encode(strategy.encrypt(v)),
     };
     return new Column(codec, this.options);
+  }
+
+  /**
+   * 列值在 SQL 里转换（对应 Java 版的 ColumnValueSQLConverter）：read 包住读这一列的地方（select、where、orderBy、导航的条件都用转换后的值），
+   * write 包住写进去的值（insert、update）。用库里的函数加解密、读写空间类型时用它；转换后的值仍按这一列的类型解码：
+   * ```ts
+   * phone: col.string().sqlConvert({
+   *   read: (c) => sql<string>`AES_DECRYPT(${c}, ${key})`,
+   *   write: (v) => sql<string>`AES_ENCRYPT(${v}, ${key})`,
+   * })
+   * ```
+   * 与 encrypted 的区别：encrypted 在应用里加解密，库里只能做等值比较；这里在库里转换，like、排序、函数都能用。
+   * RETURNING 拿不到转换后的值：returning() 选到这种列时报错，returnEntity() 改为插入后再按主键查回
+   */
+  sqlConvert(convert: {
+    read?: (column: Expr<T>) => Expr<unknown>;
+    write?: (value: Expr<T>) => Expr<unknown>;
+  }): Column<T, N, O> {
+    return new Column(this.codec, {
+      ...this.options,
+      sqlRead: convert.read,
+      sqlWrite: convert.write,
+    });
   }
 
   /** 建表时直接用这个类型，如 `col.json<Tags>().dbType('JSONB')`；不影响读写 */

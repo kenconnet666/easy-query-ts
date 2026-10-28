@@ -5,9 +5,9 @@ import { checkAliases, type ConflictNode, type Node, type SelectNode } from './a
 import { SqlWriter, type Statement } from './dialect.ts';
 import { condNode, Expr, toNode, type Cond } from './expr.ts';
 import { newQueryable, type Built, type Query } from './query.ts';
-import { REF, Scope, type Ref } from './ref.ts';
+import { REF, refColumn, Scope, type Ref } from './ref.ts';
 import type { AnySchema, EntityKey } from './relations.ts';
-import type { Entity, Insert, Row, ValueOf } from './schema.ts';
+import type { AnyColumn, Entity, Insert, Row, ValueOf } from './schema.ts';
 import { Interceptors, refEntity, type WriteEvent } from './interceptor.ts';
 import { execute, query, type Context } from './session.ts';
 
@@ -98,7 +98,20 @@ export class Returning<R> {
 function returningProps(entity: Entity, columns: readonly string[]): string[] {
   for (const c of columns)
     if (!(c in entity.columns)) throw new Error(`${entity.table} has no column '${c}'`);
-  return columns.length > 0 ? [...columns] : Object.keys(entity.columns);
+  const props = columns.length > 0 ? [...columns] : Object.keys(entity.columns);
+  const converted = props.filter((p) => entity.columns[p]!.options.sqlRead);
+  if (converted.length > 0)
+    throw new Error(
+      `returning() cannot read ${converted.join(', ')} of ${entity.table}: RETURNING gives the stored value, not the sqlConvert read`,
+    );
+  return props;
+}
+
+/** 写进某一列的值：按列编码绑定；列声明了 sqlConvert 的 write 时再包一层 */
+function columnValue(column: AnyColumn, value: unknown): Node {
+  const node = toNode(value, column.codec);
+  const write = column.options.sqlWrite;
+  return write ? write(new Expr(node, column.codec)).node : node;
 }
 
 /**
@@ -234,13 +247,16 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     };
   }
 
-  /** lambda 里选的列 → 库里的列名 */
+  /** lambda 里选的列 → 库里的列名（按表达式找回是哪一列：声明了 sqlConvert 的列读出来不是裸列） */
   private columnNames(pick: Columns<S, K>): string[] {
-    const picked = pick(new Scope(this.ctx.schema, { n: 0 }, false).root(this.key) as Ref<S, K>);
+    const root = new Scope(this.ctx.schema, { n: 0 }, false).root(this.key);
+    const picked = pick(root as Ref<S, K>);
+    const props = Object.keys(this.entity.columns);
     return (Array.isArray(picked) ? picked : [picked]).map((e: Expr<unknown>) => {
-      if (e.node.k !== 'col')
+      const prop = props.find((p) => refColumn(root, p) === e);
+      if (prop === undefined)
         throw new Error('onConflict / merge take plain columns of the inserted entity');
-      return e.node.name;
+      return this.entity.columnNames[prop]!;
     });
   }
 
@@ -300,7 +316,9 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     if (this.rows.length !== 1) throw new Error('returnEntity() needs exactly one row');
     if (this.entity.primaryKey.length === 0)
       throw new Error(`returnEntity() needs a primary key on ${this.entity.table}`);
-    if (this.ctx.dialect.supportsReturning)
+    // sqlConvert 的列 RETURNING 拿不到转换后的值：插入后再按主键查回
+    const converted = Object.values(this.entity.columns).some((c) => c.options.sqlRead);
+    if (this.ctx.dialect.supportsReturning && !converted)
       return (await this.returning().execute())[0] as Row<EntityOf<S, K>>;
     const values: Record<string, unknown> = { ...this.filled()[0] };
     const generated = this.entity.primaryKey.filter((k) => values[k] === undefined);
@@ -368,7 +386,7 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
             columns: props.map((p) => this.entity.columnNames[p]!),
             rows: rows
               .slice(from, from + perStatement)
-              .map((r) => props.map((p) => toNode(r[p], this.entity.columns[p]!.codec))),
+              .map((r) => props.map((p) => columnValue(this.entity.columns[p]!, r[p]))),
             conflict: this.conflict,
           },
           w,
@@ -602,7 +620,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       .map(([p, v]) => {
         const column = entity.columns[p];
         if (!column) throw new Error(`${entity.table} has no column '${p}'`);
-        return { column: entity.columnNames[p]!, e: toNode(v, column.codec) };
+        return { column: entity.columnNames[p]!, e: columnValue(column, v) };
       });
     // 乐观锁列：没有显式写版本的更新（表达式更新、批量更新）也让版本加 1，别人手里的旧版本就会失效
     for (const [p, column] of Object.entries(entity.columns)) {
@@ -683,7 +701,7 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     if (softSet) {
       const set = Object.entries(softSet).map(([p, v]) => ({
         column: entity.columnNames[p]!,
-        e: toNode(v, entity.columns[p]!.codec),
+        e: columnValue(entity.columns[p]!, v),
       }));
       const update = { from, set, where };
       checkAliases(update);
