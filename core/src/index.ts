@@ -95,6 +95,12 @@ export { SqlIdent } from './native.ts';
 export type { SqlTag } from './native.ts';
 export type * from './ast.ts';
 export { checkAliases } from './ast.ts';
-export { parseTableRequest } from './table.ts';
-export type { TableRequest, TableRequestInput } from './table.ts';
+export { conditionOf, parseTableRequest, rangeOf } from './table.ts';
+export type {
+  ConditionOp,
+  ConditionTree,
+  DayOptions,
+  TableRequest,
+  TableRequestInput,
+} from './table.ts';
 export type { TreeNode } from './tree.ts';

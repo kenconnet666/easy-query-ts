@@ -33,7 +33,13 @@ import type { AnySchema, EntityKey, Schema } from './relations.ts';
 import type { KeyOf } from './db.ts';
 import { Column, type Codec, type DerivedEntity, type Entity, type Row } from './schema.ts';
 import { refEntity } from './interceptor.ts';
-import { parseColumnText, resultColumn, type TableRequest } from './table.ts';
+import {
+  conditionOf,
+  parseColumnText,
+  resultColumn,
+  type DayOptions,
+  type TableRequest,
+} from './table.ts';
 import { assembleTree, type TreeNode } from './tree.ts';
 import { query, streamRows, type Context } from './session.ts';
 
@@ -421,15 +427,16 @@ export class Queryable<
 
   /**
    * 按列表请求（`parseTableRequest`）筛选、排序、分页，返回一页（对应 Java 版的 whereObject / orderByObject，见 table.ts）。
-   * 表头筛选、关键字筛选与排序只认结果里的列；请求的排序排在查询自己的排序前面；带了 total 时不再数行数
+   * 表头筛选、关键字筛选、条件树与排序只认结果里的列；请求的排序排在查询自己的排序前面；带了 total 时不再数行数。
+   * options.timeZone：日期时间列上只写了日期的区间按哪个时区算整天
    */
-  async table(request: TableRequest): Promise<Page<Out>> {
+  async table(request: TableRequest, options: DayOptions = {}): Promise<Page<Out>> {
     const select = this.state.select;
     const shapeOf = (refs: readonly unknown[]) => (select ? select(...refs) : refs[0]);
     const filters = Object.entries(request.filters);
     const searches = Object.entries(request.searches);
     let query = this as Queryable<S, K, Out, Refs>;
-    if (filters.length || searches.length) {
+    if (filters.length || searches.length || request.condition) {
       query = query.with({
         where: [
           ...query.state.where,
@@ -446,6 +453,7 @@ export class Queryable<
                   throw new Error(`cannot search by '${key}': only text columns can be searched`);
                 return (column as Expr<string>).like(text);
               }),
+              request.condition && conditionOf(request.condition, shape, options),
             ];
           },
         ],

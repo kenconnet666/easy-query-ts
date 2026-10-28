@@ -1,7 +1,7 @@
 // 列表页的请求 → 查询（对应 Java 版的 whereObject / orderByObject；参数同组件库 useTableQuery 的 tableParams）
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { parseTableRequest } from '@zerodep-dev/easy-query-ts';
+import { parseTableRequest, rangeOf } from '@zerodep-dev/easy-query-ts';
 import { seed, User } from '../src/fixture.ts';
 import { memoryDb } from '../src/sqlite-env.ts';
 
@@ -22,6 +22,7 @@ describe('parseTableRequest', () => {
       total: 368,
       filters: { status: ['draft', 'paid'] },
       searches: { supplier: '启航' },
+      condition: undefined,
       params: { keyword: ['泵'] },
     });
   });
@@ -91,5 +92,68 @@ describe('sqlite: Queryable.table', async () => {
       .queryable(User)
       .table(parseTableRequest({ sort: '-name', pageSize: '1' }));
     assert.equal(page.rows[0]!.name, 'carol');
+  });
+
+  it('条件树（FilterBar 的高级筛选）：all / any / not、between、in、contains、empty，字段只认结果列', async () => {
+    const condition = JSON.stringify({
+      all: [
+        {
+          any: [
+            { field: 'age', op: 'gte', value: 18 },
+            { field: 'age', op: 'empty' },
+          ],
+        },
+        { not: { field: 'name', op: 'contains', value: 'ob' } },
+        { field: 'company', op: 'in', value: ['acme'] },
+      ],
+    });
+    const page = await people().table(parseTableRequest({ condition }));
+    assert.deepEqual(
+      page.rows.map((row) => row.name),
+      ['alice'],
+    );
+    await assert.rejects(
+      people().table(
+        parseTableRequest({ condition: JSON.stringify({ field: 'attrs', op: 'exists' }) }),
+      ),
+      /cannot filter by 'attrs'/,
+    );
+    assert.throws(() => parseTableRequest({ condition: '{' }), /condition must be JSON/);
+  });
+
+  it('日期时间列上只写了日期的区间按整天算，时区可以指定；查询栏的区间用 rangeOf', async () => {
+    const created = () =>
+      db.queryable(User).select((u) => ({ name: u.name, createdAt: u.createdAt }));
+    // 种子数据的时刻是 2026-01-02T03:04:05Z
+    const between = (start: string, end: string) =>
+      JSON.stringify({ field: 'createdAt', op: 'between', value: [start, end] });
+    assert.equal(
+      (await created().table(parseTableRequest({ condition: between('2026-01-02', '2026-01-02') })))
+        .total,
+      3,
+    );
+    assert.equal(
+      (await created().table(parseTableRequest({ condition: between('', '2026-01-01') }))).total,
+      0,
+    );
+    // 洛杉矶（UTC-8）那时还是 1 月 1 日晚上
+    assert.equal(
+      (
+        await created().table(
+          parseTableRequest({ condition: between('2026-01-01', '2026-01-01') }),
+          {
+            timeZone: 'America/Los_Angeles',
+          },
+        )
+      ).total,
+      3,
+    );
+    const request = parseTableRequest({ created: ['2026-01-02', ''] });
+    const [start, end] = request.params['created']!;
+    const rows = await db
+      .queryable(User)
+      .where((u) => rangeOf(u.createdAt, 'created', start, end))
+      .count();
+    assert.equal(rows, 3);
   });
 });
