@@ -2,7 +2,7 @@
  * 各方言在实库上跑的同一套用例。open 每次给一个已建表的空库；方言包的测试调用 liveSuite 即可。
  */
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { and, caseWhen, createDb, defineSchema, defineView, or, touch, win, type Expr, type ExecutionEvent, type Interceptor } from '@zerodep-dev/easy-query-ts'
 import { CalendarDateTime, fromDate, parseDate, Time } from '@internationalized/date'
 import { Decimal } from 'decimal.js'

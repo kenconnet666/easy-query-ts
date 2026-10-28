@@ -12,11 +12,17 @@
     "@zerodep-dev/easy-query-ts": "workspace:*",
     "@zerodep-dev/easy-query-ts-sqlite": "workspace:*",
     "@zerodep-dev/easy-query-ts-decimal": "workspace:*",
-    "@zerodep-dev/easy-query-ts-date": "workspace:*"
+    "@zerodep-dev/easy-query-ts-date": "workspace:*",
+    "vitest": "catalog:"
   },
   "devDependencies": {
-    "decimal.js": "10.6.0",
-    "@internationalized/date": "3.12.4",
-    "zod": "4.6.7"
+    "decimal.js": "catalog:",
+    "@internationalized/date": "catalog:",
+    "zod": "catalog:",
+    "typescript": "catalog:",
+    "@types/node": "catalog:"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .. --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo"
   }
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { col, createDb, defineSchema, entity, type StandardSchema } from '@zerodep-dev/easy-query-ts'
 import { sqlite } from '@zerodep-dev/easy-query-ts-sqlite'
 import { z } from 'zod'

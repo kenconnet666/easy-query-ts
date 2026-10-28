@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import type { Pool } from 'mysql2/promise'
 import { col, createDb, Dialect, entity, type Driver } from '@zerodep-dev/easy-query-ts'
 import { Gadget, schema, User } from '@zerodep-dev/easy-query-ts-test/fixture'

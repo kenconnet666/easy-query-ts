@@ -1,7 +1,7 @@
 /**
  * 在实库上跑共用套件。EQTS_HANA_URL 形如 hana://SYSTEM:密码@127.0.0.1:39041，未设置时跳过。表建在 EQTS 模式里，每个用例重建。
  */
-import { after, describe, it } from 'node:test'
+import { afterAll, describe, it } from 'vitest'
 import assert from 'node:assert/strict'
 import { createDb, type Statement } from '@zerodep-dev/easy-query-ts'
 import { Post, schema, seed, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture'
@@ -28,7 +28,7 @@ if (!raw) {
   const options = { host: url.hostname, port: Number(url.port), user: decodeURIComponent(url.username), password: decodeURIComponent(url.password) }
   const admin = hana(options)
   const adapter = hana({ ...options, schema: 'EQTS' })
-  after(() => {
+  afterAll(() => {
     closeHana(admin)
     closeHana(adapter)
   })

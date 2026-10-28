@@ -3,7 +3,7 @@
  *   EQTS_PG_URLS=postgres://postgres:postgres@127.0.0.1:54321/easy-query-test pnpm test
  * 表建在 eqts 模式里（search_path），每个用例重建。
  */
-import { after, describe, it } from 'node:test'
+import { afterAll, describe, it } from 'vitest'
 import pg from 'pg'
 import assert from 'node:assert/strict'
 import { createDb, sql, type Statement } from '@zerodep-dev/easy-query-ts'
@@ -39,7 +39,7 @@ if (urls.length === 0) {
 
 for (const url of urls) {
   const pool = new pg.Pool({ connectionString: url, max: 5, options: '-c search_path=eqts' })
-  after(async () => { await pool.end() })
+  afterAll(async () => { await pool.end() })
 
   const open = async (): Promise<TestEnv> => {
     for (const statement of DDL) await pool.query(statement)

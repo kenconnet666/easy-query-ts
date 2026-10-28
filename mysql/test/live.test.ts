@@ -3,7 +3,7 @@
  *   EQTS_MYSQL_URLS=mysql://root:root@127.0.0.1:3318,mysql://root:root@127.0.0.1:3306 pnpm test
  * 每个用例重建 eqts_test 库里的表。
  */
-import { after, describe, it } from 'node:test'
+import { afterAll, describe, it } from 'vitest'
 import { createPool, type Pool } from 'mysql2/promise'
 import { createDb, type Statement } from '@zerodep-dev/easy-query-ts'
 import assert from 'node:assert/strict'
@@ -47,7 +47,7 @@ for (const url of urls) {
     pools.push(p)
     return p
   }
-  after(async () => { await pools[0]?.end() })
+  afterAll(async () => { await pools[0]?.end() })
 
   const open = async (): Promise<TestEnv> => {
     const p = await pool()

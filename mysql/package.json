@@ -4,14 +4,14 @@
   "description": "MySQL / PolarDB adapter (mysql2) for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
-  "homepage": "https://github.com/kenconnet666/easy-query/tree/main/ts#readme",
+  "homepage": "https://github.com/kenconnet666/vue-tsx-pro/tree/master/packages/easy-query#readme",
   "bugs": {
-    "url": "https://github.com/kenconnet666/easy-query/issues"
+    "url": "https://github.com/kenconnet666/vue-tsx-pro/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kenconnet666/easy-query.git",
-    "directory": "ts/packages/mysql"
+    "url": "git+https://github.com/kenconnet666/vue-tsx-pro.git",
+    "directory": "packages/easy-query/mysql"
   },
   "keywords": [
     "mysql",
@@ -20,21 +20,17 @@
     "easy-query"
   ],
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "@vue-tsx-pro/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
     "dist",
     "src"
   ],
   "publishConfig": {
-    "exports": {
-      ".": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      }
-    },
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts",
     "access": "public"
   },
   "peerDependencies": {
@@ -44,7 +40,7 @@
   "devDependencies": {
     "@zerodep-dev/easy-query-ts": "workspace:*",
     "@zerodep-dev/easy-query-ts-test": "workspace:*",
-    "mysql2": "3.11.5"
+    "mysql2": "catalog:"
   },
   "type": "module",
   "sideEffects": false,
