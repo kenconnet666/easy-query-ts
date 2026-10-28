@@ -27,6 +27,7 @@ import {
 } from './expr.ts';
 import {
   columnNode,
+  Fill,
   linkColumns,
   ListOf,
   makeRef,
@@ -260,9 +261,9 @@ abstract class Executable<Out> implements Subquery<Out> {
    */
   async *stream(options: { batchSize?: number } = {}): AsyncGenerator<Out> {
     const built = build(this.ctx, this.state);
-    if (built.shape.lists.length > 0)
+    if (built.shape.lists.length > 0 || built.shape.fills.length > 0)
       throw new Error(
-        'stream() cannot be combined with toList() navigations; use toList() to build object trees',
+        'stream() cannot be combined with toList() navigations or fills; use toList() to build object trees',
       );
     for await (const batch of streamRows(
       this.ctx,
@@ -502,8 +503,50 @@ export class Queryable<
     return { rows, total: request.total, page, size };
   }
 
+  /**
+   * 按键填充（对应 Java 版的 fillMany）：放在另一条查询的 select 里，把这条查询里 key 等于那一行 from 的行拼成数组。
+   * 不需要声明关系：外部表、只按编码关联的表、另一个库（这条查询来自别的 Db）都行。主查询读完后按一批键各查一次，
+   * 这条查询的 where、orderBy、select（含嵌套的 toList）照常生效；不能带 limit / offset（那是对整批的，不是每行的）
+   * ```ts
+   * const logs = logDb.queryable(Log).orderBy((l) => l.at).select((l) => ({ at: l.at, text: l.text }));
+   * db.queryable(Order).select((o) => ({ no: o.no, logs: logs.fillMany((l) => l.orderNo, o.no) }))
+   * ```
+   */
+  fillMany<V>(
+    key: (...refs: Refs) => Expr<V>,
+    from: Expr<NonNullable<V>> | Expr<NonNullable<V> | null>,
+  ): Fill<Out> {
+    return new Fill(from as Expr<unknown>, (keys) => this.byKeys(key, keys), false);
+  }
+
+  /** 按键填充一行（对应 fillOne）：多行时取第一行（按 orderBy），没有时为 null。其余同 fillMany */
+  fillOne<V>(
+    key: (...refs: Refs) => Expr<V>,
+    from: Expr<NonNullable<V>> | Expr<NonNullable<V> | null>,
+  ): Fill<Out, true> {
+    return new Fill(from as Expr<unknown>, (keys) => this.byKeys(key, keys), true);
+  }
+
+  /** 取 key 在 keys 里的行，连同各自的键 */
+  private async byKeys(
+    key: (...refs: Refs) => Expr<unknown>,
+    keys: readonly unknown[],
+  ): Promise<(readonly [unknown, Out])[]> {
+    if (this.state.limit !== undefined || this.state.offset !== undefined)
+      throw new Error(
+        'fillMany() / fillOne() cannot use limit() / offset(): they would cut the whole batch, not each row',
+      );
+    const state = this.state;
+    const rows = await new Queryable<S, K, { k: unknown; v: Out }, Refs>(this.ctx, {
+      ...state,
+      where: [...state.where, (...refs: Refs) => key(...refs).in(keys as never)],
+      select: (...refs: Refs) => ({ k: key(...refs), v: shapeOf(state, refs) }),
+    }).toList();
+    return rows.map((row) => [row.k, row.v] as const);
+  }
+
   /** 整行之外再带上导航：一对多是数组，多对一是对象（可空导航为 null） */
-  include<X extends Record<string, ListOf<unknown> | AnyRef>>(
+  include<X extends Record<string, ListOf<unknown, boolean> | Fill<unknown, boolean> | AnyRef>>(
     navigations: (...refs: Refs) => X,
   ): Queryable<S, K, Out & Selected<X>, Refs> {
     const previous = this.state.select;
@@ -927,13 +970,7 @@ function build(ctx: Context, state: State, bare = false): Built {
     orderBy = [...orderBy, ...state.groupOrderBy.flatMap((o) => orderNodes(o(g)))];
     if (!bare) shape.compile(state.groupSelect ? state.groupSelect(g) : keys);
   } else if (!bare) {
-    shape.compile(
-      state.select
-        ? state.select(...refs)
-        : state.joins.length === 0
-          ? root
-          : joinedRows(state, refs),
-    );
+    shape.compile(shapeOf(state, refs));
   }
 
   const entity = ctx.schema.entities[state.key]!;
@@ -1007,6 +1044,12 @@ function joinTables(
   return { refs, filters: pending };
 }
 
+/** select 的形状；没写 select 时是主表的整行，join 之后是各表的整行 */
+function shapeOf(state: State, refs: readonly unknown[]): unknown {
+  if (state.select) return state.select(...refs);
+  return state.joins.length === 0 ? refs[0] : joinedRows(state, refs as readonly AnyRef[]);
+}
+
 /** 没写 select 的 join 查询：每张表的整行，按实体名分组；left join 的那张表没匹配时为 null */
 function joinedRows(state: State, refs: readonly AnyRef[]): Record<string, AnyRef> {
   const keys = [state.key, ...state.joins.map((j) => j.key)];
@@ -1061,10 +1104,18 @@ interface PendingList {
   readonly slots: Map<string, { readonly keys: readonly unknown[]; readonly arrays: unknown[][] }>;
 }
 
+/** fillMany / fillOne 等待填充的数组：键 → 这些行上的数组 */
+interface PendingFill {
+  readonly fill: Fill<unknown, boolean>;
+  readonly slots: Map<string, { readonly keys: readonly unknown[]; readonly arrays: unknown[][] }>;
+}
+
 /** 把 select 形状拆成扁平的列，同时生成按行重组对象的读取函数 */
 class ShapeCompiler {
   readonly columns: { e: Node; as: string }[] = [];
   readonly lists: PendingList[] = [];
+  /** fillMany / fillOne 等着按键填充的数组 */
+  readonly fills: PendingFill[] = [];
   /** first() 的数组在第二条查询填完后换成第一项或 null */
   readonly fixups: (() => void)[] = [];
   read: Reader = () => undefined;
@@ -1099,6 +1150,7 @@ class ShapeCompiler {
   private reader(x: unknown): Reader {
     if (x instanceof Expr) return this.expr(x);
     if (x instanceof ListOf) return this.list(x);
+    if (x instanceof Fill) return this.fill(x);
     if (x && typeof x === 'object' && REF in x) return this.ref(x as AnyRef);
     if (Array.isArray(x) || x === null || typeof x !== 'object') {
       throw new TypeError(
@@ -1113,7 +1165,7 @@ class ShapeCompiler {
           this.named.set(k, { alias: this.columns.at(-1)!.as, codec: v.codec });
         else this.flat = false;
       }
-      return [k, read, v instanceof ListOf && v.single] as const;
+      return [k, read, (v instanceof ListOf || v instanceof Fill) && v.single] as const;
     });
     return (row) => {
       const obj: Record<string, unknown> = {};
@@ -1151,6 +1203,25 @@ class ShapeCompiler {
       const obj = Object.fromEntries(readers.map(([p, read]) => [p, read(row)]));
       if (info.nullable && probe.every((p) => obj[p] === null)) return null;
       return obj;
+    };
+  }
+
+  private fill(fill: Fill<unknown, boolean>): Reader {
+    const as = this.hidden(fill.from.node);
+    const pending: PendingFill = { fill, slots: new Map() };
+    this.fills.push(pending);
+    return (row) => {
+      const array: unknown[] = [];
+      const raw = row[as];
+      // 键为 NULL 的行填不到任何东西
+      if (raw !== null && raw !== undefined) {
+        const key = fill.from.codec ? fill.from.codec.decode(raw) : raw;
+        const id = slotId([key]);
+        let slot = pending.slots.get(id);
+        if (!slot) pending.slots.set(id, (slot = { keys: [key], arrays: [] }));
+        slot.arrays.push(array);
+      }
+      return array;
     };
   }
 
@@ -1199,9 +1270,22 @@ function render(ctx: Context, select: SelectNode): Statement {
 async function run(ctx: Context, select: SelectNode, shape: ShapeCompiler): Promise<unknown[]> {
   const rows = await query(ctx, render(ctx, select));
   const out = rows.map(shape.read);
-  await fillLists(ctx, shape.lists);
-  shape.fixups.forEach((f) => f());
+  await complete(ctx, shape);
   return out;
+}
+
+/** 读完一批行之后：填 toList 的数组与 fill 的值，再把 first() / fillOne 的数组换成一项 */
+async function complete(ctx: Context, shape: ShapeCompiler): Promise<void> {
+  await fillLists(ctx, shape.lists);
+  for (const { fill, slots } of shape.fills) {
+    const all = [...slots.values()];
+    for (let i = 0; i < all.length; i += IN_CHUNK) {
+      const keys = all.slice(i, i + IN_CHUNK).map((slot) => slot.keys[0]);
+      for (const [key, row] of await fill.fetch(keys))
+        for (const array of slots.get(slotId([key]))?.arrays ?? []) array.push(row);
+    }
+  }
+  shape.fixups.forEach((f) => f());
 }
 
 /** 一次 IN 查询带的键个数上限 */
@@ -1256,8 +1340,7 @@ async function fillLists(ctx: Context, lists: readonly PendingList[]): Promise<v
           array.push(item);
       }
     }
-    await fillLists(ctx, shape.lists);
-    shape.fixups.forEach((f) => f());
+    await complete(ctx, shape);
   }
 }
 

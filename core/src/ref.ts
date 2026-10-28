@@ -426,20 +426,47 @@ export class ListOf<R, Single extends boolean = false> {
   }
 }
 
+/**
+ * select 里按键从另一条查询填充的值（Queryable.fillMany / fillOne，对应 Java 版的 fillMany / fillOne）：
+ * from 是本行的键，fetch 按一批键取回 [键, 行]；主查询读完后统一取，一批键一条查询
+ */
+export class Fill<R, Single extends boolean = false> {
+  declare readonly __row: R;
+  declare readonly __single: Single;
+  readonly from: Expr<unknown>;
+  readonly fetch: (keys: readonly unknown[]) => Promise<readonly (readonly [unknown, R])[]>;
+  /** fillOne：结果是一行或 null，而不是数组 */
+  readonly single: Single;
+
+  constructor(
+    from: Expr<unknown>,
+    fetch: (keys: readonly unknown[]) => Promise<readonly (readonly [unknown, R])[]>,
+    single: Single,
+  ) {
+    this.from = from;
+    this.fetch = fetch;
+    this.single = single;
+  }
+}
+
 /** select 形状对应的结果类型 */
 export type Selected<X> =
   X extends Expr<infer T>
     ? T
-    : X extends ListOf<infer R, infer Single>
+    : X extends Fill<infer R, infer Single>
       ? Single extends true
         ? R | null
         : R[]
-      : X extends { readonly [REF]: RefInfo<infer S, infer K, infer N> }
-        ? N extends true
-          ? Row<S['entities'][K]> | null
-          : Row<S['entities'][K]>
-        : X extends readonly unknown[]
-          ? never
-          : X extends object
-            ? { -readonly [P in keyof X]: Selected<X[P]> }
-            : never;
+      : X extends ListOf<infer R, infer Single>
+        ? Single extends true
+          ? R | null
+          : R[]
+        : X extends { readonly [REF]: RefInfo<infer S, infer K, infer N> }
+          ? N extends true
+            ? Row<S['entities'][K]> | null
+            : Row<S['entities'][K]>
+          : X extends readonly unknown[]
+            ? never
+            : X extends object
+              ? { -readonly [P in keyof X]: Selected<X[P]> }
+              : never;

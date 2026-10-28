@@ -164,6 +164,23 @@ async function results() {
 void results;
 
 // 显式 join：lambda 按 join 顺序收到各表引用；left join 的那张表列可空；没写 select 时按实体名分组
+// 按键填充：fillMany 是数组，fillOne 可空；键的类型要对得上
+async function fills() {
+  const posts = db.queryable(Post).select((p) => ({ title: p.title }));
+  const rows = await db
+    .queryable(User)
+    .select((u) => ({
+      posts: posts.fillMany((p) => p.userId, u.id),
+      company: db.queryable(Company).fillOne((c) => c.id, u.companyId),
+    }))
+    .toList();
+  expect<
+    Equal<typeof rows, { posts: { title: string }[]; company: Row<typeof Company> | null }[]>
+  >();
+  // @ts-expect-error 键的类型对不上（number 对 string）
+  db.queryable(User).select((u) => ({ posts: posts.fillMany((p) => p.userId, u.name) }));
+}
+
 async function joins() {
   const inner = await db
     .queryable(User)
@@ -233,6 +250,7 @@ async function joins() {
   expect<Equal<typeof total, `${number}` | null>>();
 }
 void joins;
+void fills;
 
 // @ts-expect-error join 的 on 里新表没有这个列
 db.queryable(User).innerJoin(Post, (u, p) => p.nope.eq(u.id));
