@@ -13,7 +13,13 @@
  * ```
  * 复合外键把 from / to 写成列的数组：`{ from: ['tenantId', 'userId'], to: ['tenantId', 'id'] }`，两边个数必须相同。
  */
-import type { Column, Entity } from './schema.ts';
+import type { Cond, Expr } from './expr.ts';
+import type { Column, Entity, ValueOf } from './schema.ts';
+
+/** 关系上固定的条件（对应 Java 版导航的 extraFilter）：拿到目标表各列的表达式，返回条件；每次用到这个导航都带上 */
+export type RelationFilter<E extends Entity = Entity> = (target: {
+  readonly [K in keyof E['columns']]: Expr<ValueOf<E['columns'][K]>>;
+}) => Cond;
 
 /** 多对一 / 一对一：from 是本表的列，to 是目标表的列（按位置一一对应）。N 为 true 时目标可能不存在，导航出来的列都可空 */
 export interface One<T extends string = string, N extends boolean = boolean> {
@@ -22,6 +28,8 @@ export interface One<T extends string = string, N extends boolean = boolean> {
   readonly from: readonly string[];
   readonly to: readonly string[];
   readonly nullable: N;
+  /** 固定的条件：写进 JOIN 的 ON，不满足时导航为空 */
+  readonly where?: RelationFilter;
 }
 
 /** 多对多经过的中间表：from 列引用本表，to 列引用目标表（都是中间表上的列） */
@@ -42,6 +50,8 @@ export interface Many<T extends string = string> {
   readonly from: readonly string[];
   readonly to: readonly string[];
   readonly through?: Through;
+  /** 固定的条件：any / count / toList 等每次用到这个导航都带上 */
+  readonly where?: RelationFilter;
 }
 
 export type Relation = One | Many;
@@ -65,11 +75,13 @@ export interface RelationBuilder<E extends Record<string, Entity>, S extends key
   one<T extends keyof E & string, F extends ColumnKey<E[S]>, O extends boolean = false>(
     target: T,
     on: { from: OneOrMany<F>; to: OneOrMany<ColumnKey<E[T]>> },
-    options?: { optional?: O },
+    options?: { optional?: O; where?: RelationFilter<E[T]> },
   ): One<T, O extends true ? true : AnyNullable<E[S], F>>;
+  /** 一对多；options.where 是固定的条件（例如只算有效的子项：`{ where: (p) => p.deleted.eq(false) }`） */
   many<T extends keyof E & string>(
     target: T,
     on: { from: OneOrMany<ColumnKey<E[S]>>; to: OneOrMany<ColumnKey<E[T]>> },
+    options?: { where?: RelationFilter<E[T]> },
   ): Many<T>;
   /**
    * 多对多：经中间表 through 连接两边。throughFrom 是中间表上引用本表的列，throughTo 是引用目标表的列；
@@ -84,6 +96,7 @@ export interface RelationBuilder<E extends Record<string, Entity>, S extends key
       from?: OneOrMany<ColumnKey<E[S]>>;
       to?: OneOrMany<ColumnKey<E[T]>>;
     },
+    options?: { where?: RelationFilter<E[T]> },
   ): Many<T>;
 }
 
@@ -165,6 +178,9 @@ function builderFor<E extends Record<string, Entity>>(
   entities: E,
   source: string,
 ): RelationBuilder<E, string> {
+  // 只在给了固定条件时才带上 where 属性，没给的关系对象保持原样（exactOptionalPropertyTypes）
+  const where = (options?: { where?: RelationFilter<never> }) =>
+    options?.where ? { where: options.where as RelationFilter } : {};
   const primaryKey = (entity: Entity, what: string): readonly string[] => {
     if (entity.primaryKey.length === 0)
       throw new Error(`manyToMany on ${what} needs from / to or a primary key on ${entity.table}`);
@@ -176,12 +192,12 @@ function builderFor<E extends Record<string, Entity>>(
       const nullable =
         options?.optional === true ||
         from.some((c) => entities[source]!.columns[c]?.options.nullable);
-      return { kind: 'one', target, from, to: list(on.to), nullable } as never;
+      return { kind: 'one', target, from, to: list(on.to), nullable, ...where(options) } as never;
     },
-    many(target, on) {
-      return { kind: 'many', target, from: list(on.from), to: list(on.to) };
+    many(target, on, options) {
+      return { kind: 'many', target, from: list(on.from), to: list(on.to), ...where(options) };
     },
-    manyToMany(target, on) {
+    manyToMany(target, on, options) {
       const targetEntity = entities[target];
       return {
         kind: 'many',
@@ -189,6 +205,7 @@ function builderFor<E extends Record<string, Entity>>(
         from: on.from ? list(on.from) : primaryKey(entities[source]!, source),
         to: on.to ? list(on.to) : targetEntity ? primaryKey(targetEntity, target) : [],
         through: { entity: on.through, from: list(on.throughFrom), to: list(on.throughTo) },
+        ...where(options),
       };
     },
   };

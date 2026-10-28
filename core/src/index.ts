@@ -13,6 +13,7 @@ export type {
   ValueOf,
 } from './schema.ts';
 export { defineSchema } from './relations.ts';
+export type { RelationFilter } from './relations.ts';
 export type {
   AnySchema,
   EntityKey,

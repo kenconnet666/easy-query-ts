@@ -140,7 +140,7 @@ export function makeRef(scope: Scope, key: string, alias: string, nullable: bool
         (cached ??=
           rel.kind === 'one'
             ? joinOne(scope, ref as AnyRef, prop, rel, nullable)
-            : new ManyRef(scope, ref as AnyRef, rel)),
+            : new ManyRef(scope, ref as AnyRef, rel, rel.where ? [rel.where] : [])),
     });
   }
   return ref as AnyRef;
@@ -171,8 +171,9 @@ function joinOne(
       r: columnNode(scope, info, rel.from[i]!),
     })),
   );
-  // 拦截器的条件放进 ON：LEFT JOIN 不会因此把主表的行过滤掉
-  const extra = scope.filters(ref);
+  // 拦截器的条件与关系上固定的条件放进 ON：LEFT JOIN 不会因此把主表的行过滤掉
+  const fixed = rel.where ? condNode(rel.where(ref as never)) : undefined;
+  const extra = fixed ? [...scope.filters(ref), fixed] : scope.filters(ref);
   scope.joins.push({
     ...scope.tableRef(target, alias),
     on: extra.length === 0 ? on : { k: 'and', items: [on, ...extra] },

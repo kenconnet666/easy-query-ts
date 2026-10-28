@@ -88,7 +88,7 @@ TS 版的状态按 `packages/easy-query/core/src` 的实现核过。"写法不�
 1. ~~按主键查与查不到就抛错~~（2026-10-28 已补）
 2. ~~列表页的筛选与排序~~（2026-10-28 已补 `table`；区间与条件树待补）
 3. ~~自关联的树~~（2026-10-28 已补 `toTree`、`descendantsOf`、`ancestorsOf`）
-4. 导航上的固定条件——"有效的子项"这类到处要写的条件
+4. ~~导航上的固定条件~~（2026-10-29 已补）
 5. 事务提交后的回调（与 14.3 合并做）
 6. `subQueryToGroupJoin`、`fillOne` / `fillMany`——性能与外部关联，等真实页面用到
 7. `rightJoin`、`crossJoin`、`asSchema`——等用到
