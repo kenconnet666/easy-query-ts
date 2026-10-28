@@ -10,6 +10,7 @@ import {
   sql,
   win,
   type Adapter,
+  type Expr,
   type Insert,
   type Row,
   type ViewOf,
@@ -189,6 +190,31 @@ async function joins() {
       { User: Row<typeof User>; Post: Row<typeof Post>; Company: Row<typeof Company> | null }[]
     >
   >();
+
+  // right join：此前各表的列都可空，新表的不可空；没写 select 时此前各表的整行可空
+  const right = await db
+    .queryable(User)
+    .innerJoin(Post, (u, p) => p.userId.eq(u.id))
+    .rightJoin(Company, (u, p, c) => {
+      expect<Equal<typeof p.title, Expr<string | null>>>();
+      return c.id.eq(u.companyId);
+    })
+    .select((u, _p, c) => ({ name: u.name, company: c.name }))
+    .toList();
+  expect<Equal<typeof right, { name: string | null; company: string }[]>>();
+  const rightRows = await db
+    .queryable(User)
+    .rightJoin(Company, (u, c) => c.id.eq(u.companyId))
+    .toList();
+  expect<
+    Equal<typeof rightRows, { User: Row<typeof User> | null; Company: Row<typeof Company> }[]>
+  >();
+  const cross = await db
+    .queryable(User)
+    .crossJoin(Company)
+    .select((u, c) => ({ name: u.name, company: c.name }))
+    .toList();
+  expect<Equal<typeof cross, { name: string; company: string }[]>>();
 
   // join 之后 where / orderBy / groupBy 都按顺序收到各表引用
   const grouped = await db

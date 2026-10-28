@@ -2314,6 +2314,42 @@ export function liveSuite(
       assert.equal(rows.at(-1)!.Post, null);
     });
 
+    it('right joins: keeps every row of the new table, earlier tables become nullable', async () => {
+      const { db } = await seeded();
+      // globex 没有员工：右连接里照样出现，用户一侧为 null
+      const rows = await db
+        .queryable(User)
+        .rightJoin(Company, (u, c) => c.id.eq(u.companyId))
+        .orderBy((u, c) => [c.id, u.id])
+        .select((u, c) => ({ user: u.name, company: c.name }))
+        .toList();
+      assert.deepEqual(rows, [
+        { user: 'alice', company: 'acme' },
+        { user: 'bob', company: 'acme' },
+        { user: null, company: 'globex' },
+      ]);
+      const whole = await db
+        .queryable(User)
+        .rightJoin(Company, (u, c) => c.id.eq(u.companyId))
+        .where((_u, c) => c.name.eq('globex'))
+        .toList();
+      assert.deepEqual(
+        whole.map((r) => [r.User, r.Company.name]),
+        [[null, 'globex']],
+      );
+    });
+
+    it('cross joins: every pair, conditions in where', async () => {
+      const { db } = await seeded();
+      const pairs = await db
+        .queryable(Company)
+        .crossJoin(Company)
+        .where((a, b) => a.id.lt(b.id))
+        .select((a, b) => ({ a: a.name, b: b.name }))
+        .toList();
+      assert.deepEqual(pairs, [{ a: 'acme', b: 'globex' }]);
+    });
+
     it('joins three tables, filters on joined tables and pages', async () => {
       const { db } = await seeded();
       const q = db

@@ -2,7 +2,14 @@
  * 查询构建器。方法只记下 lambda，执行（toList、count …）时才在新的构建现场里求值、生成语法树，
  * 所以构建器不可变、可以复用：`const base = db.queryable(User).where(...)`，再分别 `base.count()`、`base.limit(10).toList()`。
  */
-import { checkAliases, type CteNode, type Node, type OrderNode, type SelectNode } from './ast.ts';
+import {
+  checkAliases,
+  type CteNode,
+  type JoinKind,
+  type Node,
+  type OrderNode,
+  type SelectNode,
+} from './ast.ts';
 import { SqlWriter, type Statement } from './dialect.ts';
 import {
   aggregate,
@@ -27,6 +34,7 @@ import {
   Scope,
   type AnyRef,
   type Ref,
+  type RefInfo,
   type Selected,
 } from './ref.ts';
 import type { AnySchema, EntityKey, Schema } from './relations.ts';
@@ -47,11 +55,11 @@ import { query, streamRows, type Context } from './session.ts';
 type Fn<R> = (...refs: any[]) => R;
 type Orders = OrderItem | readonly OrderItem[];
 
-/** 一次显式 join：目标实体、种类、ON 条件（收到此前所有表引用加上新表引用） */
+/** 一次显式 join：目标实体、种类、ON 条件（收到此前所有表引用加上新表引用；cross 没有） */
 interface JoinSpec {
   readonly key: string;
-  readonly kind: 'inner' | 'left';
-  readonly on: Fn<Cond>;
+  readonly kind: JoinKind;
+  readonly on: Fn<Cond> | undefined;
 }
 
 interface State {
@@ -77,7 +85,7 @@ interface State {
 
 /**
  * join 之后没写 select 时的结果类型：第一次 join 把主表的整行包成 `{ 主表: Row }`，之后每次加一张表。
- * nullable 为 true（left join）时新表的整行可空。
+ * nullable 为 true（left join）时新表的整行可空；previousNullable 为 true（right join）时此前各表的整行可空。
  */
 export type JoinedRows<
   S extends AnySchema,
@@ -86,11 +94,23 @@ export type JoinedRows<
   Refs extends readonly unknown[],
   T extends EntityKey<S>,
   Nullable extends boolean,
+  PreviousNullable extends boolean = false,
 > = Flatten<
-  (Refs extends readonly [unknown] ? { [Q in K]: Out } : Out) & {
+  (Refs extends readonly [unknown]
+    ? { [Q in K]: PreviousNullable extends true ? Out | null : Out }
+    : PreviousNullable extends true
+      ? { [P in keyof Out]: Out[P] | null }
+      : Out) & {
     [Q in T]: Nullable extends true ? Row<S['entities'][T]> | null : Row<S['entities'][T]>;
   }
 >;
+
+/** right join 之后：此前的表都可能没匹配到，它们的表引用变成可空（列都带上 null） */
+export type NullableRefs<S extends AnySchema, Refs extends readonly unknown[]> = {
+  [I in keyof Refs]: Refs[I] extends { readonly [REF]: RefInfo<any, infer T extends EntityKey<S>> }
+    ? Ref<S, T, true>
+    : Refs[I];
+};
 
 /** 把交叉类型摊平成一个对象类型，提示和比较都更直观 */
 type Flatten<T> = { [P in keyof T]: T[P] };
@@ -548,7 +568,35 @@ export class Queryable<
     return this.join('left', entity, on);
   }
 
-  private join(kind: 'inner' | 'left', entity: Entity, on: Fn<Cond>): never {
+  /**
+   * 右连接另一张表（RIGHT JOIN）：新表的行都保留，此前各表没匹配到时整行为 null（它们的列在之后的 lambda 里都可空）。
+   * 此前各表的拦截器条件（租户、逻辑删除）放进这个 ON，不会把只有新表的行过滤掉。其余同 innerJoin
+   */
+  rightJoin<E extends S['entities'][EntityKey<S>]>(
+    entity: E,
+    on: (...refs: [...NullableRefs<S, Refs>, Ref<S, KeyOf<S, E>>]) => Cond,
+  ): Queryable<
+    S,
+    K,
+    JoinedRows<S, K, Out, Refs, KeyOf<S, E>, false, true>,
+    [...NullableRefs<S, Refs>, Ref<S, KeyOf<S, E>>]
+  > {
+    return this.join('right', entity, on);
+  }
+
+  /** 笛卡尔积（CROSS JOIN）：没有 ON，条件写在 where 里。其余同 innerJoin */
+  crossJoin<E extends S['entities'][EntityKey<S>]>(
+    entity: E,
+  ): Queryable<
+    S,
+    K,
+    JoinedRows<S, K, Out, Refs, KeyOf<S, E>, false>,
+    [...Refs, Ref<S, KeyOf<S, E>>]
+  > {
+    return this.join('cross', entity, undefined);
+  }
+
+  private join(kind: JoinKind, entity: Entity, on: Fn<Cond> | undefined): never {
     if (this.state.select)
       throw new Error(
         `${kind}Join() must be called before select(): the selected shape is already fixed`,
@@ -860,10 +908,12 @@ function build(ctx: Context, state: State, bare = false): Built {
   const scope = new Scope(ctx.schema, { n: 0 }, true, (ref) =>
     interceptors.filters(ref, refEntity(ref)),
   );
-  const root = scope.root(state.key);
+  // right join 之前的表都可能没匹配到：主表的引用也可空
+  const rightJoined = state.joins.some((j) => j.kind === 'right');
+  const root = makeRef(scope, state.key, scope.nextAlias(), rightJoined);
   // 所有 lambda 按"主表、第一个 join 的表、……"的顺序收到这些表引用
-  const refs = joinTables(ctx, scope, root, state.joins);
-  const where = [...conds(state.where.map((f) => f(...refs))), ...scope.filters(root)];
+  const { refs, filters } = joinTables(ctx, scope, root, state.joins);
+  const where = [...conds(state.where.map((f) => f(...refs))), ...filters];
   const shape = new ShapeCompiler(ctx);
   let groupBy: Node[] = [];
   let having: Node[] = [];
@@ -911,20 +961,29 @@ function conds(list: Cond[]): Node[] {
 }
 
 /**
- * 把显式 join 的表加进语句并返回所有表引用（主表在前）。
+ * 把显式 join 的表加进语句，返回所有表引用（主表在前）与要放进 WHERE 的拦截器条件。
  * ON 条件收到此前所有表引用加上新表引用；拦截器给新表的条件也放进 ON，LEFT JOIN 不会因此丢掉主表的行。
+ * 主表与 cross join 的表的拦截器条件本该在 WHERE；但遇到 right join 时改放进它的 ON，只有右表的行才不会被过滤掉。
  */
 function joinTables(
   ctx: Context,
   scope: Scope,
   root: AnyRef,
   joins: readonly JoinSpec[],
-): AnyRef[] {
+): { refs: AnyRef[]; filters: Node[] } {
   const refs = [root];
-  for (const spec of joins) {
+  let pending = scope.filters(root);
+  const lastRight = joins.findLastIndex((j) => j.kind === 'right');
+  joins.forEach((spec, i) => {
     const target = ctx.schema.entities[spec.key]!;
     const alias = scope.nextAlias();
-    const ref = makeRef(scope, spec.key, alias, spec.kind === 'left');
+    const ref = makeRef(scope, spec.key, alias, spec.kind === 'left' || i < lastRight);
+    refs.push(ref);
+    if (!spec.on) {
+      scope.joins.push({ ...scope.tableRef(target, alias), kind: spec.kind, on: undefined });
+      pending = [...pending, ...scope.filters(ref)];
+      return;
+    }
     // 先登记再求值 ON：ON 里用导航产生的隐式 join 会排在它后面，引用到的别名已经声明
     const index =
       scope.joins.push({
@@ -932,17 +991,20 @@ function joinTables(
         kind: spec.kind,
         on: { k: 'lit', sql: '1 = 1' },
       }) - 1;
-    refs.push(ref);
     const on = condNode(spec.on(...refs));
     if (!on) throw new Error(`${spec.kind}Join(${target.table}) needs an ON condition`);
     const extra = scope.filters(ref);
+    if (spec.kind === 'right') {
+      extra.push(...pending);
+      pending = [];
+    }
     scope.joins[index] = {
       ...scope.tableRef(target, alias),
       kind: spec.kind,
       on: extra.length === 0 ? on : { k: 'and', items: [on, ...extra] },
     };
-  }
-  return refs;
+  });
+  return { refs, filters: pending };
 }
 
 /** 没写 select 的 join 查询：每张表的整行，按实体名分组；left join 的那张表没匹配时为 null */

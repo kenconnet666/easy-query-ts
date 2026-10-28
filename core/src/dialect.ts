@@ -6,6 +6,7 @@ import type {
   CteNode,
   DeleteNode,
   InsertNode,
+  JoinKind,
   Node,
   SelectNode,
   UpdateNode,
@@ -276,8 +277,11 @@ export abstract class Dialect {
         ? '1'
         : q.columns.map((c) => `${this.node(c.e, w)} AS ${this.quote(c.as)}`).join(', ');
     let s = `SELECT ${q.distinct ? 'DISTINCT ' : ''}${cols} FROM ${q.from.sub ? `(${this.select(q.from.sub, w)})` : this.table(q.from.table)} ${q.from.alias}`;
-    for (const j of q.joins)
-      s += ` ${j.kind === 'inner' ? 'INNER' : 'LEFT'} JOIN ${this.table(j.table)} ${j.alias} ON ${this.node(j.on, w)}`;
+    for (const j of q.joins) {
+      const source = j.sub ? `(${this.select(j.sub, w)})` : this.table(j.table);
+      s += ` ${JOIN_WORDS[j.kind ?? 'left']} ${source} ${j.alias}`;
+      if (j.on) s += ` ON ${this.node(j.on, w)}`;
+    }
     if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
     if (q.groupBy.length > 0)
       s += ` GROUP BY ${this.groupByKeys(
@@ -428,6 +432,13 @@ export abstract class Dialect {
     return n.k === 'op' || n.k === 'and' || n.k === 'or' || n.k === 'raw' ? `(${s})` : s;
   }
 }
+
+const JOIN_WORDS: Record<JoinKind, string> = {
+  inner: 'INNER JOIN',
+  left: 'LEFT JOIN',
+  right: 'RIGHT JOIN',
+  cross: 'CROSS JOIN',
+};
 
 function int(n: number): number {
   if (!Number.isSafeInteger(n) || n < 0)

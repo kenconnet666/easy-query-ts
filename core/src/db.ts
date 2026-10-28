@@ -399,6 +399,20 @@ export class Db<S extends AnySchema> {
     );
   }
 
+  /**
+   * 换 schema（对应 Java 版的 asSchema）：这个 Db 上的查询与写入把表放到另一个 schema（MySQL 是库）下，
+   * 多租户分库、归档库都不用改查询代码：`db.inSchema('archive_2025')`；only 只换这几个实体。表名已带 schema 前缀的换掉前缀
+   */
+  inSchema(schema: string, only?: readonly EntityKey<S>[]): Db<S> {
+    const entities = this.ctx.schema.entities;
+    const keys = only ?? Object.keys(entities).filter((key) => !entities[key]!.derived);
+    return this.mapTables(
+      Object.fromEntries(
+        keys.map((key) => [key, `${schema}.${entities[key]!.table.split('.').at(-1)}`]),
+      ) as { [K in EntityKey<S>]?: string },
+    );
+  }
+
   private freshName(name: string): string {
     if (name in this.ctx.schema.entities)
       throw new Error(`'${name}' is already an entity or CTE of this schema`);

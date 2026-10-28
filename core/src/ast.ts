@@ -60,9 +60,12 @@ export interface TableRef {
 
 export interface Join extends TableRef {
   /** 连接方式；省略为 left（导航产生的隐式 join 都是 left） */
-  readonly kind?: 'inner' | 'left';
-  readonly on: Node;
+  readonly kind?: JoinKind;
+  /** ON 条件；cross 没有 */
+  readonly on: Node | undefined;
 }
+
+export type JoinKind = 'inner' | 'left' | 'right' | 'cross';
 
 export interface OrderNode {
   readonly e: Node;
@@ -138,7 +141,11 @@ export function checkAliases(
   // 复合查询的每个成员都是独立的语句
   if ('unions' in q) q.unions?.forEach((u) => checkAliases(u.q));
   const joins = 'joins' in q ? q.joins : [];
-  for (const j of joins) declared.add(j.alias);
+  for (const j of joins) {
+    declared.add(j.alias);
+    // 派生表的 join（分组 join、跨导航的桥）是独立的语句
+    if (j.sub) checkAliases(j.sub);
+  }
   const visit = (n: Node): void => {
     switch (n.k) {
       case 'col':
@@ -211,7 +218,7 @@ export function checkAliases(
         return;
     }
   };
-  for (const j of joins) visit(j.on);
+  for (const j of joins) if (j.on) visit(j.on);
   q.where.forEach(visit);
   if ('set' in q) q.set.forEach((s) => visit(s.e));
   if ('columns' in q) {
