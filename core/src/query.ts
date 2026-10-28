@@ -34,6 +34,7 @@ import type { KeyOf } from './db.ts';
 import { Column, type Codec, type DerivedEntity, type Entity, type Row } from './schema.ts';
 import { refEntity } from './interceptor.ts';
 import { parseColumnText, resultColumn, type TableRequest } from './table.ts';
+import { assembleTree, type TreeNode } from './tree.ts';
 import { query, streamRows, type Context } from './session.ts';
 
 /** 构建时求值的 lambda：单表查询收到一个表引用，join 之后按 join 顺序收到多个 */
@@ -261,6 +262,27 @@ abstract class Executable<Out> implements Subquery<Out> {
     const rows = await this.limit(1).toList();
     if (rows.length === 0) throw new NotFoundError(message ?? 'no row matched the query');
     return rows[0]!;
+  }
+
+  /**
+   * 自关联的行拼成树（对应 Java 版的 toTreeList）：按 id 与 parent 两个字段把行挂到父节点的子节点下，
+   * 父节点不在结果里的行是根，兄弟之间保持查询的顺序；节点是 select 的形状再加上 children（名字可以换）。
+   * ```ts
+   * await db.queryable(Dept).orderBy(d => d.sort).select(d => ({ id: d.id, parentId: d.parentId, label: d.name }))
+   *   .toTree({ id: 'id', parent: 'parentId' })
+   * ```
+   */
+  async toTree<C extends string = 'children'>(options: {
+    id: keyof Out;
+    parent: keyof Out;
+    children?: C;
+  }): Promise<TreeNode<Out, C>[]> {
+    return assembleTree(
+      await this.toList(),
+      options.id,
+      options.parent,
+      options.children ?? ('children' as C),
+    );
   }
 
   /** 恰好一行，否则抛错 */

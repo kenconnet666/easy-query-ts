@@ -78,7 +78,7 @@ export { defineView } from './view.ts';
 export type { View, ViewOf } from './view.ts';
 export { tenant, touch } from './interceptor.ts';
 export type { Interceptor, WriteEvent } from './interceptor.ts';
-export type { DbOptions, KeyOf, ManyKeys, SaveInput, WithCte } from './db.ts';
+export type { DbOptions, KeyOf, ManyKeys, SaveInput, TreeWalk, WithCte } from './db.ts';
 export { Dialect, SqlWriter } from './dialect.ts';
 export type { FunctionRenderer, Statement } from './dialect.ts';
 export type {
@@ -96,3 +96,4 @@ export type * from './ast.ts';
 export { checkAliases } from './ast.ts';
 export { parseTableRequest } from './table.ts';
 export type { TableRequest, TableRequestInput } from './table.ts';
+export type { TreeNode } from './tree.ts';

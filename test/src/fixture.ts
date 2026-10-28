@@ -84,6 +84,13 @@ export const Note = entity('t_note', {
   body: col.string(),
 });
 
+/** 自关联的树：部门的上级是另一个部门（descendantsOf、ancestorsOf、toTree 的用例） */
+export const Dept = entity('t_dept', {
+  id: col.bigint().primaryKey(),
+  parentId: col.bigint().nullable(),
+  name: col.string(),
+});
+
 /** 凯撒位移 13：确定性的"加密"，测试透明加解密用 */
 export const rot13 = {
   encrypt: (v: string): string =>
@@ -124,7 +131,7 @@ export const Gadget = entity('t_gadget', {
 });
 
 export const schema = defineSchema(
-  { Company, User, Post, Comment, Ext, Role, UserRole, Member, Note, Doc },
+  { Company, User, Post, Comment, Ext, Role, UserRole, Member, Note, Doc, Dept },
   {
     Company: (r) => ({ users: r.many('User', { from: 'id', to: 'companyId' }) }),
     User: (r) => ({

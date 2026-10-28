@@ -18,6 +18,7 @@ import {
 } from './query.ts';
 import type { AnySchema, EntityKey, Many, Schema } from './relations.ts';
 import type { Expr } from './expr.ts';
+import type { Ref } from './ref.ts';
 import type { DerivedEntity, Entity, Row } from './schema.ts';
 import { createSqlTag, type SqlTag } from './native.ts';
 import {
@@ -35,6 +36,14 @@ export type KeyOf<S extends AnySchema, E> = {
 }[EntityKey<S>];
 
 type SchemaEntity<S extends AnySchema> = S['entities'][EntityKey<S>];
+
+/** descendantsOf / ancestorsOf 的选项 */
+export interface TreeWalk<S extends AnySchema, K extends EntityKey<S>> {
+  /** 指向上级的列（或表达式）：`d => d.parentId` */
+  parent: (row: Ref<S, K>) => Expr<unknown>;
+  /** 结果里含不含起点这个节点，默认含 */
+  self?: boolean;
+}
 
 /** 实体 K 上能 cascade 保存的一对多导航的名字 */
 export type ManyKeys<S extends AnySchema, K extends EntityKey<S>> = {
@@ -143,6 +152,81 @@ export class Db<S extends AnySchema> {
     });
     // 递归部分构建完成后实体才完整；Db 本身只持有实体的引用，所以直接可用
     return extended ?? this.extend(entity);
+  }
+
+  /**
+   * 某个节点的全部下级（对应 Java 版的 asTreeCTE）：递归 CTE 从 key 这个节点沿 parent 往下走，返回只含这些行的查询，
+   * 之后照常 where、select、toTree。self 默认 true（含这个节点）。递归用 UNION 去重，数据里有环也会停下。
+   * 只支持单列主键；HANA 没有递归 CTE，渲染时报不支持。
+   * ```ts
+   * await db.descendantsOf(Dept, 1, { parent: d => d.parentId }).select(...).toTree({ id: 'id', parent: 'parentId' })
+   * ```
+   */
+  descendantsOf<E extends SchemaEntity<S>>(
+    entity: E,
+    key: unknown,
+    options: TreeWalk<S, KeyOf<S, E>>,
+  ): Queryable<S, KeyOf<S, E>> {
+    return this.walkTree(entity, key, options, 'down');
+  }
+
+  /** 某个节点的全部上级（从它的上级一直到根），用法同 descendantsOf */
+  ancestorsOf<E extends SchemaEntity<S>>(
+    entity: E,
+    key: unknown,
+    options: TreeWalk<S, KeyOf<S, E>>,
+  ): Queryable<S, KeyOf<S, E>> {
+    return this.walkTree(entity, key, options, 'up');
+  }
+
+  private walkTree<E extends SchemaEntity<S>>(
+    entity: E,
+    key: unknown,
+    { parent, self = true }: TreeWalk<S, KeyOf<S, E>>,
+    direction: 'down' | 'up',
+  ): Queryable<S, KeyOf<S, E>> {
+    const [pk, ...rest] = entity.primaryKey;
+    if (pk === undefined || rest.length > 0)
+      throw new Error(
+        `descendantsOf / ancestorsOf need a single-column primary key on ${entity.table}`,
+      );
+    // 递归 CTE 的两列：id 是走到的行，up 是它的上级（往上走时下一步按它找）
+    type Columns = Record<string, Expr<unknown>>;
+    const shape = (row: unknown) => ({
+      id: (row as Columns)[pk]!,
+      up: parent(row as never) as Expr<unknown>,
+    });
+    let walked: DerivedEntity<string, unknown> | undefined;
+    const tdb = this.withRecursive(
+      'tree_walk',
+      this.queryable(entity)
+        .where((row) => (row as unknown as Columns)[pk]!.eq(key as never))
+        .select(shape),
+      (rdb, cte) => {
+        walked = cte as DerivedEntity<string, unknown>;
+        // 递归的这一步只在内部拼，实体与 CTE 的类型在这里放宽，对外的签名照样带类型
+        const step = (rdb as unknown as Db<AnySchema>).queryable(entity as never) as unknown as {
+          innerJoin(
+            other: unknown,
+            on: (row: unknown, walkedRow: Columns) => unknown,
+          ): { select(shape: (row: unknown) => unknown): Query<unknown> };
+        };
+        return step
+          .innerJoin(cte, (row, walkedRow) =>
+            direction === 'down'
+              ? (parent(row as never) as Expr<unknown>).eq(walkedRow['id'] as never)
+              : (row as Columns)[pk]!.eq(walkedRow['up'] as never),
+          )
+          .select((row) => shape(row)) as never;
+      },
+      { all: false },
+    );
+    const ids = tdb.queryable(walked as never).select((row) => (row as Columns)['id']!);
+    let query = tdb
+      .queryable(entity as never)
+      .where((row) => (row as unknown as Columns)[pk]!.in(ids as never));
+    if (!self) query = query.where((row) => (row as unknown as Columns)[pk]!.ne(key as never));
+    return query as unknown as Queryable<S, KeyOf<S, E>>;
   }
 
   /**

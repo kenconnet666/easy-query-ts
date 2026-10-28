@@ -21,6 +21,7 @@ import { Decimal } from 'decimal.js';
 import {
   Comment,
   Company,
+  Dept,
   Doc,
   Ext,
   Gadget,
@@ -2157,6 +2158,41 @@ export function liveSuite(
         ['acme', 'globex'],
       );
     });
+
+    it(
+      'walks a self-referencing tree: descendantsOf, ancestorsOf and toTree',
+      { skip: options.recursiveCte === false || !options.extraTables },
+      async () => {
+        const { db } = await seeded();
+        // 1 总部 ─┬─ 2 研发 ── 4 前端
+        //         └─ 3 销售          5 子公司（另一棵树）
+        await db
+          .insert(Dept)
+          .values([
+            { id: 1, parentId: null, name: 'hq' },
+            { id: 2, parentId: 1, name: 'rd' },
+            { id: 3, parentId: 1, name: 'sales' },
+            { id: 4, parentId: 2, name: 'web' },
+            { id: 5, parentId: null, name: 'sub' },
+          ])
+          .execute();
+        const tree = await db
+          .descendantsOf(Dept, 1, { parent: (d) => d.parentId })
+          .orderBy((d) => d.id)
+          .select((d) => ({ id: d.id, parentId: d.parentId, name: d.name }))
+          .toTree({ id: 'id', parent: 'parentId' });
+        assert.deepEqual(
+          tree.map((node) => [node.name, node.children.map((child) => child.name)]),
+          [['hq', ['rd', 'sales']]],
+        );
+        const ancestors = await db
+          .ancestorsOf(Dept, 4, { parent: (d) => d.parentId, self: false })
+          .orderBy((d) => d.id)
+          .select((d) => d.name)
+          .toList();
+        assert.deepEqual(ancestors, ['hq', 'rd']);
+      },
+    );
   });
 
   describe(`${name}: explicit joins`, () => {
