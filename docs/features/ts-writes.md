@@ -53,6 +53,28 @@ PG、SQLite 用 `RETURNING` 一条语句；MySQL、HANA 先插入拿到主键再
 
 `db.update(Post).entities(rows).execute()`：每行按主键一条 `entity(row)` 语句（带乐观锁条件、跳过 `insertOnly` 列），返回总更新行数。不自带事务，要原子请放进 `db.transaction`。批量删除用已有的 `delete(X).where(x => x.id.in(ids))`。
 
+`.batch()` 把写的列相同的行合成一条语句（对应官方的 `batch()`）：
+
+```sql
+UPDATE t_post SET title = CASE WHEN id = ? THEN ? WHEN id = ? THEN ? ELSE title END, ...
+WHERE (id = ? AND version = ?) OR (id = ? AND version = ?)
+```
+
+官方靠 JDBC 的批量接口（同一条 SQL 多组参数）；Node 的驱动没有统一的等价物，所以直接合成一条，各库都是一次往返，按方言的绑定参数上限切块。带版本列时逐行带版本条件，改到的行数不足就抛 `optimistic lock failed: n of m`。`ELSE 原列` 不会走到（条件只选中这些行），是给 PG 推断 CASE 类型用的。插入本来就是多行 `VALUES` 一条语句。
+
+## 写哪些列（对应 `SQLExecuteStrategyEnum`）
+
+TS 里"没给"（`undefined`）与"写 null"本来就分得开：没给的列一律不写。另外可以按值挑：
+
+```ts
+await db.insert(User).values(form, { columns: 'notNull' }).execute(); // null 也不写，交给库里的默认值
+await db.update(User).entity(form, { columns: 'notNull' }).execute(); // 表单里没填的保持原值
+await db.update(User).entity(row, { columns: 'null' }).execute(); // 只把 null 的列写成 NULL
+await db.update(Post).entities(rows, { columns: 'notNull' }).batch().execute();
+```
+
+主键、版本、只插入的列不受策略影响（本来就不由它写）；`$onUpdate`、拦截器在挑完之后照常补值。
+
 ## `afterWrite` 拦截器钩子
 
 ```ts

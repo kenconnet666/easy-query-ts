@@ -100,7 +100,13 @@ export {
   Returning,
   Updatable,
 } from './mutation.ts';
-export type { SetOf, SetValues } from './mutation.ts';
+export type {
+  ColumnStrategy,
+  EntityUpdateOptions,
+  InsertOptions,
+  SetOf,
+  SetValues,
+} from './mutation.ts';
 export { createDb, Db, Transaction } from './db.ts';
 export { win, WindowSpec } from './window.ts';
 export type { Bound } from './window.ts';

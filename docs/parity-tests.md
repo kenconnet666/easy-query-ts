@@ -3,7 +3,7 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1664、写法不同 277、待做 234、不适用 74。
+合计：已对应 1653、写法不同 288、待做 234、不适用 74。
 
 ## 按能力
 
@@ -49,15 +49,16 @@
 | 分库分表（`sharding`）                                           | 48     | 待做     | 待做（16.6.2、16.6.3）                                                                                                                                                                              |
 | 原生 SQL（`sql.native`）                                         | 50     | 已对应   | sql 标签、db.sql；suite.ts native SQL                                                                                                                                                               |
 | 跨库链接（asTableLink）（`table.link`）                          | 13     | 已对应   | db.withTableLink(link, only?)，表名渲染成 "t"@link；adhoc.test.ts                                                                                                                                   |
-| 换表名（asTable）（`table.rename`）                              | 53     | 写法不同 | db.mapTables；suite.ts table mapping                                                                                                                                                                |
+| 换表名（asTable）（`table.rename`）                              | 45     | 写法不同 | db.mapTables；suite.ts table mapping                                                                                                                                                                |
 | 换 schema（asSchema）（`table.schema`）                          | 19     | 写法不同 | db.inSchema；sqlite.tenant.test.ts                                                                                                                                                                  |
 | 追踪与差异更新（`tracking`）                                     | 62     | 写法不同 | update().changes(before, after)；changes.test.ts                                                                                                                                                    |
 | 树（toTreeList / asTreeCTE）（`tree`）                           | 25     | 已对应   | toTree、descendantsOf / ancestorsOf；tree.test.ts                                                                                                                                                   |
 | 乐观锁版本（`version`）                                          | 13     | 已对应   | version() / version({ initial, next })、withVersion；changes.test.ts                                                                                                                                |
 | 窗口函数与分区（`window`）                                       | 38     | 已对应   | win.* 含 firstValue / lastValue / nthValue；suite.ts function library、windows                                                                                                                      |
-| 删除（`write.delete`）                                           | 26     | 已对应   | delete()、hard()、hardDelete 护栏；suite.ts、guards.test.ts                                                                                                                                         |
-| 插入（`write.insert`）                                           | 48     | 已对应   | insert().values / fromQuery / returnId / returnEntity；suite.ts writes                                                                                                                              |
-| 更新（`write.update`）                                           | 62     | 已对应   | update().set / entity / changes / withVersion；suite.ts、changes.test.ts                                                                                                                            |
+| 删除（`write.delete`）                                           | 25     | 已对应   | delete()、hard()、hardDelete 护栏；suite.ts、guards.test.ts                                                                                                                                         |
+| 插入（`write.insert`）                                           | 44     | 已对应   | insert().values / fromQuery / returnId / returnEntity；suite.ts writes                                                                                                                              |
+| 写哪些列、批量执行（`write.strategy`）                           | 19     | 写法不同 | values / entity / entities 的 { columns: notNull \| null }；entities(..).batch() 合成 CASE WHEN 一条语句（不依赖驱动批量接口）；suite.ts                                                            |
+| 更新（`write.update`）                                           | 56     | 已对应   | update().set / entity / changes / withVersion；suite.ts、changes.test.ts                                                                                                                            |
 | upsert（`write.upsert`）                                         | 13     | 已对应   | onConflict().merge / ignore；suite.ts upsert                                                                                                                                                        |
 
 ## 逐条
@@ -2156,10 +2157,6 @@
 
 | 用例                                  | 断言的 SQL（摘要）                                                                            |
 | ------------------------------------- | --------------------------------------------------------------------------------------------- |
-| InsertTest.java#mapInsertTest1        | `INSERT INTO `aaaaa` (`id`,`name`) VALUES (?,?)`                                              |
-| InsertTest.java#mapInsertTest2        | `INSERT INTO `aaaaa` (`id`,`name`,`name1`) VALUES (?,?,?)`                                    |
-| InsertTest.java#mapInsertTest3        | `INSERT INTO `aaaaa` (`id`,`name`,`name1`,`name2`) VALUES (?,?,?,?)`                          |
-| InsertTest1.java#tesInsertMapKey2     | `INSERT INTO \`                                                                               |
 | InsertTest1.java#testColumnConfigure2 | `INSERT INTO `xxx` (`id`,`stars`) VALUES (?,ifnull(`stars`,0)+?)`                             |
 | QueryAggregateTest1.java#test1        | `SELECT SUM(t.`stars`) FROM `t_topic`t RIGHT JOIN`t_topic` t1 ON t.`id` = t1.`id` RIGHT J…`   |
 | QueryAggregateTest1.java#test2        | `SELECT SUM(t.`stars`) FROM `t_topic`t RIGHT JOIN`t_topic` t1 ON t.`id` = t1.`id` RIGHT J…`   |
@@ -2201,10 +2198,6 @@
 | QueryTest5.java#joinTest1_9           | `SELECT AVG(t2.`stars`) FROM `t_topic`t LEFT JOIN`t_topic` t1 ON t.`id` = t1.`id` LEFT JO…`   |
 | QueryTest5.java#joinTestx1            | `SELECT t.`title`,t.`content`,t.`url`,t.`star`,t.`publish_time`,t.`score`,t.`status`,t.`ord…` |
 | UpdateTest.java#mapUpdateTest1        | `UPDATE `aaa`SET`name`= ? WHERE`id` = ?`                                                      |
-| UpdateTest.java#mapUpdateTest2        | `UPDATE `aaa`SET`name`= ? WHERE`id` = ?`                                                      |
-| UpdateTest.java#mapUpdateTest3        | `UPDATE `aaa`SET`name` = ?,`name1`= ? WHERE`id` = ?`                                          |
-| UpdateTest.java#mapUpdateTest5        | `UPDATE `t_topic`SET`stars`= ? WHERE`id` = ?`                                                 |
-| UpdateTest.java#mapUpdateTest511      |                                                                                               |
 | UpdateTest.java#testColumnConfigure2  | `UPDATE `xxxxx`SET`stars` = ifnull(`stars`,0)+? WHERE `id` = ?`                               |
 | UpdateTest.java#testColumnConfigure3  | `UPDATE `xxxxx`SET`id` = ?,`stars`= ? WHERE`id` = ?`                                          |
 | UpdateTest.java#updateTest26          | `SELECT `id`,`username`,AES_DECRYPT(from_base64(`phone`),?) AS `phone`,`id_card`,`address`,…` |
@@ -2406,7 +2399,6 @@
 | DeleteTest.java#deleteTest5                        | `UPDATE `t_blog`SET`deleted`= ? WHERE`deleted`= ? AND`id` = ?`                              |
 | DeleteTest.java#deletex                            | `DELETE FROM `t_blog`WHERE`id` = ?`                                                         |
 | DeleteTest.java#deletex1                           | `UPDATE `t_blog`SET`deleted`= ? WHERE`deleted`= ? AND`id` = ?`                              |
-| DeleteTest.java#testBatchDelete                    | `DELETE FROM `t_topic`WHERE`id` = ?`                                                        |
 | mysql8/MySQL8Test2.java#testDelete                 | `SELECT t.`id`,t.`uid`,t.`code`,t.`type`,t.`bank_id`,t.`open_time`FROM`t_bank_card` t INN…` |
 | pgsql/DeleteUpdateJoinTest.java#testDeleteJoin1    | `DELETE FROM \`                                                                             |
 | pgsql/DeleteUpdateJoinTest.java#testDeleteJoin2    | `DELETE FROM \`                                                                             |
@@ -2436,16 +2428,13 @@
 | GeneralFunctionsTest.java#MySQLInsertIgnore2UpdateKey3 | `INSERT INTO `t_topic_auto` (`stars`,`title`) VALUES (?,?)`                                   |
 | InsertTest.java#incrementTest1                         | `INSERT INTO `custom_increment` (`id`,`name`,`address`) VALUES (mysqlNextId(),?,?)`           |
 | InsertTest.java#incrementTest2                         | `INSERT INTO `custom_increment` (`id`,`name`,`address`) VALUES (mysqlNextId(),?,?)`           |
-| InsertTest.java#insertBatch                            |                                                                                               |
 | InsertTest.java#insertCustom                           | `INSERT INTO `xxxxx` (`stars`) VALUES (?)`                                                    |
 | InsertTest.java#insertCustom1                          | `INSERT INTO `xxxxx` (`id`,`stars`) VALUES (sde.next_rowid('sde',?),?)`                       |
 | InsertTest.java#insertSQLConvert1                      | `INSERT INTO `xxxxx` (`id`,`username`,`phone`,`id_card`,`address`,`create_time`) VALUES (?,…` |
 | InsertTest.java#insertSQLConvert2                      |                                                                                               |
 | InsertTest.java#insertSQLConvert3                      |                                                                                               |
 | InsertTest.java#insertTest2                            |                                                                                               |
-| InsertTest.java#testIncrement                          |                                                                                               |
 | InsertTest1.java#inertTest1                            | `INSERT INTO `t_topic_abc` (`id`,`stars`,`title`,`create_time`) VALUES (?,?,?,?)`             |
-| mysql8/MySQL8Test3.java#batchTest                      |                                                                                               |
 | mysql8/MySQL8Test5.java#testLikeStartsWith             | `SELECT `column1`,`column2`,`column3`FROM`no_key_table`WHERE`column2` LIKE CONCAT(?,'%'…`     |
 | MyTest1.java#testDraft11                               | `SELECT timestampdiff(DAY, t.`create_time`, t.`update_time`) AS `value1`,timestampdiff(HOUR…` |
 | MyTest1.java#testDraft6                                | `SELECT date_add(date_add(t.`create_time`, interval (?) month), interval (?) day) AS `value…` |
@@ -2472,9 +2461,32 @@
 | QueryTest4.java#testJson1                              |                                                                                               |
 | QueryTest4.java#testJson2                              |                                                                                               |
 | QueryTest4.java#testJson2Jackson                       |                                                                                               |
-| UpdateTest.java#testColumnConfigure1                   | `INSERT INTO `xxxxx` (`id`,`stars`,`title`,`create_time`) VALUES (?,ifnull(`stars`,0)+?,?,?…` |
 | UpperPropertyTest.java#test1                           |                                                                                               |
 | UpperPropertyTest.java#test2                           |                                                                                               |
+
+### 写哪些列、批量执行（`write.strategy`，写法不同）
+
+| 用例                                 | 断言的 SQL（摘要）                                                                            |
+| ------------------------------------ | --------------------------------------------------------------------------------------------- |
+| DeleteTest.java#testBatchDelete      | `DELETE FROM `t_topic`WHERE`id` = ?`                                                          |
+| InsertTest.java#insertBatch          |                                                                                               |
+| InsertTest.java#mapInsertTest1       | `INSERT INTO `aaaaa` (`id`,`name`) VALUES (?,?)`                                              |
+| InsertTest.java#mapInsertTest2       | `INSERT INTO `aaaaa` (`id`,`name`,`name1`) VALUES (?,?,?)`                                    |
+| InsertTest.java#mapInsertTest3       | `INSERT INTO `aaaaa` (`id`,`name`,`name1`,`name2`) VALUES (?,?,?,?)`                          |
+| InsertTest.java#testIncrement        |                                                                                               |
+| InsertTest1.java#tesInsertMapKey2    | `INSERT INTO \`                                                                               |
+| mysql8/MySQL8Test3.java#batchTest    |                                                                                               |
+| UpdateTest.java#mapUpdateTest2       | `UPDATE `aaa`SET`name`= ? WHERE`id` = ?`                                                      |
+| UpdateTest.java#mapUpdateTest3       | `UPDATE `aaa`SET`name` = ?,`name1`= ? WHERE`id` = ?`                                          |
+| UpdateTest.java#mapUpdateTest4       |                                                                                               |
+| UpdateTest.java#mapUpdateTest5       | `UPDATE `t_topic`SET`stars`= ? WHERE`id` = ?`                                                 |
+| UpdateTest.java#mapUpdateTest511     |                                                                                               |
+| UpdateTest.java#testColumnConfigure1 | `INSERT INTO `xxxxx` (`id`,`stars`,`title`,`create_time`) VALUES (?,ifnull(`stars`,0)+?,?,?…` |
+| UpdateTest.java#updateTest8          | `UPDATE `t_topic`SET`title`= ? WHERE`id` = ?`                                                 |
+| UpdateTest.java#updateTest9          | `UPDATE `t_topic`SET`stars` = ?,`create_time`= ? WHERE`id` = ?`                               |
+| UpdateTest.java#updateTestBatch      |                                                                                               |
+| UpdateTest.java#updateTestBatch1     |                                                                                               |
+| UpdateTest.java#updateTestBatch2     |                                                                                               |
 
 ### 更新（`write.update`，已对应）
 
@@ -2503,7 +2515,6 @@
 | TestUpdateFlatAndPredicate.java#testExpressionKey8 |                                                                                             |
 | UpdateDeleteJoinTest.java#testUpdateJoin1          | `UPDATE `doc_bank_card`t INNER JOIN`doc_user` t1 ON t1.`id` = t.`uid` SET t.`type` = t1.`…` |
 | UpdateDeleteJoinTest.java#testUpdateJoin2          | `UPDATE `doc_bank_card`t INNER JOIN`doc_bank` t1 ON t1.`id` = t.`bank_id`INNER JOIN`doc…`   |
-| UpdateTest.java#mapUpdateTest4                     |                                                                                             |
 | UpdateTest.java#testUpdateIdNull1                  | `UPDATE `t_topic`SET`title` = CONCAT(SUBSTR(`title`,2,10),LOWER(`id`)) WHERE `id` = ?`      |
 | UpdateTest.java#updateEntityWhere                  | `UPDATE `t_blog`SET`create_time` = ?,`update_time` = ?,`create_by` = ?,`update_by` = ?,`t…` |
 | UpdateTest.java#updateSet1                         | `UPDATE `t_topic`SET`stars` = ?,`stars` = CAST(`title` AS SIGNED),`title` = ?,`title` = D…` |
@@ -2530,11 +2541,6 @@
 | UpdateTest.java#updateTest29_1                     | `UPDATE `t_topic`SET`stars` = ?,`create_time`= ? WHERE`id` = ?`                             |
 | UpdateTest.java#updateTest3                        |                                                                                             |
 | UpdateTest.java#updateTest4                        |                                                                                             |
-| UpdateTest.java#updateTest8                        | `UPDATE `t_topic`SET`title`= ? WHERE`id` = ?`                                               |
-| UpdateTest.java#updateTest9                        | `UPDATE `t_topic`SET`stars` = ?,`create_time`= ? WHERE`id` = ?`                             |
-| UpdateTest.java#updateTestBatch                    |                                                                                             |
-| UpdateTest.java#updateTestBatch1                   |                                                                                             |
-| UpdateTest.java#updateTestBatch2                   |                                                                                             |
 | UpdateTest1.java#updateNoSet                       |                                                                                             |
 | UpdateTest1.java#updateTestUpdate                  |                                                                                             |
 | UpdateTest1.java#updateTestUpdate1                 | `UPDATE `t_topic`SET`stars` = ?,`title` = ?,`create_time`= ? WHERE`id` = ?`                 |

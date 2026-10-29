@@ -1451,6 +1451,53 @@ export function liveSuite(
       );
     });
 
+    it('merges a batch of entity updates into one statement per written column set', async () => {
+      const { db, statements } = await seeded();
+      const users = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .toList();
+      statements.length = 0;
+      const affected = await db
+        .update(User)
+        .entities(
+          users.map((u) => ({ ...u, name: u.name.toUpperCase(), age: u.id === 3 ? null : 50 })),
+          { columns: 'notNull' },
+        )
+        .batch()
+        .execute();
+      // carol 的 age、companyId 是 null，不写：她单独一组
+      assert.equal(affected, 3);
+      assert.equal(statements.length, 2);
+      const after = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({ name: u.name, age: u.age, companyId: u.companyId }))
+        .toList();
+      assert.deepEqual(after, [
+        { name: 'ALICE', age: 50, companyId: 1 },
+        { name: 'BOB', age: 50, companyId: 1 },
+        { name: 'CAROL', age: 17, companyId: null },
+      ]);
+    });
+
+    it('writes only the columns the strategy picks', async () => {
+      const { db } = await seeded();
+      const insert = db
+        .insert(User)
+        .values({ ...dave, age: null, companyId: null }, { columns: 'notNull' })
+        .toSQL();
+      assert.doesNotMatch(insert[0]!.sql, /age|company_id|companyId/);
+      const alice = await db.queryable(User).findOrThrow(1);
+      // 'null'：只写值为 null 的列，name 不动
+      await db
+        .update(User)
+        .entity({ ...alice, name: 'ignored', age: null }, { columns: 'null' })
+        .execute();
+      const row = await db.queryable(User).findOrThrow(1);
+      assert.deepEqual([row.name, row.age], ['alice', null]);
+    });
+
     it('notifies afterWrite interceptors after every write', async () => {
       const env = await seeded();
       const events: string[] = [];
@@ -2203,6 +2250,39 @@ export function liveSuite(
         .where((d) => d.id.eq(1))
         .execute();
       assert.equal((await db.queryable(Doc).single()).version, 2);
+    });
+
+    it('merges versioned updates and still encodes encrypted columns', async () => {
+      const { db } = await seeded();
+      await db
+        .insert(Doc)
+        .values([doc('a'), doc('b')])
+        .execute();
+      const docs = await db
+        .queryable(Doc)
+        .orderBy((d) => d.id)
+        .toList();
+      await db
+        .update(Doc)
+        .entities(docs.map((d) => ({ ...d, title: `${d.title}!`, secret: `new ${d.title}` })))
+        .batch()
+        .execute();
+      const after = await db
+        .queryable(Doc)
+        .orderBy((d) => d.id)
+        .toList();
+      assert.deepEqual(
+        after.map((d) => [d.title, d.secret, d.version]),
+        [
+          ['a!', 'new a', 1],
+          ['b!', 'new b', 1],
+        ],
+      );
+      // 还拿着版本 0：两行都没改到
+      await assert.rejects(
+        () => db.update(Doc).entities(docs).batch().execute(),
+        /optimistic lock failed: 2 of 2/,
+      );
     });
 
     it('never updates insert-only columns', async () => {

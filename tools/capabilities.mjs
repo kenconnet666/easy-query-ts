@@ -49,6 +49,7 @@ export const rules = [
   [/sqlNativeSegment|sqlSegment|sqlQuery|executeSQL|sqlQueryMap|toResultSet/, 'sql.native'],
   [/forUpdate|forShare|NoWait|SkipLocked/, 'lock'],
   [/onConflictThen|insertOrUpdate/, 'write.upsert'],
+  [/setSQLStrategy|\.batch\(\)/, 'write.strategy'],
   [/\.insertable\(/, 'write.insert'],
   [/\.updatable\(/, 'write.update'],
   [/\.deletable\(/, 'write.delete'],
@@ -223,6 +224,11 @@ export const capabilities = {
     title: '删除',
     status: 'done',
     ts: 'delete()、hard()、hardDelete 护栏；suite.ts、guards.test.ts',
+  },
+  'write.strategy': {
+    title: '写哪些列、批量执行',
+    status: 'different',
+    ts: 'values / entity / entities 的 { columns: notNull | null }；entities(..).batch() 合成 CASE WHEN 一条语句（不依赖驱动批量接口）；suite.ts',
   },
   'write.upsert': {
     title: 'upsert',

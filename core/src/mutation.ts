@@ -3,7 +3,7 @@
  */
 import { checkAliases, type ConflictNode, type Node, type SelectNode } from './ast.ts';
 import { SqlWriter, type Statement } from './dialect.ts';
-import { condNode, Expr, toNode, type Cond } from './expr.ts';
+import { and, condNode, Expr, or, toNode, type Cond } from './expr.ts';
 import { newQueryable, type Built, type Query } from './query.ts';
 import { REF, refColumn, Scope, type Ref } from './ref.ts';
 import type { AnySchema, EntityKey } from './relations.ts';
@@ -60,10 +60,23 @@ export class Insertable<S extends AnySchema, K extends EntityKey<S>> {
     return new InsertSelect(this.ctx, this.ctx.schema.entities[this.key]!, query.buildTree());
   }
 
-  /** 一行或多行；多行时列不同的行分成几条语句 */
-  values(rows: Insert<EntityOf<S, K>> | readonly Insert<EntityOf<S, K>>[]): InsertValues<S, K> {
+  /**
+   * 一行或多行；多行时列不同的行分成几条语句。没给（undefined）的列不写；值为 null 的列默认写 NULL，
+   * `{ columns: 'notNull' }` 时也不写（交给库里的默认值，对应 Java 版插入的 ONLY_NOT_NULL_COLUMNS）
+   */
+  values(
+    rows: Insert<EntityOf<S, K>> | readonly Insert<EntityOf<S, K>>[],
+    options: InsertOptions = {},
+  ): InsertValues<S, K> {
+    const entity = this.ctx.schema.entities[this.key]!;
     const list = (Array.isArray(rows) ? rows : [rows]) as readonly Record<string, unknown>[];
-    return new InsertValues(this.ctx, this.key, list, undefined);
+    const picked =
+      options.columns === 'notNull'
+        ? list.map((row) =>
+            pickColumns(flattenRow(entity, row), Object.keys(entity.columns), 'notNull'),
+          )
+        : list;
+    return new InsertValues(this.ctx, this.key, picked, undefined);
   }
 }
 
@@ -153,23 +166,178 @@ function columnValue(column: AnyColumn, value: unknown): Node {
   return write ? write(new Expr(node, column.codec)).node : node;
 }
 
-/** 一批按主键更新的语句，见 Updatable.entities */
-export class BatchUpdate {
-  private readonly updates: readonly { execute(): Promise<number>; toSQL(): Statement }[];
+/** 写哪些列（对应 Java 版的 SQLExecuteStrategyEnum）：全部、只写非 null 的、只写 null 的；没给（undefined）的列一律不写 */
+export type ColumnStrategy = 'all' | 'notNull' | 'null';
 
-  constructor(updates: readonly { execute(): Promise<number>; toSQL(): Statement }[]) {
-    this.updates = updates;
+/** insert(..).values 的选项 */
+export interface InsertOptions {
+  /** 'notNull'：值为 null 的列也不写，交给库里的默认值 */
+  readonly columns?: 'all' | 'notNull';
+}
+
+/** update(..).entity / entities 的选项 */
+export interface EntityUpdateOptions {
+  /** 写哪些列，默认 'all'（主键、版本、只插入的列本来就不写） */
+  readonly columns?: ColumnStrategy;
+}
+
+/** 按策略挑出这一行要写的列 */
+function pickColumns(
+  row: Readonly<Record<string, unknown>>,
+  props: readonly string[],
+  strategy: ColumnStrategy = 'all',
+): Record<string, unknown> {
+  return Object.fromEntries(
+    props
+      .filter(
+        (p) =>
+          row[p] !== undefined &&
+          (strategy === 'all' || (row[p] === null) === (strategy === 'null')),
+      )
+      .map((p) => [p, row[p]]),
+  );
+}
+
+/**
+ * 一批按主键更新的实体，见 Updatable.entities。默认每行一条语句；`batch()` 时把写的列相同的行合成一条
+ * `UPDATE … SET c = CASE WHEN 主键 = ? THEN ? … END WHERE 主键 = ? OR …`（对应 Java 版的 batch，但不依赖驱动的批量接口，各库都是一次往返）。
+ * 带版本列时条件逐行带上版本，改到的行数不足就抛乐观锁错误
+ */
+export class BatchUpdate {
+  private readonly ctx: Context;
+  private readonly key: string;
+  private readonly state: WriteState;
+  private readonly rows: readonly Readonly<Record<string, unknown>>[];
+  private readonly options: EntityUpdateOptions;
+  private readonly merged: boolean;
+
+  constructor(
+    ctx: Context,
+    key: string,
+    state: WriteState,
+    rows: readonly Readonly<Record<string, unknown>>[],
+    options: EntityUpdateOptions,
+    merged = false,
+  ) {
+    this.ctx = ctx;
+    this.key = key;
+    this.state = state;
+    this.rows = rows;
+    this.options = options;
+    this.merged = merged;
+  }
+
+  /** 写的列相同的行合成一条语句（按方言的绑定参数上限切块） */
+  batch(): BatchUpdate {
+    return new BatchUpdate(this.ctx, this.key, this.state, this.rows, this.options, true);
   }
 
   toSQL(): Statement[] {
-    return this.updates.map((u) => u.toSQL());
+    return this.updates().map((u) => u.toSQL());
   }
 
   async execute(): Promise<number> {
     let affected = 0;
-    for (const update of this.updates) affected += await update.execute();
+    for (const update of this.updates()) affected += await update.execute();
     return affected;
   }
+
+  private updates(): Updatable<any, any>[] {
+    if (!this.merged)
+      return this.rows.map((row) =>
+        new Updatable(this.ctx, this.key, this.state).entity(row as never, this.options),
+      );
+    const entity = this.ctx.schema.entities[this.key]!;
+    const version = versionColumn(entity);
+    const props = Object.keys(entity.columns).filter((p) => updatableColumn(entity, p));
+    // 写的列相同的行分一组：组里每一行都有这些列的值，CASE 能逐行给出
+    const groups = new Map<string, { written: string[]; rows: Record<string, unknown>[] }>();
+    for (const row of this.rows) {
+      const flat = flattenRow(entity, row);
+      requireKey(entity, flat, 'update(..).entities(..).batch()');
+      const written = Object.keys(pickColumns(flat, props, this.options.columns));
+      if (version !== undefined) written.push(version);
+      if (written.length === 0) throw new Error(`update of ${entity.table} sets no columns`);
+      const id = written.join(',');
+      let group = groups.get(id);
+      if (!group) groups.set(id, (group = { written, rows: [] }));
+      group.rows.push(flat);
+    }
+    const pk = entity.primaryKey;
+    // 每行占的参数：每列一个 WHEN（主键几列 + 值），WHERE 里主键几列（+ 版本）
+    const perRow = (columns: number) =>
+      columns * (pk.length + 1) + pk.length + (version === undefined ? 0 : 1);
+    return [...groups.values()].flatMap(({ written, rows }) => {
+      const size = Math.max(1, Math.floor(this.ctx.dialect.maxBindParams / perRow(written.length)));
+      const updates: Updatable<any, any>[] = [];
+      for (let from = 0; from < rows.length; from += size)
+        updates.push(this.merge(entity, written, rows.slice(from, from + size)));
+      return updates;
+    });
+  }
+
+  /** 一组行合成一条 UPDATE */
+  private merge(
+    entity: Entity,
+    written: readonly string[],
+    rows: readonly Record<string, unknown>[],
+  ): Updatable<any, any> {
+    const version = versionColumn(entity);
+    const matches = (r: any, row: Record<string, unknown>) =>
+      entity.primaryKey.map((k) => (refColumn(r, k) as Expr<unknown>).eq(row[k] as never));
+    const values = (r: any) =>
+      Object.fromEntries(
+        written.map((p) => {
+          const column = entity.columns[p]!;
+          const value = (row: Record<string, unknown>) =>
+            p === version ? nextVersion(column, row[p]) : row[p];
+          // ELSE 原列：条件只会选中这些行，走不到它；PG 靠它推出 CASE 的类型（分支全是参数时会当成 text）
+          const node: Node = {
+            k: 'case',
+            when: rows.map((row) => [
+              condNode(and(...matches(r, row)))!,
+              toNode(value(row), column.codec),
+            ]),
+            else: { k: 'col', alias: r[REF].alias, name: entity.columnNames[p]! },
+          };
+          return [p, new Expr(node, column.codec)];
+        }),
+      );
+    const where = (r: any) =>
+      or(
+        ...rows.map((row) =>
+          and(
+            ...matches(r, row),
+            version !== undefined &&
+              (refColumn(r, version) as Expr<unknown>).eq(row[version] as never),
+          ),
+        ),
+      );
+    const update = new Updatable(this.ctx, this.key, {
+      ...this.state,
+      where: [...this.state.where, where],
+    }).set(values as never);
+    if (version === undefined) return update;
+    return update.expectRows(
+      rows.length,
+      (affected) =>
+        new Error(
+          `optimistic lock failed: ${rows.length - affected} of ${rows.length} ${entity.table} rows were changed or deleted by someone else`,
+        ),
+    );
+  }
+}
+
+/** 按主键（与版本）定位一行时，主键与版本都要有值 */
+function requireKey(entity: Entity, row: Readonly<Record<string, unknown>>, what: string): void {
+  if (entity.primaryKey.length === 0)
+    throw new Error(`${what} needs a primary key on ${entity.table}`);
+  for (const key of entity.primaryKey)
+    if (row[key] === undefined || row[key] === null)
+      throw new Error(`${what} needs the primary key '${key}' of ${entity.table}`);
+  const version = versionColumn(entity);
+  if (version !== undefined && (row[version] === undefined || row[version] === null))
+    throw new Error(`${what} needs the version '${version}' of ${entity.table}`);
 }
 
 /**
@@ -623,19 +791,18 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
 
   /**
    * 按主键更新整行：set 除主键外的所有列（值为 undefined 的列跳过），where 主键相等；有版本列时带上版本条件。
+   * `columns: 'notNull'` 只写非 null 的列（表单里没填的保持原值），`'null'` 只写 null 的列（对应 Java 版的 SQLExecuteStrategyEnum）
    * ```ts
    * const user = await db.queryable(User).where(u => u.id.eq(1)).single()
    * await db.update(User).entity({ ...user, name: 'b' }).execute()
+   * await db.update(User).entity(form, { columns: 'notNull' }).execute()
    * ```
    */
-  entity(row: Row<EntityOf<S, K>>): Updatable<S, K> {
+  entity(row: Row<EntityOf<S, K>>, options: EntityUpdateOptions = {}): Updatable<S, K> {
     const entity = this.ctx.schema.entities[this.key]!;
     const values = flattenRow(entity, row as Record<string, unknown>);
-    const set = Object.fromEntries(
-      Object.keys(entity.columns)
-        .filter((p) => values[p] !== undefined && updatableColumn(entity, p))
-        .map((p) => [p, values[p]]),
-    );
+    const props = Object.keys(entity.columns).filter((p) => updatableColumn(entity, p));
+    const set = pickColumns(values, props, options.columns);
     return this.byKey(entity, values, set, 'update(..).entity(..)');
   }
 
@@ -700,14 +867,8 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     set: Record<string, unknown>,
     what: string,
   ): Updatable<S, K> {
-    if (entity.primaryKey.length === 0)
-      throw new Error(`${what} needs a primary key on ${entity.table}`);
-    for (const key of entity.primaryKey)
-      if (row[key] === undefined || row[key] === null)
-        throw new Error(`${what} needs the primary key '${key}' of ${entity.table}`);
+    requireKey(entity, row, what);
     const version = versionColumn(entity);
-    if (version !== undefined && (row[version] === undefined || row[version] === null))
-      throw new Error(`${what} needs the version '${version}' of ${entity.table}`);
     const where = (r: any) =>
       entity.primaryKey.map((k) => (refColumn(r, k) as Expr<unknown>).eq(row[k] as never));
     return new Updatable(
@@ -746,14 +907,14 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   }
 
   /**
-   * 按主键逐行更新一批实体（每行一条 `entity(row)` 语句，带乐观锁条件），返回总共更新的行数。
-   * 不自带事务：要么全成要么全败请放进 `db.transaction`。
+   * 按主键更新一批实体（每行同 `entity(row, options)`，带乐观锁条件），返回总共更新的行数；
+   * 默认每行一条语句，`.batch()` 合成一条（见 BatchUpdate）。不自带事务：要么全成要么全败请放进 `db.transaction`
+   * ```ts
+   * await db.update(Post).entities(rows).batch().execute()
+   * ```
    */
-  entities(rows: readonly Row<EntityOf<S, K>>[]): BatchUpdate {
-    const statements = rows.map((row) =>
-      new Updatable<S, K>(this.ctx, this.key as K, this.state, this.values).entity(row),
-    );
-    return new BatchUpdate(statements);
+  entities(rows: readonly Row<EntityOf<S, K>>[], options: EntityUpdateOptions = {}): BatchUpdate {
+    return new BatchUpdate(this.ctx, this.key, this.state, rows as never, options);
   }
 
   /** 这条语句不用这些拦截器（名字见 InterceptorNames） */
