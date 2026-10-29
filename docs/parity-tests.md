@@ -3,7 +3,7 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1550、写法不同 328、待做 297、不适用 74。
+合计：已对应 1563、写法不同 339、待做 273、不适用 74。
 
 ## 按能力
 
@@ -39,7 +39,7 @@
 | CTE（`query.cte`）                                               | 11     | 已对应   | db.with / withRecursive；suite.ts                                                                                                                                  |
 | 分组与 having（`query.group`）                                   | 78     | 已对应   | groupBy / having / rollup / cube；suite.ts                                                                                                                         |
 | 显式 join（含 merge 写法）（`query.join`）                       | 88     | 已对应   | innerJoin / leftJoin / rightJoin / crossJoin，lambda 按顺序收到各表；suite.ts explicit joins                                                                       |
-| 无实体的 Map 查询、toMap（`query.map`）                          | 11     | 待做     | 待做：按表名查询、结果是普通对象（16.2.5）                                                                                                                         |
+| 无实体的 Map 查询、toMap（`query.map`）                          | 11     | 写法不同 | 不在 schema 里的实体直接查：db.queryable(entity('t_x', {...}))（带类型）；无实体、按列名取的 Map 结果用 db.sql；行本来就是普通对象（toMap）；adhoc.test.ts         |
 | 分页结果（`query.page`）                                         | 22     | 已对应   | toPage、table()；suite.ts、table.test.ts                                                                                                                           |
 | 复用查询（cloneQueryable）（`query.reuse`）                      | 2      | 写法不同 | 查询对象不可变，直接复用                                                                                                                                           |
 | 流式读取（`query.stream`）                                       | 9      | 已对应   | stream()；suite.ts streaming                                                                                                                                       |
@@ -48,7 +48,7 @@
 | search 扩展（`search`）                                          | 45     | 待做     | 待对照（16.6.5）                                                                                                                                                   |
 | 分库分表（`sharding`）                                           | 48     | 待做     | 待做（16.6.2、16.6.3）                                                                                                                                             |
 | 原生 SQL（`sql.native`）                                         | 50     | 已对应   | sql 标签、db.sql；suite.ts native SQL                                                                                                                              |
-| 跨库链接（asTableLink）（`table.link`）                          | 13     | 待做     | 待做（16.2.5）                                                                                                                                                     |
+| 跨库链接（asTableLink）（`table.link`）                          | 13     | 已对应   | db.withTableLink(link, only?)，表名渲染成 "t"@link；adhoc.test.ts                                                                                                  |
 | 换表名（asTable）（`table.rename`）                              | 53     | 写法不同 | db.mapTables；suite.ts table mapping                                                                                                                               |
 | 换 schema（asSchema）（`table.schema`）                          | 19     | 写法不同 | db.inSchema；sqlite.tenant.test.ts                                                                                                                                 |
 | 追踪与差异更新（`tracking`）                                     | 62     | 写法不同 | update().changes(before, after)；changes.test.ts                                                                                                                   |
@@ -1845,7 +1845,7 @@
 | QueryTest9.java#selectThrow9                      | `SELECT t.`id`,t.`stars`,t.`title`,t.`create_time`FROM`t_topic`t INNER JOIN`t_blog` t1 …`     |
 | UpdateTest.java#aaaa                              |                                                                                               |
 
-### 无实体的 Map 查询、toMap（`query.map`，待做）
+### 无实体的 Map 查询、toMap（`query.map`，写法不同）
 
 | 用例                               | 断言的 SQL（摘要）                                                                        |
 | ---------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -2134,7 +2134,7 @@
 | QueryTest8.java#test4x                     |                                                                                               |
 | QueryTestRelationTest.java#relation10      | `SELECT (SELECT COUNT(t1.`id`) AS `id`FROM`school_student` t1 WHERE t1.`class_id` = t.`id…`   |
 
-### 跨库链接（asTableLink）（`table.link`，待做）
+### 跨库链接（asTableLink）（`table.link`，已对应）
 
 | 用例                                 | 断言的 SQL（摘要）                                                                            |
 | ------------------------------------ | --------------------------------------------------------------------------------------------- |

@@ -64,6 +64,8 @@ export interface TableRef {
   readonly alias: string;
   /** 派生表：FROM (子查询) alias；有它时 table 不用 */
   readonly sub?: SelectNode;
+  /** 跟在别名后面的片段（受信任的 SQL）：SQL Server 的 WITH (NOLOCK)、ClickHouse 的 FINAL、MySQL 的 USE INDEX (…) */
+  readonly hint?: string | undefined;
 }
 
 export interface Join extends TableRef {

@@ -332,8 +332,14 @@ db.queryable(User).where((u) => [
 ]);
 // @ts-expect-error sum 只接受数值列
 void db.queryable(User).sum((u) => u.name);
-// @ts-expect-error 实体不在 schema 里
-db.queryable(Unrelated);
+// 不在 schema 里的实体也能查（动态表、外部表）：类型照样由列推出，只是没有导航
+async function adhoc() {
+  const rows = await db.queryable(Unrelated).toList();
+  expect<Equal<typeof rows, { id: number }[]>>();
+  // @ts-expect-error 临时的实体没有导航
+  db.queryable(Unrelated).select((x) => x.company);
+}
+void adhoc;
 db.update(User).set({
   // @ts-expect-error set 的值类型不对
   age: 'x',

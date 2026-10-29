@@ -75,6 +75,8 @@ interface JoinSpec {
   readonly toggles: readonly InterceptorToggle[];
   /** 没写 select 时这张表的整行放在哪个键下；省略为实体名（join 子查询时是 'derived'） */
   readonly label?: string;
+  /** 跟在别名后面的片段（tableHint） */
+  readonly hint?: string;
 }
 
 interface State {
@@ -94,6 +96,8 @@ interface State {
   readonly forUpdate: boolean;
   readonly lockWait: 'nowait' | 'skip' | undefined;
   readonly groupMode: 'rollup' | 'cube' | undefined;
+  /** 主表别名后面的片段（tableHint） */
+  readonly hint?: string;
 }
 
 /**
@@ -639,6 +643,17 @@ export class Queryable<
   }
 
   /**
+   * 给最近加入的表（主表，或上一个 join 的表）后面追加一段 SQL（对应 Java 版的 asTableSegment）：
+   * `.tableHint('WITH (NOLOCK)')`（SQL Server）、`.tableHint('FINAL')`（ClickHouse）、`.tableHint('USE INDEX (idx_time)')`（MySQL）。
+   * 片段原样写进 SQL，只能用受信任的文字
+   */
+  tableHint(hint: string): Queryable<S, K, Out, Refs> {
+    const joins = this.state.joins;
+    if (joins.length === 0) return this.with({ hint });
+    return this.with({ joins: [...joins.slice(0, -1), { ...joins.at(-1)!, hint }] });
+  }
+
+  /**
    * 内连接另一张表（INNER JOIN）。on 收到此前所有表引用加上新表引用；之后的 where / orderBy / select 也按这个顺序收到它们。
    * 没写 select 时结果是每张表的整行，按实体名分组：`{ User: Row, Post: Row }`。必须在 select 之前调用。
    * ```ts
@@ -1093,7 +1108,7 @@ function build(ctx: Context, state: State, bare = false): Built {
 
   const entity = ctx.schema.entities[state.key]!;
   const select: SelectNode = {
-    from: scope.tableRef(entity, root[REF].alias),
+    from: { ...scope.tableRef(entity, root[REF].alias), hint: state.hint },
     joins: scope.joins,
     where,
     groupBy,
@@ -1135,7 +1150,12 @@ function joinTables(
     const ref = makeRef(scope, spec.key, alias, spec.kind === 'left' || i < lastRight);
     refs.push(ref);
     if (!spec.on) {
-      scope.joins.push({ ...scope.tableRef(target, alias), kind: spec.kind, on: undefined });
+      scope.joins.push({
+        ...scope.tableRef(target, alias),
+        hint: spec.hint,
+        kind: spec.kind,
+        on: undefined,
+      });
       pending = [...pending, ...scope.filters(ref, spec.toggles)];
       return;
     }
@@ -1155,6 +1175,7 @@ function joinTables(
     }
     scope.joins[index] = {
       ...scope.tableRef(target, alias),
+      hint: spec.hint,
       kind: spec.kind,
       on: extra.length === 0 ? on : { k: 'and', items: [on, ...extra] },
     };

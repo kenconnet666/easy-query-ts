@@ -39,6 +39,12 @@ import {
   runHooks,
 } from './session.ts';
 
+/** 不在 schema 里的实体单独成一个 schema（没有导航） */
+export type AdhocSchema<E extends Entity> = Schema<
+  { [N in E['name']]: E },
+  { [N in E['name']]: {} }
+>;
+
 /** 实体对象在 schema 里的键 */
 export type KeyOf<S extends AnySchema, E> = {
   [K in EntityKey<S>]: S['entities'][K] extends E ? K : never;
@@ -113,20 +119,50 @@ export class Db<S extends AnySchema> {
     this.sql = createSqlTag(ctx);
   }
 
-  queryable<E extends SchemaEntity<S>>(entity: E): Queryable<S, KeyOf<S, E>> {
-    return newQueryable(this.ctx, this.key(entity));
+  /**
+   * 从一个实体开始查询。不在 schema 里的实体也行（动态表、外部表、按月分的表，对应 Java 版的 mapQueryable 与动态表名）：
+   * `db.queryable(entity('t_log_202610', { id: col.int(), msg: col.string() }))`，类型照样由列推出，只是没有导航
+   */
+  queryable<E extends SchemaEntity<S>>(entity: E): Queryable<S, KeyOf<S, E>>;
+  queryable<E extends Entity>(entity: E): Queryable<AdhocSchema<E>, E['name']>;
+  queryable(entity: Entity): Queryable<any, string> {
+    const { ctx, key } = this.target(entity);
+    return newQueryable(ctx, key);
   }
 
-  insert<E extends SchemaEntity<S>>(entity: E): Insertable<S, KeyOf<S, E>> {
-    return new Insertable(this.ctx, this.key(entity));
+  insert<E extends SchemaEntity<S>>(entity: E): Insertable<S, KeyOf<S, E>>;
+  insert<E extends Entity>(entity: E): Insertable<AdhocSchema<E>, E['name']>;
+  insert(entity: Entity): Insertable<any, string> {
+    const { ctx, key } = this.target(entity);
+    return new Insertable(ctx, key);
   }
 
-  update<E extends SchemaEntity<S>>(entity: E): Updatable<S, KeyOf<S, E>> {
-    return new Updatable(this.ctx, this.key(entity));
+  update<E extends SchemaEntity<S>>(entity: E): Updatable<S, KeyOf<S, E>>;
+  update<E extends Entity>(entity: E): Updatable<AdhocSchema<E>, E['name']>;
+  update(entity: Entity): Updatable<any, string> {
+    const { ctx, key } = this.target(entity);
+    return new Updatable(ctx, key);
   }
 
-  delete<E extends SchemaEntity<S>>(entity: E): Deletable<S, KeyOf<S, E>> {
-    return new Deletable(this.ctx, this.key(entity));
+  delete<E extends SchemaEntity<S>>(entity: E): Deletable<S, KeyOf<S, E>>;
+  delete<E extends Entity>(entity: E): Deletable<AdhocSchema<E>, E['name']>;
+  delete(entity: Entity): Deletable<any, string> {
+    const { ctx, key } = this.target(entity);
+    return new Deletable(ctx, key);
+  }
+
+  /** 实体在 schema 里就用它；不在就临时登记进这条语句的 schema（名字被占用时加序号） */
+  private target(entity: Entity): { ctx: Context; key: string } {
+    const known = this.keys.get(entity);
+    if (known !== undefined) return { ctx: this.ctx, key: known };
+    const entities = this.ctx.schema.entities;
+    let key = entity.name;
+    for (let n = 2; key in entities; n++) key = `${entity.name}#${n}`;
+    const schema: AnySchema = {
+      entities: { ...entities, [key]: entity },
+      relations: { ...this.ctx.schema.relations, [key]: {} },
+    };
+    return { ctx: { ...this.ctx, schema }, key };
   }
 
   /** schema 里某个实体的对象（join、queryable 都要传实体对象）；CTE 登记之后用它取：`tdb.queryable(tdb.entity('recent'))` */
@@ -423,6 +459,21 @@ export class Db<S extends AnySchema> {
     return this.mapTables(
       Object.fromEntries(
         keys.map((key) => [key, `${schema}.${entities[key]!.table.split('.').at(-1)}`]),
+      ) as { [K in EntityKey<S>]?: string },
+    );
+  }
+
+  /**
+   * 跨库链接（对应 Java 版的 asTableLink，如 Oracle 的 db link）：这个 Db 上的表名后面加上 `@link`；only 只换这几个实体
+   */
+  withTableLink(link: string, only?: readonly EntityKey<S>[]): Db<S> {
+    if (!/^[A-Za-z_][\w$#.]*$/.test(link))
+      throw new Error(`withTableLink: '${link}' is not a valid link name`);
+    const entities = this.ctx.schema.entities;
+    const keys = only ?? Object.keys(entities).filter((key) => !entities[key]!.derived);
+    return this.mapTables(
+      Object.fromEntries(
+        keys.map((key) => [key, `${entities[key]!.table.split('@')[0]}@${link}`]),
       ) as { [K in EntityKey<S>]?: string },
     );
   }

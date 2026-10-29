@@ -103,8 +103,8 @@ export const capabilities = {
   'query.stream': { title: '流式读取', status: 'done', ts: 'stream()；suite.ts streaming' },
   'query.map': {
     title: '无实体的 Map 查询、toMap',
-    status: 'todo',
-    ts: '待做：按表名查询、结果是普通对象（16.2.5）',
+    status: 'different',
+    ts: "不在 schema 里的实体直接查：db.queryable(entity('t_x', {...}))（带类型）；无实体、按列名取的 Map 结果用 db.sql；行本来就是普通对象（toMap）；adhoc.test.ts",
   },
   'query.reuse': {
     title: '复用查询（cloneQueryable）',
@@ -121,7 +121,11 @@ export const capabilities = {
     status: 'different',
     ts: 'db.inSchema；sqlite.tenant.test.ts',
   },
-  'table.link': { title: '跨库链接（asTableLink）', status: 'todo', ts: '待做（16.2.5）' },
+  'table.link': {
+    title: '跨库链接（asTableLink）',
+    status: 'done',
+    ts: 'db.withTableLink(link, only?)，表名渲染成 "t"@link；adhoc.test.ts',
+  },
   'nav.relation': {
     title: '导航关系与隐式 join',
     status: 'done',

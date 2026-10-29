@@ -374,10 +374,10 @@ export abstract class Dialect {
       q.columns.length === 0
         ? '1'
         : q.columns.map((c) => `${this.node(c.e, w)} AS ${this.quote(c.as)}`).join(', ');
-    let s = `SELECT ${q.distinct ? 'DISTINCT ' : ''}${cols} FROM ${q.from.sub ? `(${this.select(q.from.sub, w)})` : this.table(q.from.table)} ${q.from.alias}`;
+    let s = `SELECT ${q.distinct ? 'DISTINCT ' : ''}${cols} FROM ${q.from.sub ? `(${this.select(q.from.sub, w)})` : this.table(q.from.table)} ${q.from.alias}${q.from.hint ? ` ${q.from.hint}` : ''}`;
     for (const j of q.joins) {
       const source = j.sub ? `(${this.select(j.sub, w)})` : this.table(j.table);
-      s += ` ${JOIN_WORDS[j.kind ?? 'left']} ${source} ${j.alias}`;
+      s += ` ${JOIN_WORDS[j.kind ?? 'left']} ${source} ${j.alias}${j.hint ? ` ${j.hint}` : ''}`;
       if (j.on) s += ` ON ${this.node(j.on, w)}`;
     }
     if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
@@ -432,11 +432,14 @@ export abstract class Dialect {
   }
 
   /** 表名可以带 schema 前缀（a.b） */
+  /** 表名可以带 schema 前缀（a.b）与跨库链接（a.b@link，链接名原样） */
   table(name: string): string {
-    return name
+    const [table = '', link] = name.split('@');
+    const quoted = table
       .split('.')
       .map((p) => this.quote(p))
       .join('.');
+    return link ? `${quoted}@${link}` : quoted;
   }
 
   node(n: Node, w: SqlWriter): string {
