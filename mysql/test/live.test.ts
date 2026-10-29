@@ -9,7 +9,7 @@ import { createDb, type Statement } from '@zerodep-dev/easy-query-ts';
 import assert from 'node:assert/strict';
 import { Post, schema, seed, User, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
-import { MySQL, mysql } from '../src/index.ts';
+import { MySQL, mysql, type MySqlVersion } from '../src/index.ts';
 
 const DDL = [
   'DROP TABLE IF EXISTS t_dept, t_doc, t_note, t_member, t_user_role, t_role, t_ext, t_comment, t_post, t_user, t_company',
@@ -59,7 +59,10 @@ for (const url of urls) {
     const p = await pool();
     for (const statement of DDL) await p.query(statement);
     const statements: Statement[] = [];
-    const adapter = mysql(p);
+    // 按服务器的真实版本渲染（8.0.18 的 upsert 用 VALUES()，8.4 用行别名）
+    const [rows] = await p.query('SELECT VERSION() AS v');
+    const version = String((rows as { v: string }[])[0]!.v).replace(/-.*$/, '') as MySqlVersion;
+    const adapter = mysql(p, { version });
     return {
       db: createDb({ schema, adapter, log: (s) => statements.push(s) }),
       statements,

@@ -24,6 +24,7 @@ import {
   type FunctionRenderer,
   type Node,
   type QueryRunner,
+  type SelectNode,
   type Session,
   SqlWriter,
   type TransactionOptions,
@@ -36,6 +37,16 @@ export type { MatchMode } from './functions.ts';
 
 /** MySQL 要求 OFFSET 前必须有 LIMIT；没给 LIMIT 时用最大值 */
 const NO_LIMIT = '18446744073709551615';
+
+/** MySQL 的版本：'8.0.18'（PolarDB 基线）、'8.4'、'9.1' …；5.7 也能用，只是窗口函数、CTE 渲染时报错 */
+export type MySqlVersion = `${5 | 8 | 9}.${number}` | `${5 | 8 | 9}.${number}.${number}`;
+
+/** 专属函数的最低版本 */
+const MYSQL_MINIMUM: Record<string, string> = {
+  'mysql.json_overlaps': '8.0.17',
+  'mysql.member_of': '8.0.17',
+  'mysql.member_of_path': '8.0.17',
+};
 
 export class MySqlDialect extends Dialect {
   /** 带 join：MySQL 的多表 UPDATE，JOIN 写在 SET 前面，SET 的列带上别名 */
@@ -165,7 +176,16 @@ export class MySqlDialect extends Dialect {
 
   /** MySQL.json / MySQL.match 的函数（见 functions.ts） */
   protected override functions(): Record<string, FunctionRenderer> {
-    return { ...super.functions(), ...mysqlFunctions };
+    const gated = Object.fromEntries(
+      Object.entries(MYSQL_MINIMUM).map(([name, min]): [string, FunctionRenderer] => {
+        const render = mysqlFunctions[name]!;
+        return [
+          name,
+          (a) => (this.requires(`${name.replace(/^mysql\./, '').toUpperCase()}`, min), render(a)),
+        ];
+      }),
+    );
+    return { ...super.functions(), ...mysqlFunctions, ...gated };
   }
 
   override quote(identifier: string): string {
@@ -182,11 +202,29 @@ export class MySqlDialect extends Dialect {
    * ignore 写成对 target 的空更新，而不是 INSERT IGNORE（后者会吞掉其它错误）。
    */
   override onConflict(c: ConflictNode): string {
-    const update =
-      c.update.length === 0
-        ? c.target.map((t) => `${this.quote(t)} = ${this.quote(t)}`)
-        : c.update.map((u) => `${this.quote(u)} = VALUES(${this.quote(u)})`);
-    return ` ON DUPLICATE KEY UPDATE ${update.join(', ')}`;
+    if (c.update.length === 0)
+      return ` ON DUPLICATE KEY UPDATE ${c.target.map((t) => `${this.quote(t)} = ${this.quote(t)}`).join(', ')}`;
+    // 8.0.19 起用行别名取新值（VALUES() 在 8.0.20 起弃用）；之前（PolarDB 8.0.18）用 VALUES(col)
+    if (this.atLeast('8.0.19'))
+      return ` AS eq_new ON DUPLICATE KEY UPDATE ${c.update.map((u) => `${this.quote(u)} = eq_new.${this.quote(u)}`).join(', ')}`;
+    return ` ON DUPLICATE KEY UPDATE ${c.update.map((u) => `${this.quote(u)} = VALUES(${this.quote(u)})`).join(', ')}`;
+  }
+
+  /** 窗口函数与 CTE 要 8.0 */
+  override node(n: Node, w: SqlWriter): string {
+    if (n.k === 'over') this.requires('window functions', '8.0');
+    return super.node(n, w);
+  }
+
+  override select(q: SelectNode, w: SqlWriter = new SqlWriter()): string {
+    if (q.ctes?.length) this.requires('WITH (common table expressions)', '8.0');
+    return super.select(q, w);
+  }
+
+  /** NOWAIT / SKIP LOCKED 要 8.0.1 */
+  override forUpdate(wait?: 'nowait' | 'skip'): string {
+    if (wait) this.requires(wait === 'skip' ? 'SKIP LOCKED' : 'NOWAIT', '8.0.1');
+    return super.forUpdate(wait);
   }
 
   override limitOffset(
@@ -353,6 +391,11 @@ class MySqlDriver extends MySqlSession implements Driver {
   }
 }
 
-export function mysql(pool: Pool): Adapter {
-  return { dialect: new MySqlDialect(), driver: new MySqlDriver(pool) };
+export interface MySqlOptions {
+  /** 服务器版本：按它选写法（如 8.0.18 的 upsert 用 VALUES()），用到更高版本的特性时报错；默认最新 */
+  readonly version?: MySqlVersion;
+}
+
+export function mysql(pool: Pool, options: MySqlOptions = {}): Adapter {
+  return { dialect: new MySqlDialect({ version: options.version }), driver: new MySqlDriver(pool) };
 }

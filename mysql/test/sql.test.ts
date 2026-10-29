@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import type { Pool } from 'mysql2/promise';
-import { col, createDb, Dialect, entity, type Driver } from '@zerodep-dev/easy-query-ts';
+import { col, createDb, Dialect, entity, win, type Driver } from '@zerodep-dev/easy-query-ts';
 import { ddlSchema, Gadget, schema, User } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { MySQL, mysql } from '../src/index.ts';
 
@@ -110,5 +110,41 @@ describe('mysql: create statements with comments, indexes and foreign keys', asy
       'CREATE UNIQUE INDEX `t_book_shelf_id_title_uidx` ON `t_book` (`shelf_id`, `title`)',
       'ALTER TABLE `t_book` ADD CONSTRAINT `fk_t_book_shelf_id` FOREIGN KEY (`shelf_id`) REFERENCES `t_shelf` (`id`) ON DELETE CASCADE',
     ]);
+  });
+});
+
+describe('mysql: rendering by server version', () => {
+  const at = (version?: '8.0.18' | '8.0.16' | '5.7') =>
+    createDb({ schema, adapter: mysql({} as Pool, version ? { version } : {}) });
+  const upsert = (db: ReturnType<typeof at>) =>
+    db
+      .insert(User)
+      .values({ id: 1, name: 'a', createdAt: new Date(0), attrs: { tags: [] } })
+      .onConflict((u) => u.id)
+      .merge((u) => u.name)
+      .toSQL()[0]!.sql;
+
+  it('upsert：8.0.19 起用行别名，8.0.18（PolarDB）用 VALUES()', () => {
+    assert.match(upsert(at()), / AS eq_new ON DUPLICATE KEY UPDATE `name` = eq_new\.`name`$/);
+    assert.match(upsert(at('8.0.18')), / ON DUPLICATE KEY UPDATE `name` = VALUES\(`name`\)$/);
+  });
+
+  it('用到更高版本的特性时报出最低版本', () => {
+    assert.throws(
+      () =>
+        at('8.0.16')
+          .queryable(User)
+          .where((u) => MySQL.json(u.attrs).overlaps('["vip"]'))
+          .toSQL(),
+      /JSON_OVERLAPS needs mysql 8\.0\.17 or later \(the dialect is configured for 8\.0\.16\)/,
+    );
+    assert.throws(
+      () =>
+        at('5.7')
+          .queryable(User)
+          .select((u) => ({ n: win.rowNumber((w) => w.orderBy(u.id)) }))
+          .toSQL(),
+      /window functions needs mysql 8\.0 or later/,
+    );
   });
 });

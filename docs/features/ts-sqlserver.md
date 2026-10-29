@@ -11,6 +11,9 @@ const legacy = createDb({ schema, adapter: mssql(pool, { version: 2008 }) });
 `STRING_AGG needs sqlserver 2017 or later (the dialect is configured for 2016)`，而不是把一条库里才报错的 SQL 发出去。
 `version` 的取值在类型上限定（SQL Server 是 `2008 | 2012 | … | 2025`）。不给时按最新。
 
+MySQL 同样支持：`mysql(pool, { version: '8.0.18' })`（PolarDB 基线）时 upsert 用 `VALUES(col)`，8.0.19 起用行别名 `AS eq_new`（`VALUES()` 在 8.0.20 起弃用）；
+`JSON_OVERLAPS` / `MEMBER OF` 要 8.0.17，窗口函数与 CTE 要 8.0，`NOWAIT` / `SKIP LOCKED` 要 8.0.1，低于时渲染就报错。
+
 | 版本 | 用到的写法                                                                    | 更早的版本                                                               |
 | ---- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | 2012 | `OFFSET … FETCH`、`CONCAT`、`FORMAT`                                          | `ROW_NUMBER()` 包一层分页、`+` 拼接；`FORMAT` 报错                       |
