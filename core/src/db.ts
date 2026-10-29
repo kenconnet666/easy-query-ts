@@ -271,7 +271,7 @@ export class Db<S extends AnySchema> {
     const children: Record<string, readonly Record<string, unknown>[]> = {};
     for (const name of cascade) {
       const rel = relations[name];
-      if (!rel || rel.kind !== 'many' || rel.through)
+      if (!rel || rel.kind !== 'many' || rel.through || rel.hops)
         throw new Error(`save: '${name}' of ${entity.name} is not a plain one-to-many navigation`);
       children[name] = (parent[name] as readonly Record<string, unknown>[] | undefined) ?? [];
       delete parent[name];

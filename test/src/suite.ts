@@ -961,6 +961,42 @@ export function liveSuite(
       return env;
     };
 
+    it('path relations: a de-duplicated bridge over several navigations', async () => {
+      const { db } = await withRoles();
+      const users = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({
+          name: u.name,
+          peers: u.peers.count(),
+          names: u.peers.orderBy((p) => p.id).toList((p) => p.name),
+        }))
+        .toList();
+      assert.deepEqual(users, [
+        { name: 'alice', peers: 2, names: ['alice', 'bob'] },
+        { name: 'bob', peers: 2, names: ['alice', 'bob'] },
+        { name: 'carol', peers: 0, names: [] },
+      ]);
+      const companies = await db
+        .queryable(Company)
+        .orderBy((c) => c.id)
+        .select((c) => ({
+          name: c.name,
+          posts: c.posts.count(),
+          big: c.posts.any((p) => p.amount.gt('1000')),
+        }))
+        .toList();
+      assert.deepEqual(companies, [
+        { name: 'acme', posts: 4, big: true },
+        { name: 'globex', posts: 0, big: false },
+      ]);
+      const post = await db
+        .queryable(Post)
+        .select((p) => ({ title: p.title, company: p.company.name }))
+        .find(1);
+      assert.deepEqual(post, { title: 'orm tips', company: 'acme' });
+    });
+
     it('filters and counts through the junction table', async () => {
       const { db } = await withRoles();
       const names = (rows: { name: string }[]) => rows.map((r) => r.name);
@@ -2006,6 +2042,36 @@ export function liveSuite(
   });
 
   describe(`${name}: subqueries, derived tables, unions and CTEs`, () => {
+    it('groupJoin: aggregates over a grouped LEFT JOIN match the correlated subqueries', async () => {
+      const { db } = await seeded();
+      const select = (grouped: boolean) =>
+        db
+          .queryable(User)
+          .orderBy((u) => u.id)
+          .select((u) => {
+            const posts = grouped ? u.posts.groupJoin() : u.posts;
+            return {
+              name: u.name,
+              posts: posts.count(),
+              orm: posts.count((p) => p.title.startsWith('orm')),
+              total: posts.sum((p) => p.amount),
+              avg: posts.avg((p) => p.amount),
+            };
+          })
+          .toList();
+      const rows = await select(true);
+      assert.deepEqual(rows, await select(false));
+      assert.deepEqual(
+        // decimal 的和各库写法不一（SQLite 是浮点），按数值比
+        rows.map((r) => [r.name, r.posts, r.orm, r.total === null ? null : Number(r.total)]),
+        [
+          ['alice', 2, 1, 2010.5],
+          ['bob', 2, 1, 4.25],
+          ['carol', 0, 0, null],
+        ],
+      );
+    });
+
     it('uses a subquery in in(...) and as a scalar', async () => {
       const { db } = await seeded();
       const q = db.queryable(User).orderBy((u) => u.id);

@@ -50,13 +50,14 @@ export type {
   Temporal,
   TemporalExtensions,
 } from './expr.ts';
-export { ListOf, ManyRef } from './ref.ts';
+export { Fill, GroupJoin, ListOf, ManyRef } from './ref.ts';
 export type { Ref, Selected } from './ref.ts';
 export { GroupedQueryable, NotFoundError, Queryable } from './query.ts';
 export type {
   DerivedSchema,
   Group,
   JoinedRows,
+  NullableRefs,
   KeyInput,
   NullableKeys,
   Page,

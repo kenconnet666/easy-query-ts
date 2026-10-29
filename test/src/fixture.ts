@@ -133,7 +133,11 @@ export const Gadget = entity('t_gadget', {
 export const schema = defineSchema(
   { Company, User, Post, Comment, Ext, Role, UserRole, Member, Note, Doc, Dept },
   {
-    Company: (r) => ({ users: r.many('User', { from: 'id', to: 'companyId' }) }),
+    Company: (r) => ({
+      users: r.many('User', { from: 'id', to: 'companyId' }),
+      // 直达关系：公司经员工到帖子
+      posts: r.path('Post', ['users', 'posts']),
+    }),
     User: (r) => ({
       company: r.one('Company', { from: 'companyId', to: 'id' }),
       posts: r.many('Post', { from: 'id', to: 'userId' }),
@@ -142,6 +146,8 @@ export const schema = defineSchema(
         throughFrom: 'userId',
         throughTo: 'roleId',
       }),
+      // 有共同角色的人（含自己）
+      peers: r.path('User', ['roles', 'users']),
     }),
     Role: (r) => ({
       users: r.manyToMany('User', {
@@ -159,6 +165,7 @@ export const schema = defineSchema(
     Post: (r) => ({
       user: r.one('User', { from: 'userId', to: 'id' }),
       comments: r.many('Comment', { from: 'id', to: 'postId' }),
+      company: r.pathOne('Company', ['user', 'company']),
     }),
     Comment: (r) => ({ post: r.one('Post', { from: 'postId', to: 'id' }) }),
   },

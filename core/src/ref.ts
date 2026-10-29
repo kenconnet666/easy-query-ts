@@ -16,7 +16,7 @@ import {
   type OrderItem,
   type Pred,
 } from './expr.ts';
-import type { AnySchema, EntityKey, Many, One, Relation } from './relations.ts';
+import type { AnySchema, EntityKey, Many, One, Relation, RelationFilter } from './relations.ts';
 import type { AnyColumn, Entity, Row, ValueOf } from './schema.ts';
 
 export const REF: unique symbol = Symbol('eqts.ref');
@@ -139,7 +139,9 @@ export function makeRef(scope: Scope, key: string, alias: string, nullable: bool
       get: () =>
         (cached ??=
           rel.kind === 'one'
-            ? joinOne(scope, ref as AnyRef, prop, rel, nullable)
+            ? rel.path
+              ? walkPath(ref as AnyRef, rel.path)
+              : joinOne(scope, ref as AnyRef, prop, rel, nullable)
             : new ManyRef(scope, ref as AnyRef, rel, rel.where ? [rel.where] : [])),
     });
   }
@@ -151,6 +153,11 @@ function columnExpr(node: Node, column: AnyColumn): Expr<unknown> {
   const raw = new Expr<unknown>(node, column.codec);
   const read = column.options.sqlRead;
   return read ? new Expr(read(raw).node, column.codec) : raw;
+}
+
+/** 多对一的直达关系：等同于一段段访问导航（与直接写 `u.company.city` 共用同样的 JOIN） */
+function walkPath(ref: AnyRef, path: readonly string[]): AnyRef {
+  return path.reduce((current, name) => (current as unknown as Record<string, AnyRef>)[name]!, ref);
 }
 
 function joinOne(
@@ -206,6 +213,7 @@ export function linkColumns(scope: Scope, relation: Many, targetRoot: AnyRef): N
     entity: { columnNames: Record<string, string> },
     prop: string,
   ): Node => ({ k: 'col', alias, name: entity.columnNames[prop]! });
+  if (relation.hops) return bridgeColumns(scope, relation, targetRoot);
   const through = relation.through;
   if (!through) return relation.to.map((c) => col(info.alias, target, c));
   const middle = scope.schema.entities[through.entity]!;
@@ -229,6 +237,107 @@ export function linkColumns(scope: Scope, relation: Many, targetRoot: AnyRef): N
   return through.from.map((c) => col(alias, middle, c));
 }
 
+/**
+ * 直达关系（r.path）的"孩子一侧"：把各段导航拼成一张去重的桥（父键 → 目标键），inner join 到目标表上，返回桥上的父键列。
+ * 桥是 DISTINCT 的：同一个目标经几条路径到达也只出现一次，count、sum、toList 不会重复。
+ * 各段的目标表与中间表都带上拦截器条件，中间各段的固定条件也在桥里；最后一段的固定条件由 ManyRef 加在目标上
+ */
+function bridgeColumns(scope: Scope, relation: Many, targetRoot: AnyRef): Node[] {
+  const hops = relation.hops!;
+  const first = hops[0]!;
+  const last = hops.at(-1)!;
+  const inner = scope.child();
+  const where: Node[] = [];
+  const columnsOf = (ref: AnyRef, props: readonly string[]) =>
+    props.map((p) => columnNode(inner, ref[REF], p));
+  /** inner join 一张表：props 列等于 keys（按位置），并带上拦截器条件与固定条件 */
+  const joinOn = (
+    key: string,
+    props: readonly string[],
+    keys: readonly Node[],
+    fixed?: RelationFilter,
+  ): AnyRef => {
+    const alias = inner.nextAlias();
+    const ref = makeRef(inner, key, alias, false);
+    const extra = inner.filters(ref);
+    const condition = fixed ? condNode(fixed(ref as never)) : undefined;
+    if (condition) extra.push(condition);
+    const on = columnsOf(ref, props).map((l, i): Node => ({ k: 'op', op: '=', l, r: keys[i]! }));
+    inner.joins.push({
+      ...inner.tableRef(inner.schema.entities[key]!, alias),
+      kind: 'inner',
+      on: allOf([...on, ...extra]),
+    });
+    return ref;
+  };
+  /** 从 ref 沿一段导航走到下一张表（多对多时经中间表） */
+  const step = (ref: AnyRef, hop: Relation): AnyRef => {
+    let keys = columnsOf(ref, hop.from);
+    if (hop.kind === 'many' && hop.through) {
+      const middle = joinOn(hop.through.entity, hop.through.from, keys);
+      keys = columnsOf(middle, hop.through.to);
+    }
+    return joinOn(hop.target, hop.to, keys, hop.where);
+  };
+
+  // 桥从第一段的目标表开始（多对多时从中间表开始），父键是第一段"孩子一侧"的列
+  let start: AnyRef;
+  let current: AnyRef;
+  let parentKeys: Node[];
+  if (first.kind === 'many' && first.through) {
+    start = inner.root(first.through.entity);
+    where.push(...inner.filters(start));
+    parentKeys = columnsOf(start, first.through.from);
+    current = joinOn(first.target, first.to, columnsOf(start, first.through.to), first.where);
+  } else {
+    start = current = inner.root(first.target);
+    where.push(...inner.filters(start));
+    const fixed = first.where ? condNode(first.where(start as never)) : undefined;
+    if (fixed) where.push(fixed);
+    parentKeys = columnsOf(start, first.to);
+  }
+  for (const hop of hops.slice(1, -1)) current = step(current, hop);
+  // 最后一段只走到目标键为止，目标表本身在外层
+  let targetKeys = columnsOf(current, last.from);
+  if (last.kind === 'many' && last.through) {
+    const middle = joinOn(last.through.entity, last.through.from, targetKeys);
+    targetKeys = columnsOf(middle, last.through.to);
+  }
+  const bridge: SelectNode = {
+    from: inner.tableRef(inner.schema.entities[start[REF].key]!, start[REF].alias),
+    joins: inner.joins,
+    where,
+    groupBy: [],
+    having: [],
+    orderBy: [],
+    columns: [
+      ...parentKeys.map((e, i) => ({ e, as: `p${i}` })),
+      ...targetKeys.map((e, i) => ({ e, as: `q${i}` })),
+    ],
+    distinct: true,
+    limit: undefined,
+    offset: undefined,
+    forUpdate: false,
+  };
+  const alias = scope.nextAlias();
+  const target = scope.schema.entities[relation.target]!;
+  scope.joins.push({
+    table: '',
+    alias,
+    sub: bridge,
+    kind: 'inner',
+    on: allOf(
+      last.to.map((c, i): Node => ({
+        k: 'op',
+        op: '=',
+        l: { k: 'col', alias, name: `q${i}` },
+        r: { k: 'col', alias: targetRoot[REF].alias, name: target.columnNames[c]! },
+      })),
+    ),
+  });
+  return parentKeys.map((_, i): Node => ({ k: 'col', alias, name: `p${i}` }));
+}
+
 export function columnNode(scope: Scope, info: RefInfo, prop: string): Node {
   return { k: 'col', alias: info.alias, name: scope.schema.entities[info.key]!.columnNames[prop]! };
 }
@@ -250,6 +359,8 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
 
   /** toList / first 时每个父行最多取几条（limit） */
   readonly take: number | undefined;
+  /** groupJoin() 的结果：同一个导航上的几个聚合共用一个分组 join */
+  private grouped: GroupJoin<S, K> | undefined;
 
   constructor(
     scope: Scope,
@@ -346,6 +457,19 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
     return new ListOf(this.limit(1), shape, true);
   }
 
+  /**
+   * 聚合改成分组 join（对应 Java 版的 subQueryToGroupJoin）：count / sum / avg / max / min 不再是每行一个关联子查询，
+   * 而是把子表按关联列分组一次、再 LEFT JOIN 回来；列表页每行显示子项数、合计时行多了快得多。
+   * 同一个导航（含 where）上的几个聚合共用一个分组 join；没有子项时 count 为 0，其余为 null（与子查询的写法一致）。
+   * any / none 仍用 EXISTS。分组 join 是独立的语句：where 里不能引用外层的表
+   * ```ts
+   * select((u) => ({ name: u.name, posts: u.posts.groupJoin().count(), total: u.posts.groupJoin().sum((p) => p.amount) }))
+   * ```
+   */
+  groupJoin(): GroupJoin<S, K> {
+    return (this.grouped ??= new GroupJoin(this));
+  }
+
   private aggregate(
     fn: 'sum' | 'avg' | 'max' | 'min',
     value: (r: any) => Expr<unknown>,
@@ -407,6 +531,106 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
       if (n) where.push(n);
     }
     return { where, orderBy: this.orders.flatMap((o) => orderNodes(o(root))) };
+  }
+}
+
+/** 一对多导航的分组 join（ManyRef.groupJoin）：第一次用到聚合时把分组的派生表 LEFT JOIN 到父行所在的语句上 */
+export class GroupJoin<S extends AnySchema, K extends EntityKey<S>> {
+  private readonly many: ManyRef<S, K>;
+  private joined:
+    | { readonly alias: string; readonly root: AnyRef; readonly columns: { e: Node; as: string }[] }
+    | undefined;
+
+  constructor(many: ManyRef<S, K>) {
+    this.many = many;
+  }
+
+  /** 子项个数（带条件时只数满足的）；没有子项时为 0 */
+  count(filter?: (r: Ref<S, K>) => Cond): Expr<number> {
+    const n = filter ? condNode(filter(this.join().root as Ref<S, K>)) : undefined;
+    const arg: Node | undefined = n && {
+      k: 'case',
+      when: [[n, { k: 'lit', sql: '1' }]],
+      else: undefined,
+    };
+    const column = this.column({ k: 'agg', fn: 'count', arg, distinct: false });
+    return new Expr(
+      { k: 'fn', name: 'coalesce', args: [column, { k: 'lit', sql: '0' }] },
+      codecs.int,
+    );
+  }
+
+  sum<V extends Numeric | null>(value: (r: Ref<S, K>) => Expr<V>): Expr<NonNullable<V> | null> {
+    return this.aggregate('sum', value);
+  }
+  avg<V extends Numeric | null>(value: (r: Ref<S, K>) => Expr<V>): Expr<NonNullable<V> | null> {
+    return this.aggregate('avg', value);
+  }
+  max<V>(value: (r: Ref<S, K>) => Expr<V>): Expr<NonNullable<V> | null> {
+    return this.aggregate('max', value);
+  }
+  min<V>(value: (r: Ref<S, K>) => Expr<V>): Expr<NonNullable<V> | null> {
+    return this.aggregate('min', value);
+  }
+
+  private aggregate(
+    fn: 'sum' | 'avg' | 'max' | 'min',
+    value: (r: any) => Expr<unknown>,
+  ): Expr<any> {
+    const e = value(this.join().root);
+    return new Expr(this.column(aggregate(fn, e, undefined).node), aggregateCodec(fn, e));
+  }
+
+  /** 分组的派生表里加一列，返回外层引用它的列 */
+  private column(e: Node): Node {
+    const { alias, columns } = this.join();
+    const as = `a${columns.length}`;
+    columns.push({ e, as });
+    return { k: 'col', alias, name: as };
+  }
+
+  /** SELECT 关联列, 聚合… FROM 子表 WHERE 拦截器条件、导航的条件 GROUP BY 关联列，LEFT JOIN 到父行上 */
+  private join() {
+    if (this.joined) return this.joined;
+    const { scope, relation, parent } = this.many;
+    if (!scope.allowJoins)
+      throw new Error(
+        'groupJoin() needs a JOIN, which update/delete do not support; use count() instead',
+      );
+    const inner = scope.child();
+    const root = inner.root(relation.target);
+    const link = linkColumns(inner, relation, root);
+    const where = [...inner.filters(root), ...this.many.rebuild(root).where];
+    // 关联列占前几列（g0…），聚合在后面按用到的顺序追加（a…）
+    const columns = link.map((e, i) => ({ e, as: `g${i}` }));
+    const alias = scope.nextAlias();
+    scope.joins.push({
+      table: '',
+      alias,
+      sub: {
+        from: inner.tableRef(inner.schema.entities[relation.target]!, root[REF].alias),
+        joins: inner.joins,
+        where,
+        groupBy: link,
+        having: [],
+        orderBy: [],
+        columns,
+        distinct: false,
+        limit: undefined,
+        offset: undefined,
+        forUpdate: false,
+      },
+      kind: 'left',
+      on: allOf(
+        relation.from.map((c, i): Node => ({
+          k: 'op',
+          op: '=',
+          l: { k: 'col', alias, name: `g${i}` },
+          r: columnNode(scope, parent[REF], c),
+        })),
+      ),
+    });
+    return (this.joined = { alias, root, columns });
   }
 }
 

@@ -30,6 +30,8 @@ export interface One<T extends string = string, N extends boolean = boolean> {
   readonly nullable: N;
   /** 固定的条件：写进 JOIN 的 ON，不满足时导航为空 */
   readonly where?: RelationFilter;
+  /** 直达关系（pathOne）：沿着这几段导航走到目标 */
+  readonly path?: readonly string[];
 }
 
 /** 多对多经过的中间表：from 列引用本表，to 列引用目标表（都是中间表上的列） */
@@ -52,6 +54,10 @@ export interface Many<T extends string = string> {
   readonly through?: Through;
   /** 固定的条件：any / count / toList 等每次用到这个导航都带上 */
   readonly where?: RelationFilter;
+  /** 直达关系（path）：沿着这几段导航走到目标 */
+  readonly path?: readonly string[];
+  /** 直达关系的各段（定义 schema 时按 path 找到） */
+  readonly hops?: readonly Relation[];
 }
 
 export type Relation = One | Many;
@@ -98,6 +104,20 @@ export interface RelationBuilder<E extends Record<string, Entity>, S extends key
     },
     options?: { where?: RelationFilter<E[T]> },
   ): Many<T>;
+  /**
+   * 跨导航的直达关系（对应 Java 版的 directMapping）：沿着已经定义的导航走到 target。
+   * 例如用户经角色到菜单 `menus: r.path('Menu', ['roles', 'menus'])`，之后 `u.menus.any(…)`、`count()`、`toList()` 与普通一对多一样用；
+   * 同一个目标经几条路径到达也只算一次。各段导航上的固定条件、拦截器照常生效；导航名与终点在定义 schema 时核对
+   */
+  path<T extends keyof E & string>(
+    target: T,
+    navigations: readonly [string, string, ...string[]],
+  ): Many<T>;
+  /** 每一段都是多对一 / 一对一的直达关系：`city: r.pathOne('City', ['company', 'city'])`，等同于写 `u.company.city`，目标可空 */
+  pathOne<T extends keyof E & string>(
+    target: T,
+    navigations: readonly [string, string, ...string[]],
+  ): One<T, true>;
 }
 
 /** 实体与关系的整体；查询从这里取导航 */
@@ -127,18 +147,65 @@ export function defineSchema<
   entities: E,
   relations?: { [S in keyof R]: (r: RelationBuilder<E, S & keyof E>) => R[S] },
 ): Schema<E, ResolvedRelations<E, R>> {
-  const resolved: Record<string, Record<string, Relation>> = {};
+  const defined: Record<string, Record<string, Relation>> = {};
   for (const key of Object.keys(entities)) {
     const define = (
       relations as
         | Record<string, ((r: RelationBuilder<E, string>) => Record<string, Relation>) | undefined>
         | undefined
     )?.[key];
-    const defined = define ? define(builderFor(entities, key)) : {};
-    for (const [name, rel] of Object.entries(defined)) check(entities, key, name, rel);
-    resolved[key] = defined;
+    defined[key] = define ? define(builderFor(entities, key)) : {};
+  }
+  // 直达关系要引用别的实体的导航：全部定义完再按名字找
+  const resolved: Record<string, Record<string, Relation>> = {};
+  for (const [key, own] of Object.entries(defined)) {
+    const relationsOfKey: Record<string, Relation> = {};
+    for (const [name, rel] of Object.entries(own)) {
+      const relation = rel.path ? resolvePath(defined, key, name, rel) : rel;
+      check(entities, key, name, relation);
+      relationsOfKey[name] = relation;
+    }
+    resolved[key] = relationsOfKey;
   }
   return { entities, relations: resolved as ResolvedRelations<E, R> };
+}
+
+/** 直达关系：按导航名一段段走到终点，核对终点与种类，补上 from / to 与各段 */
+function resolvePath(
+  relations: Record<string, Record<string, Relation>>,
+  key: string,
+  name: string,
+  rel: Relation,
+): Relation {
+  const where = `relation ${key}.${name}`;
+  const hops: Relation[] = [];
+  let current = key;
+  for (const hop of rel.path!) {
+    const next = relations[current]?.[hop];
+    if (!next) throw new Error(`${where}: ${current} has no navigation '${hop}'`);
+    if (next.path)
+      throw new Error(`${where}: '${hop}' is itself a path; list its navigations instead`);
+    hops.push(next);
+    current = next.target;
+  }
+  if (current !== rel.target)
+    throw new Error(`${where}: the path ends at ${current}, not ${rel.target}`);
+  const toMany = hops.some((hop) => hop.kind === 'many');
+  if (rel.kind === 'one' && toMany)
+    throw new Error(`${where}: the path passes a one-to-many navigation; use r.path`);
+  if (rel.kind === 'many' && !toMany)
+    throw new Error(`${where}: every step is many-to-one; use r.pathOne`);
+  const first = hops[0]!;
+  const last = hops.at(-1)!;
+  if (rel.kind === 'one') return { ...rel, from: first.from, to: last.to };
+  // 最后一段的固定条件作用在目标上，交给一对多导航的通用逻辑；中间各段的在桥里
+  return {
+    ...rel,
+    from: first.from,
+    to: last.to,
+    hops,
+    ...(last.where ? { where: last.where } : {}),
+  };
 }
 
 /** 定义时就把写错的列名、个数对不上的复合外键报出来，而不是等到第一次查询 */
@@ -148,6 +215,8 @@ function check(entities: Record<string, Entity>, key: string, name: string, rel:
   const target = entities[rel.target];
   if (!target) throw new Error(`${where}: unknown entity '${rel.target}'`);
   if (name in source.columns) throw new Error(`${where} has the same name as a column`);
+  // 直达关系的各段在定义它们的地方已经核对过
+  if (rel.path) return;
   const columns = (entity: Entity, entityKey: string, names: readonly string[], what: string) => {
     if (names.length === 0) throw new Error(`${where}: ${what} must name at least one column`);
     for (const c of names)
@@ -207,6 +276,13 @@ function builderFor<E extends Record<string, Entity>>(
         through: { entity: on.through, from: list(on.throughFrom), to: list(on.throughTo) },
         ...where(options),
       };
+    },
+    // from / to 在定义 schema 时按各段补上
+    path(target, navigations) {
+      return { kind: 'many', target, from: [], to: [], path: navigations };
+    },
+    pathOne(target, navigations) {
+      return { kind: 'one', target, from: [], to: [], nullable: true, path: navigations };
     },
   };
 }
