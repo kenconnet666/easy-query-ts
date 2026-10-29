@@ -326,6 +326,10 @@ export const capabilities = {
     status: 'done',
     ts: 'easy-query-ts-duckdb：共用套件在内存库上全绿；序列自增、事务排队、BLOB / DECIMAL 读写；ts-duckdb.md',
   },
-  'dialect.clickhouse': { title: 'ClickHouse 方言', status: 'different', ts: 'easy-query-ts-clickhouse：查询、函数、mutation（ALTER TABLE UPDATE / DELETE，mutations_sync）、MergeTree 建表与读库结构；没有自增、事务，主键由应用给值；ts-clickhouse.md' },
+  'dialect.clickhouse': {
+    title: 'ClickHouse 方言',
+    status: 'different',
+    ts: 'easy-query-ts-clickhouse：查询、函数、mutation（ALTER TABLE UPDATE / DELETE，mutations_sync）、MergeTree 建表与读库结构；没有自增、事务，主键由应用给值；ts-clickhouse.md',
+  },
   'dialect.h2': { title: 'H2 方言', status: 'na', ts: '不适用：H2 运行在 JVM 里，Node 没有驱动' },
 };
