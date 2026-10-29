@@ -65,7 +65,7 @@ User: (r) => ({
 - `r.path` 把各段拼成一张去重（DISTINCT）的桥：`父键 → 目标键`，inner join 到目标表上。同一个菜单经两个角色到达也只算一次，`count`、`sum`、`toList` 都不重复。
 - 各段的拦截器条件、中间各段的固定条件在桥里；最后一段的固定条件作用在目标上。
 - `r.pathOne` 不建桥，就是一段段访问导航，与直接写 `u.company.city` 共用同样的 JOIN。
-- 导航名、终点、种类（经过一对多就必须用 `path`）在 `defineSchema` 时核对；直达关系不能再引用直达关系；`save` 不能 cascade 它。
+- 导航名、终点、种类（经过一对多就必须用 `path`）在 `defineSchema` 时核对；直达关系不能再引用直达关系；不能写进 `save` 的 `include`。
 
 ## 分组 join（对应 subQueryToGroupJoin）
 

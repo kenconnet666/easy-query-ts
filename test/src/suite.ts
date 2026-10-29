@@ -1180,7 +1180,7 @@ export function liveSuite(
             { title: 'p2', amount: '2.00' },
           ],
         },
-        { cascade: ['posts'] },
+        { include: { posts: true } },
       );
       assert.equal(saved.name, 'dave');
       // 自增主键取回之后，子行的关联列自动设成它
@@ -1195,12 +1195,14 @@ export function liveSuite(
       );
     });
 
-    it('updates only the given columns of an existing parent and prunes missing children', async () => {
+    it('updates only the given columns of an existing parent and deletes removed children', async () => {
       const { db } = await seeded();
+      // 帖子 2 的评论跟着删（include 下一层）
+      await db.insert(Comment).values({ postId: 2, body: 'bye' }).execute();
       const saved = await db.save(
         User,
         { id: 1, name: 'alice2', posts: [{ id: 1, title: 'changed' }] },
-        { cascade: ['posts'], prune: true },
+        { include: { posts: { removed: 'delete', include: { comments: true } } } },
       );
       // age 没给，保持 30；alice 的第 2 篇帖子不在列表里被删除；bob 的帖子不受影响
       assert.deepEqual([saved.name, saved.age], ['alice2', 30]);
@@ -1216,10 +1218,124 @@ export function liveSuite(
           [4, 'hello'],
         ],
       );
-      await assert.rejects(
-        () => db.save(User, { id: 1 }, { cascade: ['company' as never] }),
-        /not a plain one-to-many/,
+      assert.equal(
+        await db
+          .queryable(Comment)
+          .where((c) => c.postId.eq(2))
+          .count(),
+        0,
       );
+      // 帖子 1 的评论不在输入里（comments 没出现）：不动
+      assert.equal(
+        await db
+          .queryable(Comment)
+          .where((c) => c.postId.eq(1))
+          .count(),
+        2,
+      );
+    });
+
+    it('refuses to guess what to do with removed children and unknown navigations', async () => {
+      const { db } = await seeded();
+      // userId 不可空：没写 removed 又确实有要移除的帖子，报错而不是默认删除
+      await assert.rejects(
+        () => db.save(User, { id: 1, posts: [{ id: 1 }] }, { include: { posts: true } }),
+        /cannot be null; set removed/,
+      );
+      await assert.rejects(
+        () => db.save(User, { id: 1, posts: [] } as never),
+        /list it in include/,
+      );
+      await assert.rejects(
+        () => db.save(User, { id: 1, bigPosts: [] } as never, { include: { bigPosts: true } }),
+        /path \/ on relation/,
+      );
+      // 什么都没改
+      assert.equal(await db.queryable(Post).count(), 4);
+    });
+
+    it('matches children by a business key and keeps the rest', async () => {
+      const { db } = await seeded();
+      await db.save(
+        User,
+        {
+          id: 1,
+          posts: [
+            { title: 'orm tips', amount: '99.00' },
+            { title: 'fresh', amount: '1.00' },
+          ],
+        },
+        { include: { posts: { key: 'title', removed: 'keep' } } },
+      );
+      const posts = await db
+        .queryable(Post)
+        .where((p) => p.userId.eq(1))
+        .orderBy((p) => p.id)
+        .select((p) => ({ id: p.id, title: p.title, amount: p.amount }))
+        .toList();
+      assert.deepEqual(
+        posts.map((p) => [p.id, p.title, Number(p.amount)]),
+        [
+          [1, 'orm tips', 99],
+          [2, 'sql 100%', 2000],
+          [5, 'fresh', 1],
+        ],
+      );
+    });
+
+    it('saves a many-to-one target first and nested children after the parent', async () => {
+      const { db } = await seeded();
+      const saved = await db.save(
+        User,
+        {
+          ...dave,
+          company: { name: 'initech' },
+          posts: [{ title: 'p1', amount: '1.00', comments: [{ body: 'c1' }, { body: 'c2' }] }],
+        },
+        { include: { company: true, posts: { include: { comments: true } } } },
+      );
+      const row = await db
+        .queryable(User)
+        .where((u) => u.id.eq(saved.id))
+        .select((u) => ({
+          company: u.company.name,
+          comments: u.posts.count((p) => p.comments.any()),
+        }))
+        .single();
+      assert.deepEqual(row, { company: 'initech', comments: 1 });
+      assert.equal(
+        await db
+          .queryable(Comment)
+          .where((c) => c.post.userId.eq(saved.id))
+          .count(),
+        2,
+      );
+      // 多对一给 null：外键置空，公司本身不动
+      await db.save(User, { id: saved.id, company: null }, { include: { company: true } });
+      assert.equal((await db.queryable(User).findOrThrow(saved.id)).companyId, null);
+      assert.equal(
+        await db
+          .queryable(Company)
+          .where((c) => c.name.eq('initech'))
+          .count(),
+        1,
+      );
+    });
+
+    it('unlinks removed children whose foreign key is nullable', async () => {
+      const { db } = await seeded();
+      // bob 不在 acme 的员工列表里了：companyId 置空，人还在
+      await db.save(Company, { id: 1, users: [{ id: 1 }] }, { include: { users: true } });
+      const users = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({ name: u.name, companyId: u.companyId }))
+        .toList();
+      assert.deepEqual(users, [
+        { name: 'alice', companyId: 1 },
+        { name: 'bob', companyId: null },
+        { name: 'carol', companyId: null },
+      ]);
     });
 
     it('rolls the whole save back when a child fails', async () => {
@@ -1229,7 +1345,7 @@ export function liveSuite(
         db.save(
           User,
           { ...dave, posts: [{ title: 'ok', amount: '1.00' }, { amount: '1.00' }] },
-          { cascade: ['posts'] },
+          { include: { posts: true } },
         ),
       );
       assert.equal(
@@ -1240,6 +1356,50 @@ export function liveSuite(
         0,
       );
     });
+
+    it('removes a row with the children it owns', async () => {
+      const { db } = await seeded();
+      assert.equal(await db.remove(Post, 1, { include: { comments: true } }), true);
+      assert.equal(await db.remove(Post, 1), false);
+      assert.equal(await db.queryable(Comment).count(), 0);
+      assert.equal(await db.queryable(Post).count(), 3);
+    });
+
+    it(
+      'links many-to-many targets by key and saves the new ones',
+      { skip: !options.extraTables },
+      async () => {
+        const { db } = await seeded();
+        const admin = Number(await db.insert(Role).values({ name: 'admin' }).returnId());
+        const dev = Number(await db.insert(Role).values({ name: 'dev' }).returnId());
+        const roleNames = async () =>
+          db
+            .queryable(Role)
+            .where((r) => r.users.any((u) => u.id.eq(1)))
+            .orderBy((r) => r.name)
+            .select((r) => r.name)
+            .toList();
+        await db.save(
+          User,
+          { id: 1, roles: [{ id: admin }, { name: 'ops' }] },
+          { include: { roles: true } },
+        );
+        assert.deepEqual(await roleNames(), ['admin', 'ops']);
+        // 默认只删中间表的行，角色本身还在
+        await db.save(User, { id: 1, roles: [{ id: dev }] }, { include: { roles: true } });
+        assert.deepEqual(await roleNames(), ['dev']);
+        assert.equal(await db.queryable(Role).count(), 3);
+        assert.equal(await db.queryable(UserRole).count(), 1);
+        // 删用户时沿 include 把中间表的行一起删掉
+        await db
+          .delete(Post)
+          .where((p) => p.userId.eq(1))
+          .execute();
+        await db.delete(Comment).all().execute();
+        assert.equal(await db.remove(User, 1, { include: { roles: true } }), true);
+        assert.equal(await db.queryable(UserRole).count(), 0);
+      },
+    );
 
     it('returns the whole inserted row', async () => {
       const { db } = await seeded();

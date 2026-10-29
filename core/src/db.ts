@@ -23,11 +23,12 @@ import {
   type Query,
   type Queryable,
 } from './query.ts';
-import type { AnySchema, EntityKey, Many, Schema } from './relations.ts';
+import type { AnySchema, EntityKey, Schema } from './relations.ts';
 import type { Expr } from './expr.ts';
 import type { Ref } from './ref.ts';
-import type { DerivedEntity, Entity, Row, UpdateOf } from './schema.ts';
+import type { DerivedEntity, Entity, Row } from './schema.ts';
 import { createSqlTag, type SqlTag } from './native.ts';
+import { AggregateSaver, type SaveInclude, type SaveValue } from './save.ts';
 import {
   execute,
   type Adapter,
@@ -59,21 +60,6 @@ export interface TreeWalk<S extends AnySchema, K extends EntityKey<S>> {
   /** 结果里含不含起点这个节点，默认含 */
   self?: boolean;
 }
-
-/** 实体 K 上能 cascade 保存的一对多导航的名字 */
-export type ManyKeys<S extends AnySchema, K extends EntityKey<S>> = {
-  [R in keyof S['relations'][K]]: S['relations'][K][R] extends Many ? R : never;
-}[keyof S['relations'][K]] &
-  string;
-
-/** save 的入参：父行的列（都可选，没给的保持原值或用库里默认值；值对象可以只给其中几项）+ cascade 导航对应的子行数组 */
-export type SaveInput<S extends AnySchema, K extends EntityKey<S>, C extends string> = UpdateOf<
-  S['entities'][K]['fields']
-> & {
-  [R in C]?: S['relations'][K][R] extends Many<infer T>
-    ? readonly UpdateOf<S['entities'][T & EntityKey<S>]['fields']>[]
-    : never;
-};
 
 /** 加上一个 CTE 实体之后的 schema：原有实体 + 名字为 N、列取自查询输出 Out 的派生实体 */
 export type WithCte<S extends AnySchema, N extends string, Out> = Schema<
@@ -289,127 +275,66 @@ export class Db<S extends AnySchema> {
   }
 
   /**
-   * 保存一个实体（存在则更新，不存在则插入），可以带上一对多的子行一起保存，整个过程在一个事务里。
+   * 聚合保存（对应 Java 版的 savable）：保存一个实体以及 include 里列出的导航，整个过程在一个事务里，返回保存后重新读出的行。
    * ```ts
-   * const saved = await db.save(User, { id: 1, name: 'alice2', posts: [{ id: 5, title: 'changed' }, { title: 'new' }] },
-   *   { cascade: ['posts'], prune: true })       // prune：库里属于它、但不在这份列表里的子行删掉
+   * await db.save(User, { id: 1, name: 'alice2', posts: [{ id: 5, title: 'changed' }, { title: 'new' }] }, {
+   *   include: { posts: { removed: 'delete' } },   // 不在列表里的帖子删掉
+   * })
    * ```
-   * - 带完整主键：行已存在就只更新你给出的列（没给的保持原值，`$onUpdate` 照常生效），不存在就插入；主键没给（自增）就插入并取回新主键。
-   * - cascade 里列出的一对多导航：子行的关联列自动设成父行的值，同样按主键存在与否 upsert / 插入。只支持一层、直连的一对多（不含多对多）。
-   * - 必填列的检查交给数据库：插入新行时少了必填列会报错。返回保存后的父行。
+   * - 带完整主键：行已存在就只更新给出的列（没给的保持原值，`$onUpdate` 照常生效），不存在就插入；主键没给（自增）就插入并取回新主键
+   * - 导航按 include 保存：一对多 / 一对一按差异增改、移除；多对一先存目标再设外键；多对多只增删中间表的行。细则见 save.ts
+   * - 必填列的检查交给数据库：插入新行时少了必填列会报错
    */
-  async save<E extends SchemaEntity<S>, C extends ManyKeys<S, KeyOf<S, E>> = never>(
+  async save<E extends SchemaEntity<S>, const I extends SaveInclude<S, KeyOf<S, E>> = {}>(
     entity: E,
-    input: SaveInput<S, KeyOf<S, E>, C>,
-    options: { cascade?: readonly C[]; prune?: boolean } = {},
+    input: NoInfer<SaveValue<S, KeyOf<S, E>, I>>,
+    options: { readonly include?: I } = {},
   ): Promise<Row<E>> {
-    const run = (db: Db<S>): Promise<Row<E>> =>
-      db.saveRow(
-        entity,
+    const run = async (db: Db<S>): Promise<Row<E>> => {
+      const key = db.key<string>(entity);
+      const saver = new AggregateSaver(db as never, db.ctx.schema);
+      const saved = await saver.save(
+        key,
         input as Record<string, unknown>,
-        options.cascade ?? [],
-        options.prune ?? false,
-      ) as Promise<Row<E>>;
+        options.include as never,
+      );
+      return db
+        .queryable(entity)
+        .where((r: any) =>
+          entity.primaryKey.map((k) => (r[k] as Expr<unknown>).eq(saved[k] as never)),
+        )
+        .firstOrThrow() as Promise<Row<E>>;
+    };
     return this.inTransaction ? run(this) : this.transaction(run);
   }
 
-  private async saveRow(
-    entity: Entity,
-    input: Record<string, unknown>,
-    cascade: readonly string[],
-    prune: boolean,
-  ): Promise<Record<string, unknown>> {
-    const key = this.key<string>(entity);
-    const relations = this.ctx.schema.relations[key] ?? {};
-    // 子行单独拿出来，剩下的才是父行的列
-    const parent: Record<string, unknown> = { ...input };
-    const children: Record<string, readonly Record<string, unknown>[]> = {};
-    for (const name of cascade) {
-      const rel = relations[name];
-      if (!rel || rel.kind !== 'many' || rel.through || rel.hops || rel.on)
-        throw new Error(`save: '${name}' of ${entity.name} is not a plain one-to-many navigation`);
-      children[name] = (parent[name] as readonly Record<string, unknown>[] | undefined) ?? [];
-      delete parent[name];
-    }
-    const saved = await this.upsertRow(entity, parent);
-    for (const [name, rows] of Object.entries(children)) {
-      const rel = relations[name] as Many;
-      const childEntity = this.ctx.schema.entities[rel.target]!;
-      const keptKeys: unknown[] = [];
-      for (const row of rows) {
-        // 关联列取父行的值（父行刚插入时，自增主键已经取回放进了 saved）
-        const values = { ...row };
-        rel.to.forEach((c, i) => {
-          values[c] = saved[rel.from[i]!];
-        });
-        const savedChild = await this.upsertRow(childEntity, values);
-        keptKeys.push(savedChild[childEntity.primaryKey[0]!]);
-      }
-      if (prune) await this.pruneChildren(childEntity, rel, saved, keptKeys);
-    }
-    const found = await this.queryable(entity as SchemaEntity<S>)
-      .where((r: any) =>
-        entity.primaryKey.map((k) => (r[k] as Expr<unknown>).eq(saved[k] as never)),
-      )
-      .first();
-    return found as Record<string, unknown>;
-  }
-
   /**
-   * 带完整主键：行已存在就只更新给出的列，不存在就插入；没有主键就插入并取回自增主键。返回带上主键的行值。
-   * 先查再改而不是 upsert：INSERT … ON CONFLICT 会先校验新行的 NOT NULL，只给部分列时即使行已存在也会失败。
+   * 删除一棵对象树（save 的反向）：按主键找到这一行，沿 include 先删它拥有的子项（一对多、一对一）和中间表的行，再删它自己。
+   * 行不存在时返回 false。逻辑删除的实体照常变成逻辑删除
+   * ```ts
+   * await db.remove(User, 1, { include: { posts: { include: { comments: true } }, roles: true } })
+   * ```
    */
-  private async upsertRow(
-    entity: Entity,
-    row: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    const pk = entity.primaryKey;
-    if (pk.length === 0) throw new Error(`save needs a primary key on ${entity.table}`);
-    const insert = this.insert(entity as SchemaEntity<S>) as unknown as {
-      values(r: Record<string, unknown>): {
-        execute(): Promise<number>;
-        returnId(): Promise<number | bigint>;
-      };
+  async remove<E extends SchemaEntity<S>, const I extends SaveInclude<S, KeyOf<S, E>> = {}>(
+    entity: E,
+    key: KeyInput<E>,
+    options: { readonly include?: I } = {},
+  ): Promise<boolean> {
+    const run = async (db: Db<S>): Promise<boolean> => {
+      const name = db.key<string>(entity);
+      const row = await db
+        .queryable(entity)
+        .where((r: any) => keyCondition(entity, key, r))
+        .first();
+      if (!row) return false;
+      await new AggregateSaver(db as never, db.ctx.schema).removeRows(
+        name,
+        [row as never],
+        options.include as never,
+      );
+      return true;
     };
-    if (pk.every((k) => row[k] !== undefined && row[k] !== null)) {
-      const byKey = (r: any) => pk.map((k) => (r[k] as Expr<unknown>).eq(row[k] as never));
-      const exists =
-        (await this.queryable(entity as SchemaEntity<S>)
-          .where(byKey)
-          .count()) > 0;
-      if (!exists) {
-        await insert.values(row).execute();
-      } else {
-        const changes = Object.fromEntries(
-          Object.entries(row).filter(([p, v]) => !pk.includes(p) && v !== undefined),
-        );
-        if (Object.keys(changes).length > 0)
-          await (this.update(entity as SchemaEntity<S>) as any).set(changes).where(byKey).execute();
-      }
-      return row;
-    }
-    if (pk.length > 1)
-      throw new Error(`save: composite primary key of ${entity.table} must be given completely`);
-    const id = await insert.values(row).returnId();
-    return { ...row, [pk[0]!]: id };
-  }
-
-  /** 删掉属于父行、但不在保存列表里的子行（用主键 NOT IN；列表为空就删光） */
-  private async pruneChildren(
-    child: Entity,
-    rel: Many,
-    parent: Record<string, unknown>,
-    kept: readonly unknown[],
-  ): Promise<void> {
-    if (child.primaryKey.length !== 1)
-      throw new Error(`save: prune needs a single-column primary key on ${child.table}`);
-    const pk = child.primaryKey[0]!;
-    await this.delete(child as SchemaEntity<S>)
-      .where((r: any) => [
-        ...rel.to.map((c, i) => (r[c] as Expr<unknown>).eq(parent[rel.from[i]!] as never)),
-        kept.length > 0 && (r[pk] as Expr<unknown>).notIn(kept as never[]),
-      ])
-      .execute();
+    return this.inTransaction ? run(this) : this.transaction(run);
   }
 
   /** 按实体定义生成建表语句（列、主键、唯一约束），不执行。类型规则见各方言的 columnType */

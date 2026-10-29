@@ -116,7 +116,8 @@ export type {
   WriteDetail,
   WriteEvent,
 } from './interceptor.ts';
-export type { DbOptions, KeyOf, ManyKeys, SaveInput, TreeWalk, WithCte } from './db.ts';
+export type { DbOptions, KeyOf, TreeWalk, WithCte } from './db.ts';
+export type { RemovedPolicy, SaveInclude, SaveNode, SaveValue } from './save.ts';
 export { Dialect, SqlWriter } from './dialect.ts';
 export type { DatePart, DateToken, FunctionRenderer, Statement } from './dialect.ts';
 export { coalesceEach, dateFormatParts, jsonPathParts, standardJsonPath } from './dialect.ts';

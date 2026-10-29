@@ -3,7 +3,7 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1664、写法不同 238、待做 273、不适用 74。
+合计：已对应 1664、写法不同 277、待做 234、不适用 74。
 
 ## 按能力
 
@@ -44,7 +44,7 @@
 | 复用查询（cloneQueryable）（`query.reuse`）                      | 2      | 写法不同 | 查询对象不可变，直接复用                                                                                                                                                                            |
 | 流式读取（`query.stream`）                                       | 9      | 已对应   | stream()；suite.ts streaming                                                                                                                                                                        |
 | union / union all（`query.union`）                               | 18     | 已对应   | union / unionAll；suite.ts                                                                                                                                                                          |
-| 聚合根保存（savable）（`save.aggregate`）                        | 39     | 待做     | 部分：db.save 一层一对多；其余待做（16.4.1）                                                                                                                                                        |
+| 聚合根保存（savable）（`save.aggregate`）                        | 39     | 写法不同 | db.save(entity, tree, { include })：类型化 include 树，按现状比较（无追踪上下文）；多层、多对多中间表、多对一/一对一、removed、key；db.remove 删整棵树                                              |
 | search 扩展（`search`）                                          | 45     | 待做     | 待对照（16.6.5）                                                                                                                                                                                    |
 | 分库分表（`sharding`）                                           | 48     | 待做     | 待做（16.6.2、16.6.3）                                                                                                                                                                              |
 | 原生 SQL（`sql.native`）                                         | 50     | 已对应   | sql 标签、db.sql；suite.ts native SQL                                                                                                                                                               |
@@ -1932,7 +1932,7 @@
 | QueryTest.java#query67                | `SELECT t5.`id`,t5.`stars`,t5.`abc`AS`abc` FROM ( (SELECT t.`id`,t.`stars`,t.`title`AS`…`     |
 | QueryTest11.java#testx20              | `SELECT t6.`value1`AS`value1`,t6.`value2`AS`value2`FROM ( (SELECT ? AS`value1`,COUNT(…`       |
 
-### 聚合根保存（savable）（`save.aggregate`，待做）
+### 聚合根保存（savable）（`save.aggregate`，写法不同）
 
 | 用例                                           | 断言的 SQL（摘要）                                              |
 | ---------------------------------------------- | --------------------------------------------------------------- |

@@ -231,8 +231,8 @@ export const capabilities = {
   },
   'save.aggregate': {
     title: '聚合根保存（savable）',
-    status: 'todo',
-    ts: '部分：db.save 一层一对多；其余待做（16.4.1）',
+    status: 'different',
+    ts: 'db.save(entity, tree, { include })：类型化 include 树，按现状比较（无追踪上下文）；多层、多对多中间表、多对一/一对一、removed、key；db.remove 删整棵树',
   },
   tracking: {
     title: '追踪与差异更新',

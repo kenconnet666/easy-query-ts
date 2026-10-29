@@ -125,8 +125,8 @@ TS 写法上建议再加一个 Db 级的派生：`db.withInterceptors({ use: ['d
 
 调研时对照官方回头看已有的实现，这几处按 TS 的写法还能更好，按价值排：
 
-1. **聚合保存**（`db.save`）：只做了一层一对多与 `prune`。补多对多中间表的增删（按现状比较，不删了重建）、多层、脱钩方式（删除 / 设 null / 不动），
-   并让 cascade 的路径成为类型：`cascade: ['posts', 'posts.comments', 'roles']` 由关系推出可选的路径，写错编译期报错。中等偏大。
+1. **聚合保存**（`db.save`）：只做了一层一对多与 `prune`。——已做（ROADMAP 16.4.1）：换成带类型的 `include` 树，多层、多对多中间表按现状增删、
+   多对一 / 一对一、`removed`（删除 / 置空 / 不动）、按业务列匹配（`key`），另加 `db.remove` 删整棵树。见 features/ts-writes。
 2. **多对一导航上单独关拦截器**：一对多导航与 join 已经能关，`u.company` 这种属性访问没地方放开关。可以在关系定义处给默认开关
    （`r.one('Company', …, { interceptors: { skip: ['softDelete'] } })`），覆盖"关联已删除的公司也要显示名字"这类需求。小。
 3. **`table()` 的白名单**：现在按 select 的结果列放行，能筛的列就是能看的列。官方的 `whereObject` 可以按注解只放行一部分；

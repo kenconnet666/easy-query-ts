@@ -424,3 +424,19 @@ personDb.queryable(Person).where((p) => [
   // @ts-expect-error 不是 'YYYY-MM-DD' 形状的字面量
   p.born.ge('not a date'),
 ]);
+
+// 聚合保存：输入里能写哪些导航由 include 决定，值的形状由关系推出
+void db.save(
+  User,
+  { name: 'dave', posts: [{ title: 'p', amount: '1.00' }], company: { name: 'acme' } },
+  { include: { posts: { removed: 'delete', key: 'title' }, company: true } },
+);
+void db.save(User, { id: 1, company: null }, { include: { company: true } });
+// @ts-expect-error posts 没写进 include，不能出现在输入里
+void db.save(User, { id: 1, posts: [] });
+// @ts-expect-error 一对多的值是数组
+void db.save(User, { id: 1, posts: { title: 'p' } }, { include: { posts: true } });
+// @ts-expect-error key 只能是目标实体的列
+void db.save(User, { id: 1 }, { include: { posts: { key: 'nope' } } });
+// @ts-expect-error 不是 User 的导航
+void db.save(User, { id: 1 }, { include: { comments: true } });
