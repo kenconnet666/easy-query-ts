@@ -41,6 +41,9 @@ const Doc = entity('t_doc', {
 
 - `update(X).entity(row)`、`changes(before, after)`、`set(…).withVersion(v)`：版本列作为条件、同时写入下一个版本；一行都没更新到（被别人改过或删除）抛 `optimistic lock failed`。
 - 其它更新（表达式更新、批量更新）没有版本条件，但同样换成下一个版本，别人手里的旧版本随之失效。
+  不想让它失效（管理端的批量修正）时写 `.ignoreVersion()`：不带条件、不换版本，`entity(row)` 也不再要求版本（对应官方的 `ignoreVersion`）。
+- 删除：`delete(X).withVersion(v)`、`delete(X).entity(row)`（按主键，有版本列就带上版本条件，对应官方的 `deletable(entity)`）；
+  没删到行同样抛 `optimistic lock failed`，逻辑删除时顺带换版本。
 - 整数列每次加 1；别的类型给规则：`col.string().version({ initial: '0', next: () => crypto.randomUUID() })`。
 
 ## 验证与限制

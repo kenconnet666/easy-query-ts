@@ -2359,6 +2359,45 @@ export function liveSuite(
       );
     });
 
+    it('ignores the version when asked and guards deletes by version (official VersionTest)', async () => {
+      const { db } = await seeded();
+      await db
+        .insert(Doc)
+        .values([doc('a'), doc('b')])
+        .execute();
+      const [a, b] = await db
+        .queryable(Doc)
+        .orderBy((d) => d.id)
+        .toList();
+      // ignoreVersion：表达式更新不换版本，entity(row) 不要求、也不带版本条件
+      await db
+        .update(Doc)
+        .set({ title: 'a1' })
+        .where((d) => d.id.eq(a!.id))
+        .ignoreVersion()
+        .execute();
+      await db
+        .update(Doc)
+        .ignoreVersion()
+        .entity({ ...a!, title: 'a2', version: 41 })
+        .execute();
+      const after = await db.queryable(Doc).findOrThrow(a!.id);
+      assert.deepEqual([after.title, after.version], ['a2', 0]);
+      // 带版本的删除：版本不对抛错，对了才删（逻辑删除顺带换版本）
+      await assert.rejects(
+        () =>
+          db
+            .delete(Doc)
+            .entity({ ...b!, version: 7 })
+            .execute(),
+        /optimistic lock failed/,
+      );
+      assert.equal(await db.delete(Doc).entity(b!).execute(), 1);
+      const removed = await db.queryable(Doc).noInterceptor('softDelete').findOrThrow(b!.id);
+      assert.deepEqual([removed.deleted, removed.version], [true, 1]);
+      assert.throws(() => db.delete(Comment).withVersion(1), /has no version column/);
+    });
+
     it('never updates insert-only columns', async () => {
       const { db } = await seeded();
       await db.insert(Doc).values(doc('a')).execute();

@@ -259,7 +259,7 @@ export const capabilities = {
   version: {
     title: '乐观锁版本',
     status: 'done',
-    ts: 'version() / version({ initial, next })、withVersion；changes.test.ts',
+    ts: 'version() / version({ initial, next })、withVersion（更新与删除）、ignoreVersion、delete(X).entity(row)；changes.test.ts、suite.ts column rules',
   },
   interceptor: {
     title: '拦截器',

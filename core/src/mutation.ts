@@ -266,13 +266,13 @@ export class BatchUpdate {
         new Updatable(this.ctx, this.key, this.state).entity(row as never, this.options),
       );
     const entity = this.ctx.schema.entities[this.key]!;
-    const version = versionColumn(entity);
+    const version = guardedVersion(entity, this.state);
     const props = Object.keys(entity.columns).filter((p) => updatableColumn(entity, p));
     // 写的列相同的行分一组：组里每一行都有这些列的值，CASE 能逐行给出
     const groups = new Map<string, { written: string[]; rows: Record<string, unknown>[] }>();
     for (const row of this.rows) {
       const flat = flattenRow(entity, row);
-      requireKey(entity, flat, 'update(..).entities(..).batch()');
+      requireKey(entity, flat, version, 'update(..).entities(..).batch()');
       const written = Object.keys(pickColumns(flat, props, this.options.columns));
       if (version !== undefined) written.push(version);
       if (written.length === 0) throw new Error(`update of ${entity.table} sets no columns`);
@@ -300,7 +300,7 @@ export class BatchUpdate {
     written: readonly string[],
     rows: readonly Record<string, unknown>[],
   ): Updatable<any, any> {
-    const version = versionColumn(entity);
+    const version = guardedVersion(entity, this.state);
     const matches = (r: any, row: Record<string, unknown>) =>
       entity.primaryKey.map((k) => (refColumn(r, k) as Expr<unknown>).eq(row[k] as never));
     const values = (r: any) =>
@@ -347,13 +347,17 @@ export class BatchUpdate {
 }
 
 /** 按主键（与版本）定位一行时，主键与版本都要有值 */
-function requireKey(entity: Entity, row: Readonly<Record<string, unknown>>, what: string): void {
+function requireKey(
+  entity: Entity,
+  row: Readonly<Record<string, unknown>>,
+  version: string | undefined,
+  what: string,
+): void {
   if (entity.primaryKey.length === 0)
     throw new Error(`${what} needs a primary key on ${entity.table}`);
   for (const key of entity.primaryKey)
     if (row[key] === undefined || row[key] === null)
       throw new Error(`${what} needs the primary key '${key}' of ${entity.table}`);
-  const version = versionColumn(entity);
   if (version !== undefined && (row[version] === undefined || row[version] === null))
     throw new Error(`${what} needs the version '${version}' of ${entity.table}`);
 }
@@ -663,6 +667,11 @@ function versionColumn(entity: Entity): string | undefined {
   return Object.keys(entity.columns).find((p) => entity.columns[p]!.options.version);
 }
 
+/** 这条语句要管的版本列：ignoreVersion() 时没有 */
+function guardedVersion(entity: Entity, state: WriteState): string | undefined {
+  return state.ignoreVersion ? undefined : versionColumn(entity);
+}
+
 /** 版本列的下一个版本：有规则用规则，没有就按整数加 1 */
 function nextVersion(column: AnyColumn, current: unknown): unknown {
   const next = column.options.version!.next;
@@ -701,6 +710,8 @@ interface WriteState {
   readonly unchanged?: boolean;
   /** delete 显式写了 hard()：hardDelete: 'forbid' 时也执行物理删除 */
   readonly hard?: boolean;
+  /** ignoreVersion()：不带版本条件、也不换版本（对应 Java 版的 ignoreVersion） */
+  readonly ignoreVersion?: boolean;
   /** 带 RETURNING：不能再有导航产生的 join（自连接里两份目标表的列名会重名） */
   readonly returning?: boolean;
   /** expectRows：改到的行数必须是 count，否则抛 error(实际行数) */
@@ -758,6 +769,11 @@ abstract class Filtered {
     const affected = (await execute(this.ctx, statement)).affected;
     const expect = this.state.expect;
     if (expect && affected !== expect.count) throw expect.error(affected);
+    // 带乐观锁条件却一行也没改到：行已被删除或已被别人改过
+    if (affected === 0 && this.state.version)
+      throw new Error(
+        `optimistic lock failed: ${this.ctx.schema.entities[this.key]!.table} row was changed or deleted by someone else`,
+      );
     await this.ctx.interceptors.afterWrite({
       ...detail,
       entity: this.ctx.schema.entities[this.key]!,
@@ -933,8 +949,8 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     set: Record<string, unknown>,
     what: string,
   ): Updatable<S, K> {
-    requireKey(entity, row, what);
-    const version = versionColumn(entity);
+    const version = guardedVersion(entity, this.state);
+    requireKey(entity, row, version, what);
     const where = (r: any) =>
       entity.primaryKey.map((k) => (refColumn(r, k) as Expr<unknown>).eq(row[k] as never));
     return new Updatable(
@@ -949,16 +965,10 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     );
   }
 
-  /** 带乐观锁条件的更新没有更新到任何行：行已被删除或已被别人改过；changes 没有变化时不发语句 */
+  /** changes 没有变化时不发语句 */
   override async execute(): Promise<number> {
     if (this.state.unchanged) return 0;
-    const affected = await super.execute();
-    if (affected === 0 && this.state.version) {
-      throw new Error(
-        `optimistic lock failed: ${this.ctx.schema.entities[this.key]!.table} row was changed or deleted by someone else`,
-      );
-    }
-    return affected;
+    return super.execute();
   }
 
   /** 更新后返回这些列（已解码）；见 Returning */
@@ -1009,6 +1019,15 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     return new Updatable(this.ctx, this.key as K, { ...this.state, ...change }, this.values);
   }
 
+  /**
+   * 不管乐观锁（对应 Java 版的 ignoreVersion）：不带版本条件、也不换版本；entity(row) 不再要求版本。
+   * 管理端的批量修正这类不该让别人手里的版本失效的更新用它；写在 entity / entities 前后都行
+   */
+  ignoreVersion(): Updatable<S, K> {
+    const { version: _version, ...rest } = this.state;
+    return new Updatable(this.ctx, this.key as K, { ...rest, ignoreVersion: true }, this.values);
+  }
+
   all(): Updatable<S, K> {
     return new Updatable(this.ctx, this.key as K, { ...this.state, all: true }, this.values);
   }
@@ -1024,7 +1043,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       if (given[p] !== undefined && entity.columns[p]?.options.insertOnly)
         throw new Error(`column '${p}' of ${entity.table} is insert-only and cannot be updated`);
     }
-    const version = versionColumn(entity);
+    const version = guardedVersion(entity, this.state);
     const guard = this.state.version;
     // 带版本条件时写入下一个版本（调用方显式给了就用它的）
     if (version !== undefined && guard && given[version] === undefined)
@@ -1112,6 +1131,29 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     return new Deletable(this.ctx, this.key as K, { ...this.state, ...change });
   }
 
+  /**
+   * 带乐观锁删除（对应 Java 版 deletable 的 withVersion）：条件加上"版本等于 current"，没删到行就抛错；
+   * 逻辑删除时顺带把版本换成下一个
+   */
+  withVersion(current: unknown): Deletable<S, K> {
+    const entity = this.ctx.schema.entities[this.key]!;
+    if (versionColumn(entity) === undefined)
+      throw new Error(`withVersion(): ${entity.table} has no version column`);
+    return this.withState({ version: { current } });
+  }
+
+  /** 按主键删这一行（对应 Java 版的 deletable(entity)）；有版本列时带上版本条件 */
+  entity(row: Row<EntityOf<S, K>>): Deletable<S, K> {
+    const entity = this.ctx.schema.entities[this.key]!;
+    const values = flattenRow(entity, row as Record<string, unknown>);
+    const version = versionColumn(entity);
+    requireKey(entity, values, version, 'delete(..).entity(..)');
+    const deletable = this.where((r: any) =>
+      entity.primaryKey.map((k) => (refColumn(r, k) as Expr<unknown>).eq(values[k] as never)),
+    );
+    return version === undefined ? deletable : deletable.withVersion(values[version]);
+  }
+
   /** 物理删除：绕过逻辑删除（读过滤与改写成 update 都不再生效），已被逻辑删除的行也会被删掉 */
   hard(): Deletable<S, K> {
     return new Deletable(withToggle(this.ctx, { skip: ['softDelete'] }), this.key as K, {
@@ -1140,7 +1182,15 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     const entity = this.ctx.schema.entities[this.key]!;
     const target = this.target(scope, root);
     // 逻辑删除：delete 改写成把标记列设为"已删除"的 update，条件不变（读过滤已经保证不会重复删）
-    const softSet = this.ctx.interceptors.deleteAsUpdate(entity);
+    const version = versionColumn(entity);
+    const guard = this.state.version;
+    if (version !== undefined && guard)
+      where.push(condNode(refColumn(root, version).eq(guard.current as never))!);
+    const deleteAs = this.ctx.interceptors.deleteAsUpdate(entity);
+    const softSet =
+      deleteAs && version !== undefined && guard
+        ? { ...deleteAs, [version]: nextVersion(entity.columns[version]!, guard.current) }
+        : deleteAs;
     if (softSet) {
       const set = Object.entries(softSet).map(([p, v]) => ({
         column: entity.columnNames[p]!,
