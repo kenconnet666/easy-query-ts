@@ -62,14 +62,11 @@ export class MsSqlDialect extends Dialect {
   protected override readonly recursiveKeyword = '';
   protected override readonly ctesAtTop = true;
 
-  /** 2022 起有 IS [NOT] DISTINCT FROM */
-  override readonly nullSafeEquals: string | undefined;
   /** 2016 起有 DROP TABLE IF EXISTS */
   override readonly dropIfExists: boolean;
 
   constructor(options: DialectOptions = {}) {
     super(options);
-    this.nullSafeEquals = this.atLeast('2022') ? 'IS NOT DISTINCT FROM' : undefined;
     this.dropIfExists = this.atLeast('2016');
   }
 
@@ -241,7 +238,7 @@ export class MsSqlDialect extends Dialect {
       // SUBSTRING 必须给长度：取到末尾时给一个够大的长度
       substring: (a) => `SUBSTRING(${a[0]}, ${a[1]}, ${a[2] ?? '2147483647'})`,
       concat,
-      trim: (a) => (this.atLeast('2017') ? `TRIM(${a[0]})` : `LTRIM(RTRIM(${a[0]}))`),
+      trim: (a) => `LTRIM(RTRIM(${a[0]}))`,
       year: (a) => `YEAR(${a[0]})`,
       month: (a) => `MONTH(${a[0]})`,
       day: (a) => `DAY(${a[0]})`,
@@ -311,10 +308,8 @@ export class MsSqlDialect extends Dialect {
     };
   }
 
-  /** 截断到时间单位：2022 起 DATETRUNC，之前按"从 0 起经过多少个单位再加回去" */
+  /** 截断到时间单位：按"从 0 起经过多少个单位再加回去"，各版本通用（DATETRUNC 要 2022） */
   private dateTrunc(x: string, unit: string): string {
-    if (this.atLeast('2022'))
-      return `CAST(DATETRUNC(${unit === 'week' ? 'ISO_WEEK' : unit.toUpperCase()}, ${x}) AS DATETIME2(3))`;
     if (unit === 'second') return `CAST(CONVERT(VARCHAR(19), ${x}, 120) AS DATETIME2(3))`;
     if (unit === 'week')
       return `CAST(DATEADD(DAY, -((DATEPART(WEEKDAY, ${x}) + @@DATEFIRST - 2) % 7), CAST(${x} AS DATE)) AS DATETIME2(3))`;
@@ -575,3 +570,25 @@ export interface MsSqlOptions {
 export function mssql(pool: sql.ConnectionPool, options: MsSqlOptions = {}): Adapter {
   return { dialect: new MsSqlDialect({ version: options.version }), driver: new MsSqlDriver(pool) };
 }
+
+/** 主版本号 → 发行年份 */
+const RELEASES: Record<number, SqlServerVersion> = {
+  10: 2008,
+  11: 2012,
+  12: 2014,
+  13: 2016,
+  14: 2017,
+  15: 2019,
+  16: 2022,
+  17: 2025,
+};
+
+/** 连上库读出服务器版本再建 adapter，部署到哪个版本都自动选对写法；比 2008 R2 还老的库读不到主版本，按 2008 渲染 */
+mssql.detect = async (pool: sql.ConnectionPool): Promise<Adapter> => {
+  const result = await pool
+    .request()
+    .query<{ v: number | null }>(`SELECT CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) AS v`);
+  const major = result.recordset[0]?.v ?? 10;
+  const version = RELEASES[major] ?? (major > 17 ? undefined : 2008);
+  return { dialect: new MsSqlDialect({ version }), driver: new MsSqlDriver(pool) };
+};

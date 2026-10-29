@@ -7,7 +7,7 @@ const pool = await oracledb.createPool({
   connectString: 'host:1521/FREEPDB1',
   sessionCallback: oracleSession,
 });
-const db = createDb({ schema, adapter: oracle(pool) }); // 23ai
+const db = createDb({ schema, adapter: await oracle.detect(pool) }); // 连上库读出版本
 const legacy = createDb({ schema, adapter: oracle(pool, { version: '11.2' }) });
 ```
 

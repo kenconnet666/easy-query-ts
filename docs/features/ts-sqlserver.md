@@ -1,7 +1,8 @@
 # TS：SQL Server 方言与按版本渲染
 
 ```ts
-const db = createDb({ schema, adapter: mssql(pool) }); // 最新（2022）
+const db = createDb({ schema, adapter: await mssql.detect(pool) }); // 连上库读出版本，部署到哪个版本都不用改代码
+const latest = createDb({ schema, adapter: mssql(pool) }); // 不连库：按最新渲染
 const legacy = createDb({ schema, adapter: mssql(pool, { version: 2008 }) });
 ```
 
@@ -11,17 +12,28 @@ const legacy = createDb({ schema, adapter: mssql(pool, { version: 2008 }) });
 `STRING_AGG needs sqlserver 2017 or later (the dialect is configured for 2016)`，而不是把一条库里才报错的 SQL 发出去。
 `version` 的取值在类型上限定（SQL Server 是 `2008 | 2012 | … | 2025`）。不给时按最新。
 
+部署时一般用 `await mssql.detect(pool)` / `mysql.detect(pool)` / `oracle.detect(pool)`：连上库读出服务器版本再建 adapter，同一份代码部署到不同版本都选对写法；
+手写 `version` 用在不连库只看 SQL、或要锁定基线（如 PolarDB 8.0.18）的场合。
+
+只在三种情况按版本分支，其余一律用各版本都能跑的写法（分支越少，没在旧库上实测过的路径越少）：
+
+1. 旧写法在新版本里弃用或删除（MySQL upsert 的 `VALUES(col)` → 行别名）；
+2. 旧版本没有这个能力：渲染时报出最低版本，不写第二套；
+3. 新旧写法语义或性能差别大（分页、`IF [NOT] EXISTS`、聚合里能不能用子查询、JSON 里的 null 与缺失）。
+
+只为写法更好看的（`TRIM`、`DATETRUNC`、`IS NOT DISTINCT FROM`）不分支，各版本都用通用写法。
+
 MySQL 同样支持：`mysql(pool, { version: '8.0.18' })`（PolarDB 基线）时 upsert 用 `VALUES(col)`，8.0.19 起用行别名 `AS eq_new`（`VALUES()` 在 8.0.20 起弃用）；
 `JSON_OVERLAPS` / `MEMBER OF` 要 8.0.17，窗口函数与 CTE 要 8.0，`NOWAIT` / `SKIP LOCKED` 要 8.0.1，低于时渲染就报错。
 
-| 版本 | 用到的写法                                                                    | 更早的版本                                                               |
-| ---- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| 2012 | `OFFSET … FETCH`、`CONCAT`、`FORMAT`                                          | `ROW_NUMBER()` 包一层分页、`+` 拼接；`FORMAT` 报错                       |
-| 2016 | `DROP TABLE IF EXISTS`、`JSON_VALUE` / `OPENJSON`                             | 先读库结构再删；JSON 函数报错                                            |
-| 2017 | `STRING_AGG … WITHIN GROUP`、`TRIM`                                           | `joining` 报错；`LTRIM(RTRIM())`                                         |
-| 2022 | `GREATEST` / `LEAST`、`IS NOT DISTINCT FROM`、`DATETRUNC`、`JSON_PATH_EXISTS` | `VALUES` 子查询取最值、展开的 null 安全相等、`DATEADD` / `DATEDIFF` 截断 |
+| 版本 | 用到的写法                                        | 更早的版本                                                          |
+| ---- | ------------------------------------------------- | ------------------------------------------------------------------- |
+| 2012 | `OFFSET … FETCH`、`CONCAT`、`FORMAT`              | `ROW_NUMBER()` 包一层分页、`+` 拼接；`FORMAT` 报错                  |
+| 2016 | `DROP TABLE IF EXISTS`、`JSON_VALUE` / `OPENJSON` | 先读库结构再删；JSON 函数报错                                       |
+| 2017 | `STRING_AGG … WITHIN GROUP`                       | `joining` 报错                                                      |
+| 2022 | `GREATEST` / `LEAST`、`JSON_PATH_EXISTS`          | `VALUES` 子查询取最值（不能放进聚合里）；分不清 JSON 的 null 与缺失 |
 
-同一个 2022 实例上按 2008 渲染的分页、最值、截断与新写法结果一致（实库测试）。
+同一个 2022 实例上按 2008 渲染的分页、最值与新写法结果一致（实库测试）。
 
 ## 与其它库的差异
 

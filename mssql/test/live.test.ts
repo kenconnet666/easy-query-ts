@@ -73,7 +73,7 @@ if (!raw) {
     for (const t of TABLES) await p.request().query(`DROP TABLE IF EXISTS ${t}`);
     for (const statement of DDL) await p.request().query(statement);
     const statements: Statement[] = [];
-    const adapter = mssql(p);
+    const adapter = await mssql.detect(p);
     return {
       db: createDb({
         schema,
@@ -101,7 +101,7 @@ if (!raw) {
   };
 
   describe(`sqlserver ${url.port}: rendering for older versions`, () => {
-    it('2008：ROW_NUMBER 分页、TOP 之外的偏移、GREATEST / TRIM / DATETRUNC 的旧写法', async () => {
+    it('2008：ROW_NUMBER 分页、TOP 之外的偏移、GREATEST 的旧写法', async () => {
       const db = await older(2008);
       const page = await db
         .queryable(Post)

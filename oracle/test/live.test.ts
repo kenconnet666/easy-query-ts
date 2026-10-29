@@ -74,7 +74,7 @@ if (!raw) {
       await conn.close();
     }
     const statements: Statement[] = [];
-    const adapter = oracle(p);
+    const adapter = await oracle.detect(p);
     return {
       db: createDb({
         schema,

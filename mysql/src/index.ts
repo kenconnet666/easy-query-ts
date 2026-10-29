@@ -399,3 +399,14 @@ export interface MySqlOptions {
 export function mysql(pool: Pool, options: MySqlOptions = {}): Adapter {
   return { dialect: new MySqlDialect({ version: options.version }), driver: new MySqlDriver(pool) };
 }
+
+/**
+ * 连上库读出服务器版本再建 adapter：同一份代码部署到 8.0.18 还是 8.4 都自动选对写法，不用手配 version。
+ * MariaDB 按 8.0 渲染（有窗口函数、CTE，upsert 用 VALUES()）。
+ */
+mysql.detect = async (pool: Pool): Promise<Adapter> => {
+  const [rows] = await pool.query('SELECT VERSION() AS v');
+  const text = String((rows as { v: string }[])[0]?.v ?? '');
+  const version = /mariadb/i.test(text) ? '8.0' : /^\d+(\.\d+)*/.exec(text)?.[0];
+  return { dialect: new MySqlDialect({ version }), driver: new MySqlDriver(pool) };
+};

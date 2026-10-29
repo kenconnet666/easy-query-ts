@@ -564,6 +564,19 @@ export function oracle(pool: oracledb.Pool, options: OracleOptions = {}): Adapte
   };
 }
 
+/** 连上库读出服务器版本（如 23.5.0.24.7）再建 adapter，部署到 11g 还是 23ai 都自动选对写法 */
+oracle.detect = async (pool: oracledb.Pool): Promise<Adapter> => {
+  const conn = await pool.getConnection();
+  try {
+    return {
+      dialect: new OracleDialect({ version: conn.oracleServerVersionString }),
+      driver: new OracleDriver(pool),
+    };
+  } finally {
+    await conn.close();
+  }
+};
+
 /** 建池时的 sessionCallback：日期、时间戳的会话格式设成 ISO、时区 UTC（核心按 UTC 文字读写日期时间） */
 export function oracleSession(
   conn: oracledb.Connection,
