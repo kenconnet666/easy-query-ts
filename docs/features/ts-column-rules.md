@@ -33,13 +33,16 @@ const Doc = entity('t_doc', {
 
 - `delete(X)…` 改写成把标记列设为"已删除"的 `update`，条件不变；**读、改、删**（含导航的 JOIN 与一对多子查询、toList 的第二条查询、多对多的中间表）都自动只看未删除的行——它是内置拦截器，名字 `softDelete`。
 - 布尔列默认 `false` / `true`，整数列默认 `0` / `1`；其它类型显式给：`col.datetime().nullable().softDelete({ active: null, deleted: () => new Date() })`（`active: null` 渲染为 `IS NULL`）。
-- 单条查询 `noInterceptor('softDelete')` 能看到已删除的行；`delete(X).hard()` 物理删除（绕过过滤，已被逻辑删除的行也会删掉）。
+- 单条查询 `noInterceptor('softDelete')` 能看到已删除的行；只在一个导航上看 `u.roles.noInterceptor('softDelete').any()`；`delete(X).hard()` 物理删除（绕过过滤，已被逻辑删除的行也会删掉）。
+- 删除人、删除时间这类列用 `$onDelete(() => currentUser())`：逻辑删除时一并写入，物理删除不写。
+- `createDb({ hardDelete: 'forbid' })`：没有逻辑删除列的实体 delete 要显式 `.hard()` 才执行，防止误删。
 
 ## 乐观锁
 
-- `update(X).entity(row)`：版本列作为条件、同时写入加 1 后的版本；一行都没更新到（被别人改过或删除）抛 `optimistic lock failed`。
-- 其它更新（表达式更新、批量更新）没有版本条件，但同样让版本加 1，别人手里的旧版本随之失效。
+- `update(X).entity(row)`、`changes(before, after)`、`set(…).withVersion(v)`：版本列作为条件、同时写入下一个版本；一行都没更新到（被别人改过或删除）抛 `optimistic lock failed`。
+- 其它更新（表达式更新、批量更新）没有版本条件，但同样换成下一个版本，别人手里的旧版本随之失效。
+- 整数列每次加 1；别的类型给规则：`col.string().version({ initial: '0', next: () => crypto.randomUUID() })`。
 
 ## 验证与限制
 
-SQLite、MySQL 8.0.18 / 8.4、PG 17 实测；HANA 随 CI 验证。每个实体只支持一个逻辑删除列。`encrypted` 只用于字符串列；非确定性的加密不能用在 `eq` 条件里。Java 的 `@ColumnIgnore` 没有对应物（TS 版的实体和表一一对应，不需要不落库的属性）。
+SQLite、MySQL 8.0.18 / 8.4、PG 17 实测；HANA 随 CI 验证。每个实体只支持一个逻辑删除列。`encrypted` 只用于字符串列；非确定性的加密不能用在 `eq` 条件里；like 只在策略声明 `searchable`（可分段加密）时可用，否则报错，要在库里搜索改用 `sqlConvert`。Java 的 `@ColumnIgnore` 没有对应物（TS 版的实体和表一一对应，不需要不落库的属性）。

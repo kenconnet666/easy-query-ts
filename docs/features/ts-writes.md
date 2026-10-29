@@ -36,15 +36,36 @@ PG、SQLite 用 `RETURNING` 一条语句；MySQL、HANA 先插入拿到主键再
 ## `afterWrite` 拦截器钩子
 
 ```ts
-const audit = {
-  name: 'audit',
-  afterWrite: (e) => log(`${e.kind} ${e.entity.table} ${e.affected}`),
+const audit: Interceptor = {
+  name: 'audit', // 名字登记在 InterceptorNames 里
+  afterWrite: (e) => {
+    switch (e.kind) {
+      case 'insert':
+        return log('insert', e.entity.table, e.rows); // 补好默认值的各行
+      case 'update':
+        return log('update', e.entity.table, e.set); // 写进去的值
+      case 'delete':
+        return log(e.soft ? 'soft delete' : 'delete', e.entity.table);
+    }
+  },
 };
 createDb({ schema, adapter, interceptors: [audit] });
 ```
 
-`insert / update / delete`（含 `returnId`、`returning`、`fromQuery`、批量更新、逻辑删除）成功执行之后调用，参数是种类（逻辑删除的 delete 仍是 `'delete'`）、实体和影响的行数。**钩子在同一个事务里**，抛错会让这次写入失败、事务回滚——可以当作"否决"用；做审计日志也在这里。`noInterceptor` 对写入无效（它只作用于查询）。
+`insert / update / delete`（含 `returnId`、`returning`、`fromQuery`、批量更新、逻辑删除）成功执行之后调用。事件是判别联合：
+`insert` 带插入的各行（INSERT … SELECT 时为空）、`update` 带 set、`delete` 带是否逻辑删除，都带执行的语句与参数（条件在里面）和影响的行数。
+**钩子在同一个事务里**，抛错会让这次写入失败、事务回滚——可以当作"否决"用；做审计日志也在这里。写入语句上同样可以 `noInterceptor(name)`。
+
+## 差异更新：`changes(before, after)`
+
+```ts
+const before = await tx.queryable(User).findOrThrow(id);
+await tx.update(User).changes(before, form).execute(); // 只 set 变了的列；没有变化返回 0、不发语句
+```
+
+对应 Java 版追踪模式下的差异更新，但不需要追踪上下文：按列的编码比较（日期比时刻、JSON 比内容、decimal.js 比文字、值对象逐项），
+按 before 的主键（与版本）定位，after 可以只是表单提交的几项。表达式更新要乐观锁时写 `.withVersion(current)`。
 
 ## 验证与限制
 
-SQLite、MySQL 8.0.18 / 8.4、PG 17 实测（含 `save` 失败整体回滚、afterWrite 抛错回滚事务）。Java 版 `Savable` 的多层级联、多对多保存、按差异比较保存没有做。
+SQLite、MySQL 8.0.18 / 8.4、PG 17 实测（含 `save` 失败整体回滚、afterWrite 抛错回滚事务）。Java 版 `Savable` 的多层级联、多对多保存没有做（取舍见 decisions/0003）。

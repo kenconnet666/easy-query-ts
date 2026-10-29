@@ -75,20 +75,27 @@ TS 版的状态按 `packages/easy-query/core/src` 的实现核过。"写法不�
 | `@ValueObject`（几列合成一个嵌套对象）                                         | `address: embed({ city: col.string(), … })`，查询里 `c.address.city`                      | ✓    | 列名默认 `address_city`；更新可以只给其中几项                         |
 | `ColumnValueSQLConverter`（列值在 SQL 里转换）                                 | `col.string().sqlConvert({ read, write })`                                                | ✓    | 读的地方（select、where、排序）与写进去的值都包一层；RETURNING 拿不到 |
 | 改到的行数检查                                                                 | `expectRows(n, () => error)`                                                              | ✓    |                                                                       |
-| 追踪（`asTracking`，按差异更新）                                               | —                                                                                         | —    | 不做实体追踪（设计 0002）                                             |
+| 追踪（`asTracking`，按差异更新）                                               | `update(X).changes(before, after)`                                                        | ≈    | 不要追踪上下文：before 由调用方给，按列的类型比较（决定 0003）        |
+| 版本策略（int、long、UUID、时间戳）、表达式更新 `withVersion`                  | `version()`（整数）、`version({ initial, next })`、`withVersion(v)`                       | ✓    |                                                                       |
+| 逻辑删除时写删除人（自定义逻辑删除策略）                                       | 列修饰 `$onDelete(() => user)`                                                            | ≈    | 与 `$onUpdate` 对称                                                   |
+| 加密列模糊搜索 `supportQueryLike`                                              | `encrypted({ …, searchable: true })`                                                      | ✓    | 不可分段的策略上 like 直接报错                                        |
+| 数据库函数生成列 `generatedSQLColumnGenerator`                                 | 插入值或 `$default` 返回 `sql` 片段                                                       | ≈    |                                                                       |
 
 ## 其他
 
-| Java                                     | TS                                                           | 状态 | 说明                       |
-| ---------------------------------------- | ------------------------------------------------------------ | ---- | -------------------------- |
-| 值转换器、JSON 列                        | `col.custom` / `codec`、`col.json` 接 Standard Schema（zod） | ✓    |                            |
-| 函数库 `SQLFunc`、窗口函数、方言专属函数 | 函数库、`win.*`、`MySQL` / `Pg` / `Hana` 入口                | ✓    |                            |
-| 原生 SQL 片段                            | `db.sql` 标签模板                                            | ✓    |                            |
-| 拦截器（租户、更新时间、自定义）         | `tenant`、`touch`、自定义                                    | ✓    |                            |
-| 事务提交后的回调                         | `tx.afterCommit` / `afterRollback`                           | ✓    |                            |
-| 分库分表、二级缓存                       | —                                                            | —    | 不做                       |
-| DTO 代码生成插件                         | —                                                            | —    | 不需要：结果类型由形状推出 |
+| Java                                                                                        | TS                                                                                                     | 状态 | 说明                                          |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ---- | --------------------------------------------- |
+| 值转换器、JSON 列                                                                           | `col.custom` / `codec`、`col.json` 接 Standard Schema（zod）                                           | ✓    |                                               |
+| 函数库 `SQLFunc`、窗口函数、方言专属函数                                                    | 函数库、`win.*`、`MySQL` / `Pg` / `Hana` 入口                                                          | ✓    |                                               |
+| 原生 SQL 片段                                                                               | `db.sql` 标签模板                                                                                      | ✓    |                                               |
+| 拦截器（租户、更新时间、自定义）                                                            | `tenant`、`touch`、自定义                                                                              | ✓    |                                               |
+| `noInterceptor` / `useInterceptor`、`enable`、`ProtectedInterceptor`、`relationLogicDelete` | 语句、Db（`withInterceptors`）、一对多导航、join 的表上 `{ use, skip }`；`enabled: false`、`protected` | ✓    | 名字登记在 `InterceptorNames`，写错编译期报错 |
+| 审计日志（替换 `EntityExpressionExecutor`）                                                 | `afterWrite` 的事件带插入的行、更新的 set、语句                                                        | ≈    |                                               |
+| `deleteThrow`、`resultSizeLimit`                                                            | `createDb({ hardDelete: 'forbid', maxRows })`                                                          | ≈    | maxRows 超了报错，不截断                      |
+| 事务提交后的回调                                                                            | `tx.afterCommit` / `afterRollback`                                                                     | ✓    |                                               |
+| 分库分表、二级缓存                                                                          | —                                                                                                      | —    | 不做                                          |
+| DTO 代码生成插件                                                                            | —                                                                                                      | —    | 不需要：结果类型由形状推出                    |
 
 ## 剩下的
 
-对照表里已经没有"✗"。不做的几项（实体追踪、分库分表、二级缓存、跨库链接、代码生成）的理由见各行与设计 0002。
+对照表里已经没有"✗"。不做或换了写法的几项（追踪上下文、分库与跨库归并、二级缓存、跨库链接、代理类与 DTO 生成）的理由与可行性见决定 0002、0003。
