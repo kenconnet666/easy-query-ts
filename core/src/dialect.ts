@@ -37,7 +37,7 @@ export class SqlWriter {
       );
     }
     this.params.push(value);
-    return dialect.placeholder(this.params.length);
+    return dialect.placeholder(this.params.length, value);
   }
 }
 
@@ -476,8 +476,8 @@ export abstract class Dialect {
     return `"${identifier.replace(/"/g, '""')}"`;
   }
 
-  /** 第 index 个参数（从 1 开始）的占位符 */
-  placeholder(_index: number): string {
+  /** 第 index 个参数（从 1 开始）的占位符；value 是绑定的值（ClickHouse 的占位符要写出类型） */
+  placeholder(_index: number, _value?: unknown): string {
     return '?';
   }
 
