@@ -139,8 +139,8 @@ export const capabilities = {
   },
   'nav.flat': {
     title: '一对多展开（flatElement / elements）',
-    status: 'todo',
-    ts: '待做（16.2.4）',
+    status: 'different',
+    ts: 'flatElement 在条件里是 any(…)、select 里是 toList(p => p.x)、多层是 r.path；element / firstElement 是 at(i)，另有 all、countDistinct；suite.ts implicit subqueries',
   },
   'nav.groupJoin': {
     title: '隐式子查询改分组 join',

@@ -484,6 +484,68 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
     return pred({ k: 'exists', q: this.subquery(filter, () => []), not: true });
   }
 
+  /**
+   * 每一行都满足条件（对应 Java 版的 all）：没有子项时为真。条件为 NULL 的行算不满足
+   * ```ts
+   * db.queryable(User).where((u) => u.posts.all((p) => p.amount.gt('1')))
+   * ```
+   */
+  all(filter: (r: Ref<S, K>) => Cond): Pred {
+    const q = this.subquery(
+      (r) => {
+        const n = condNode(filter(r));
+        // CASE 把 NULL 也当成"不满足"，各库都能写
+        return n
+          ? pred({
+              k: 'op',
+              op: '=',
+              l: { k: 'case', when: [[n, { k: 'lit', sql: '1' }]], else: { k: 'lit', sql: '0' } },
+              r: { k: 'lit', sql: '0' },
+            })
+          : pred({ k: 'lit', sql: '1 = 0' });
+      },
+      () => [],
+    );
+    return pred({ k: 'exists', q, not: true });
+  }
+
+  /**
+   * 按 orderBy 排好后的第 index 行（0 起，对应 Java 版的 element / firstElement），每一列是一条标量子查询，
+   * 条件、select 里都能用：`u.posts.orderBy((p) => p.id.desc()).at(0).title.eq('最新的')`。没有这一行时列为 NULL
+   */
+  at(index: number): ColumnRefs<S['entities'][K]['fields'], true> {
+    if (!Number.isSafeInteger(index) || index < 0)
+      throw new RangeError(`at() index must be a non-negative integer, got ${index}`);
+    const entity = this.scope.schema.entities[this.relation.target]!;
+    const ref: Record<string, unknown> = {};
+    for (const [prop, column] of Object.entries(entity.columns)) {
+      let root: AnyRef | undefined;
+      const q = this.subquery(undefined, (r) => {
+        root = r;
+        return [{ e: refColumn(r, prop).node, as: 'v' }];
+      });
+      const node: Node = {
+        k: 'sub',
+        q: {
+          ...q,
+          orderBy: this.orders.flatMap((o) => orderNodes(o(root))),
+          limit: 1,
+          offset: index,
+        },
+      };
+      setPath(ref, prop, new Expr(node, column.codec));
+    }
+    return ref as never;
+  }
+
+  /** 去重后的个数（NULL 不计），对应 Java 版的 distinct().count(...) */
+  countDistinct(value: (r: Ref<S, K>) => Expr<unknown>): Expr<number> {
+    const q = this.subquery(undefined, (r) => [
+      { e: { k: 'agg', fn: 'count', arg: value(r as Ref<S, K>).node, distinct: true }, as: 'v' },
+    ]);
+    return new Expr({ k: 'sub', q }, codecs.int);
+  }
+
   count(filter?: (r: Ref<S, K>) => Cond): Expr<number> {
     return new Expr(
       {
@@ -572,6 +634,10 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
     filter: ((r: any) => Cond) | undefined,
     columns: (r: AnyRef) => { e: Node; as: string }[],
   ): SelectNode {
+    if (this.take !== undefined)
+      throw new Error(
+        'limit() on a navigation only applies to toList() / first(); filter with where() before any / count / sum',
+      );
     const scope = this.scope.child(this.toggles);
     const target = scope.schema.entities[this.relation.target]!;
     const root = scope.root(this.relation.target);

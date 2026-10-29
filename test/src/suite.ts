@@ -2086,6 +2086,51 @@ export function liveSuite(
       );
     });
 
+    it('implicit subqueries: all, at(i), countDistinct (official sub-query/README)', async () => {
+      const { db } = await seeded();
+      // 每篇都大于 2 元的人（carol 没有帖子，也算满足）
+      const all = await db
+        .queryable(User)
+        .where((u) => u.posts.all((p) => p.amount.gt('2')))
+        .orderBy((u) => u.id)
+        .select((u) => u.name)
+        .toList();
+      assert.deepEqual(all, ['alice', 'carol']);
+      const rows = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({
+          latest: u.posts.orderBy((p) => p.id.desc()).at(0).title,
+          second: u.posts.orderBy((p) => p.id).at(1).title,
+          users: u.posts.countDistinct((p) => p.userId),
+        }))
+        .toList();
+      assert.deepEqual(rows, [
+        { latest: 'sql 100%', second: 'sql 100%', users: 1 },
+        { latest: 'hello', second: 'hello', users: 1 },
+        { latest: null, second: null, users: 0 },
+      ]);
+      const byLatest = await db
+        .queryable(User)
+        .where((u) =>
+          u.posts
+            .orderBy((p) => p.id)
+            .at(0)
+            .title.startsWith('orm'),
+        )
+        .select((u) => u.name)
+        .toList();
+      assert.deepEqual(byLatest.sort(), ['alice', 'bob']);
+      assert.throws(
+        () =>
+          db
+            .queryable(User)
+            .select((u) => ({ n: u.posts.limit(1).count() }))
+            .toSQL(),
+        /only applies to toList/,
+      );
+    });
+
     it('uses a subquery in in(...) and as a scalar', async () => {
       const { db } = await seeded();
       const q = db.queryable(User).orderBy((u) => u.id);
@@ -2616,6 +2661,42 @@ export function liveSuite(
       assert.deepEqual(
         whole.map((r) => [r.User, r.Company.name]),
         [[null, 'globex']],
+      );
+    });
+
+    it('joins a subquery as a derived table (official sub-query/join-sub-query)', async () => {
+      const { db } = await seeded();
+      const stats = db
+        .queryable(Post)
+        .groupBy((p) => ({ userId: p.userId }))
+        .select((g) => ({ userId: g.key.userId, posts: g.count(), top: g.max((p) => p.amount) }));
+      const rows = await db
+        .queryable(User)
+        .leftJoin(stats, (u, s) => s.userId.eq(u.id))
+        .orderBy((u) => u.id)
+        .select((u, s) => ({ name: u.name, posts: s.posts.orElse(0), top: s.top }))
+        .toList();
+      assert.deepEqual(
+        rows.map((r) => [r.name, r.posts, r.top === null ? null : Number(r.top)]),
+        [
+          ['alice', 2, 2000],
+          ['bob', 2, 3],
+          ['carol', 0, null],
+        ],
+      );
+      // 没写 select：子查询的行放在 derived 键下
+      const whole = await db
+        .queryable(User)
+        .innerJoin(stats, (u, s) => s.userId.eq(u.id))
+        .where((_u, s) => s.posts.ge(2))
+        .orderBy((u) => u.id)
+        .toList();
+      assert.deepEqual(
+        whole.map((r) => [r.User.name, r.derived.posts]),
+        [
+          ['alice', 2],
+          ['bob', 2],
+        ],
       );
     });
 

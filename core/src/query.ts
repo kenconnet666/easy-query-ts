@@ -73,6 +73,8 @@ interface JoinSpec {
   readonly on: Fn<Cond> | undefined;
   /** 只对这张表的拦截器开关（join 的第三个参数，如 `{ skip: ['softDelete'] }`） */
   readonly toggles: readonly InterceptorToggle[];
+  /** 没写 select 时这张表的整行放在哪个键下；省略为实体名（join 子查询时是 'derived'） */
+  readonly label?: string;
 }
 
 interface State {
@@ -114,6 +116,29 @@ export type JoinedRows<
       : Out) & {
     [Q in T]: Nullable extends true ? Row<S['entities'][T]> | null : Row<S['entities'][T]>;
   }
+>;
+
+/** join 一条子查询时它的表引用：列就是子查询 select 的键；N 为 true（left join）时列都可空 */
+export type SubqueryRef<R, N extends boolean = false> = Ref<
+  DerivedSchema<'derived', R>,
+  'derived',
+  N
+>;
+
+/** join 子查询之后没写 select 时的结果：子查询的行放在 derived 键下 */
+export type JoinedQueryRows<
+  K extends string,
+  Out,
+  Refs extends readonly unknown[],
+  R,
+  Nullable extends boolean,
+  PreviousNullable extends boolean = false,
+> = Flatten<
+  (Refs extends readonly [unknown]
+    ? { [Q in K]: PreviousNullable extends true ? Out | null : Out }
+    : PreviousNullable extends true
+      ? { [P in keyof Out]: Out[P] | null }
+      : Out) & { derived: Nullable extends true ? R | null : R }
 >;
 
 /** right join 之后：此前的表都可能没匹配到，它们的表引用变成可空（列都带上 null） */
@@ -629,22 +654,32 @@ export class Queryable<
     K,
     JoinedRows<S, K, Out, Refs, KeyOf<S, E>, false>,
     [...Refs, Ref<S, KeyOf<S, E>>]
-  > {
-    return this.join('inner', entity, on, toggle);
+  >;
+  innerJoin<R>(
+    query: Query<R>,
+    on: (...refs: [...Refs, SubqueryRef<R>]) => Cond,
+  ): Queryable<S, K, JoinedQueryRows<K, Out, Refs, R, false>, [...Refs, SubqueryRef<R>]>;
+  innerJoin(target: Entity | Query<unknown>, on: Fn<Cond>, toggle?: InterceptorToggle): never {
+    return this.join('inner', target, on, toggle);
   }
 
   /** 左连接另一张表（LEFT JOIN）：新表在 select 里的列都可空，没匹配到时整行为 null。其余同 innerJoin */
   leftJoin<E extends S['entities'][EntityKey<S>]>(
     entity: E,
-    on: (...refs: [...Refs, Ref<S, KeyOf<S, E>>]) => Cond,
+    on: (...refs: [...Refs, Ref<S, KeyOf<S, E>, true>]) => Cond,
     toggle?: InterceptorToggle,
   ): Queryable<
     S,
     K,
     JoinedRows<S, K, Out, Refs, KeyOf<S, E>, true>,
     [...Refs, Ref<S, KeyOf<S, E>, true>]
-  > {
-    return this.join('left', entity, on, toggle);
+  >;
+  leftJoin<R>(
+    query: Query<R>,
+    on: (...refs: [...Refs, SubqueryRef<R, true>]) => Cond,
+  ): Queryable<S, K, JoinedQueryRows<K, Out, Refs, R, true>, [...Refs, SubqueryRef<R, true>]>;
+  leftJoin(target: Entity | Query<unknown>, on: Fn<Cond>, toggle?: InterceptorToggle): never {
+    return this.join('left', target, on, toggle);
   }
 
   /**
@@ -660,8 +695,18 @@ export class Queryable<
     K,
     JoinedRows<S, K, Out, Refs, KeyOf<S, E>, false, true>,
     [...NullableRefs<S, Refs>, Ref<S, KeyOf<S, E>>]
-  > {
-    return this.join('right', entity, on, toggle);
+  >;
+  rightJoin<R>(
+    query: Query<R>,
+    on: (...refs: [...NullableRefs<S, Refs>, SubqueryRef<R>]) => Cond,
+  ): Queryable<
+    S,
+    K,
+    JoinedQueryRows<K, Out, Refs, R, false, true>,
+    [...NullableRefs<S, Refs>, SubqueryRef<R>]
+  >;
+  rightJoin(target: Entity | Query<unknown>, on: Fn<Cond>, toggle?: InterceptorToggle): never {
+    return this.join('right', target, on, toggle);
   }
 
   /** 笛卡尔积（CROSS JOIN）：没有 ON，条件写在 where 里。其余同 innerJoin */
@@ -673,13 +718,17 @@ export class Queryable<
     K,
     JoinedRows<S, K, Out, Refs, KeyOf<S, E>, false>,
     [...Refs, Ref<S, KeyOf<S, E>>]
-  > {
-    return this.join('cross', entity, undefined, toggle);
+  >;
+  crossJoin<R>(
+    query: Query<R>,
+  ): Queryable<S, K, JoinedQueryRows<K, Out, Refs, R, false>, [...Refs, SubqueryRef<R>]>;
+  crossJoin(target: Entity | Query<unknown>, toggle?: InterceptorToggle): never {
+    return this.join('cross', target, undefined, toggle);
   }
 
   private join(
     kind: JoinKind,
-    entity: Entity,
+    target: Entity | Query<unknown>,
     on: Fn<Cond> | undefined,
     toggle: InterceptorToggle | undefined,
   ): never {
@@ -687,14 +736,36 @@ export class Queryable<
       throw new Error(
         `${kind}Join() must be called before select(): the selected shape is already fixed`,
       );
+    const toggles = toggle ? [toggle] : [];
+    if (target instanceof Executable) {
+      // 子查询当作一张派生表：登记进这条查询的 schema（名字不与已有的重复），没写 select 时整行放在 derived 键下
+      const built = target.buildTree();
+      assertDerivable(built.shape, `${kind}Join(query)`);
+      const entities = this.ctx.schema.entities;
+      let n = 0;
+      while (`derived${n}` in entities) n++;
+      const key = `derived${n}`;
+      const derived = makeDerived(key, 'subquery', built.select, built.shape.named, false);
+      const schema: AnySchema = {
+        entities: { ...entities, [key]: derived },
+        relations: { ...this.ctx.schema.relations, [key]: {} },
+      };
+      return new Queryable(
+        { ...this.ctx, schema },
+        {
+          ...this.state,
+          joins: [...this.state.joins, { key, kind, on, toggles, label: 'derived' }],
+        },
+      ) as never;
+    }
     const key = Object.keys(this.ctx.schema.entities).find(
-      (k) => this.ctx.schema.entities[k] === entity,
+      (k) => this.ctx.schema.entities[k] === target,
     );
     if (key === undefined)
-      throw new Error(`entity for table '${entity.table}' is not part of the schema`);
+      throw new Error(`entity for table '${target.table}' is not part of the schema`);
     return new Queryable(this.ctx, {
       ...this.state,
-      joins: [...this.state.joins, { key, kind, on, toggles: toggle ? [toggle] : [] }],
+      joins: [...this.state.joins, { key, kind, on, toggles }],
     }) as never;
   }
 
@@ -1099,7 +1170,7 @@ function shapeOf(state: State, refs: readonly unknown[]): unknown {
 
 /** 没写 select 的 join 查询：每张表的整行，按实体名分组；left join 的那张表没匹配时为 null */
 function joinedRows(state: State, refs: readonly AnyRef[]): Record<string, AnyRef> {
-  const keys = [state.key, ...state.joins.map((j) => j.key)];
+  const keys = [state.key, ...state.joins.map((j) => j.label ?? j.key)];
   if (new Set(keys).size !== keys.length) {
     throw new Error(
       'the same entity is joined more than once; call select() to name the columns you want',

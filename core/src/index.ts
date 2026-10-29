@@ -72,12 +72,14 @@ export { GroupedQueryable, NotFoundError, Queryable } from './query.ts';
 export type {
   DerivedSchema,
   Group,
+  JoinedQueryRows,
   JoinedRows,
   NullableRefs,
   KeyInput,
   NullableKeys,
   Page,
   Query,
+  SubqueryRef,
 } from './query.ts';
 export {
   BatchUpdate,
