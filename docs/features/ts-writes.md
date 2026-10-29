@@ -98,6 +98,19 @@ createDb({ schema, adapter, interceptors: [audit] });
 `insert` 带插入的各行（INSERT … SELECT 时为空）、`update` 带 set、`delete` 带是否逻辑删除，都带执行的语句与参数（条件在里面）和影响的行数。
 **钩子在同一个事务里**，抛错会让这次写入失败、事务回滚——可以当作"否决"用；做审计日志也在这里。写入语句上同样可以 `noInterceptor(name)`。
 
+审计要前后对比时，拦截器声明 `before: true`：update / delete（含逻辑删除、`returning`、批量）执行前，核心按这条语句同样的条件（含拦截器给 update / delete 加的租户、逻辑删除条件）先读一次整行，放进 `e.before`（已解码、值对象是嵌套对象）。
+多一条查询，所以只在有生效的拦截器声明时才读；官方没有对应的现成能力（要自己替换执行器）。
+
+```ts
+const diff: Interceptor = {
+  name: 'audit',
+  before: true,
+  afterWrite: (e) => {
+    if (e.kind === 'update') for (const row of e.before ?? []) log(row, e.set);
+  },
+};
+```
+
 ## 差异更新：`changes(before, after)`
 
 ```ts

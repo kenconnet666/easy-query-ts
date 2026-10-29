@@ -46,12 +46,14 @@ export type WriteDetail =
 
 /**
  * afterWrite 收到的事件：写了什么（WriteDetail）、哪个实体、影响了多少行、执行的语句（含参数，条件在里面）。
- * 审计日志据此记录；要"改之前的值"时在 beforeUpdate 里自己按同样的条件查一次
+ * 有拦截器声明了 `before: true` 时，update / delete 的事件还带上改之前的行（before）
  */
 export type WriteEvent = WriteDetail & {
   readonly entity: Entity;
   readonly affected: number;
   readonly statements: readonly Statement[];
+  /** 改之前的整行（值对象是嵌套对象）：update / delete 且有拦截器声明 before 时才有 */
+  readonly before?: readonly Readonly<Record<string, unknown>>[];
 };
 
 export interface Interceptor {
@@ -69,6 +71,11 @@ export interface Interceptor {
   beforeUpdate?(set: Record<string, unknown>, entity: Entity): void;
   /** 写入语句成功执行之后（在同一个事务里）调用：审计日志、发事件、失效缓存。抛错会让这次写入失败（事务里则回滚） */
   afterWrite?(event: WriteEvent): void | Promise<void>;
+  /**
+   * update / delete 的事件要不要带改之前的行（审计的前后对比）：true 时核心在执行前按同样的条件（含拦截器加的）先读一次整行，
+   * 放进 event.before。多一条查询，所以按拦截器声明
+   */
+  readonly before?: boolean;
   /** 删除前询问：返回值表示"不要物理删除，改成把这些列更新成这些值"（逻辑删除）；返回 undefined 表示照常删除 */
   deleteAs?(entity: Entity): Record<string, unknown> | undefined;
 }
@@ -176,6 +183,8 @@ export class Interceptors {
   private readonly skipAll: boolean;
   /** 生效的那些，按登记顺序 */
   private readonly active: readonly Interceptor[];
+  /** 有生效的拦截器要 update / delete 之前的行 */
+  readonly wantsBefore: boolean;
 
   constructor(
     list: readonly Interceptor[],
@@ -193,6 +202,7 @@ export class Interceptors {
       if (skipAll && !i.protected) return false;
       return i.enabled !== false;
     });
+    this.wantsBefore = this.active.some((i) => i.before === true && i.afterWrite !== undefined);
   }
 
   /** 叠加开关，返回新的一份（按先后，后面的覆盖前面的） */

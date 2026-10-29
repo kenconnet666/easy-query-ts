@@ -132,7 +132,7 @@ TS 写法上建议再加一个 Db 级的派生：`db.withInterceptors({ use: ['d
 3. **`table()` 的白名单**：现在按 select 的结果列放行，能筛的列就是能看的列。官方的 `whereObject` 可以按注解只放行一部分；
    TS 可以加 `table(request, { filterable: ['status', 'createdAt'] })`，键的类型由 select 推出。小。
 4. **`afterWrite` 拿不到"改之前的值"**：审计常要前后对比。可以让拦截器声明 `before: true`，由核心在同一事务里按同样的条件先查一次再更新，
-   查到的行放进事件。代价是多一条查询，所以做成按拦截器声明的。中等。
+   查到的行放进事件。代价是多一条查询，所以做成按拦截器声明的。中等。——已做（ROADMAP 16.4.3）：`Interceptor.before`、`WriteEvent.before`。
 5. **`maxRows` 只管 `toList`**：`toTree`、`fillMany` 的被填充查询、导航的 `toList` 第二条查询都没管；后两者受父行数限制，问题不大，
    `toTree` 内部走 `toList` 已经受限。暂不改，记在这里。
 

@@ -91,6 +91,8 @@ export class Returning<R> {
   private readonly statements: readonly Statement[];
   private readonly props: readonly string[];
   private readonly detail: WriteDetail;
+  /** update / delete：读改之前的行（拦截器要时） */
+  private readonly before: (() => Promise<Record<string, unknown>[] | undefined>) | undefined;
 
   constructor(
     ctx: Context,
@@ -98,12 +100,14 @@ export class Returning<R> {
     statements: readonly Statement[],
     props: readonly string[],
     detail: WriteDetail,
+    before?: () => Promise<Record<string, unknown>[] | undefined>,
   ) {
     this.ctx = ctx;
     this.entity = entity;
     this.statements = statements;
     this.props = props;
     this.detail = detail;
+    this.before = before;
   }
 
   toSQL(): Statement[] {
@@ -113,30 +117,38 @@ export class Returning<R> {
   }
 
   async execute(): Promise<R[]> {
+    const before = await this.before?.();
     const out: R[] = [];
-    for (const statement of this.toSQL()) {
-      for (const row of await query(this.ctx, statement)) {
-        // 值对象的列放回嵌套对象
-        const item: Record<string, unknown> = {};
-        out.push(item as R);
-        for (const p of this.props) {
-          const raw = row[this.entity.columnNames[p]!];
-          setPath(
-            item,
-            p,
-            raw === null || raw === undefined ? null : this.entity.columns[p]!.codec.decode(raw),
-          );
-        }
-      }
-    }
+    for (const statement of this.toSQL())
+      for (const row of await query(this.ctx, statement))
+        out.push(decodeRow(this.entity, this.props, (p) => row[this.entity.columnNames[p]!]) as R);
     await this.ctx.interceptors.afterWrite({
       ...this.detail,
       entity: this.entity,
       affected: out.length,
       statements: this.statements,
+      ...(before ? { before } : {}),
     });
     return out;
   }
+}
+
+/** 读出的一行按列解码，值对象的列放回嵌套对象 */
+function decodeRow(
+  entity: Entity,
+  props: readonly string[],
+  raw: (prop: string, index: number) => unknown,
+): Record<string, unknown> {
+  const item: Record<string, unknown> = {};
+  props.forEach((p, i) => {
+    const value = raw(p, i);
+    setPath(
+      item,
+      p,
+      value === null || value === undefined ? null : entity.columns[p]!.codec.decode(value),
+    );
+  });
+  return item;
 }
 
 /** returning 的列名：不写就是整行；写了就只取这些（类型检查只允许实体的列） */
@@ -720,6 +732,7 @@ abstract class Filtered {
   async execute(): Promise<number> {
     // 只构建一次：$onUpdate、逻辑删除的时间这类值每次求值都不同，语句与事件要是同一份
     const { statement, detail } = this.build();
+    const before = await this.rowsBefore();
     const affected = (await execute(this.ctx, statement)).affected;
     const expect = this.state.expect;
     if (expect && affected !== expect.count) throw expect.error(affected);
@@ -728,8 +741,39 @@ abstract class Filtered {
       entity: this.ctx.schema.entities[this.key]!,
       affected,
       statements: [statement],
+      ...(before ? { before } : {}),
     });
     return affected;
+  }
+
+  /**
+   * 改之前的行（有拦截器声明 before 时，否则 undefined）：与这条语句同样的条件（含拦截器给 update / delete 加的），整行读出。
+   * 不加行锁：同一事务里随后的 update / delete 会锁住这些行，两步之间被别人改了的情况留给乐观锁
+   */
+  protected async rowsBefore(): Promise<Record<string, unknown>[] | undefined> {
+    if (!this.ctx.interceptors.wantsBefore) return undefined;
+    const { root, where } = this.scope();
+    const entity = this.ctx.schema.entities[this.key]!;
+    const props = Object.keys(entity.columns);
+    const node: SelectNode = {
+      from: { table: entity.table, alias: root[REF].alias },
+      joins: [],
+      where,
+      groupBy: [],
+      having: [],
+      orderBy: [],
+      columns: props.map((p, i) => ({
+        e: (refColumn(root, p) as Expr<unknown>).node,
+        as: `c${i}`,
+      })),
+      distinct: false,
+      limit: undefined,
+      offset: undefined,
+      forUpdate: false,
+    };
+    const w = new SqlWriter();
+    const rows = await query(this.ctx, { sql: this.ctx.dialect.select(node, w), params: w.params });
+    return rows.map((row) => decodeRow(entity, props, (_, i) => row[`c${i}`]));
   }
 
   toSQL(): Statement {
@@ -903,7 +947,14 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   returning(...columns: string[]): Returning<unknown> {
     const entity = this.ctx.schema.entities[this.key]!;
     const { statement, detail } = this.build();
-    return new Returning(this.ctx, entity, [statement], returningProps(entity, columns), detail);
+    return new Returning(
+      this.ctx,
+      entity,
+      [statement],
+      returningProps(entity, columns),
+      detail,
+      () => this.rowsBefore(),
+    );
   }
 
   /**
@@ -1021,7 +1072,14 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   returning(...columns: string[]): Returning<unknown> {
     const entity = this.ctx.schema.entities[this.key]!;
     const { statement, detail } = this.build();
-    return new Returning(this.ctx, entity, [statement], returningProps(entity, columns), detail);
+    return new Returning(
+      this.ctx,
+      entity,
+      [statement],
+      returningProps(entity, columns),
+      detail,
+      () => this.rowsBefore(),
+    );
   }
 
   /** 物理删除：绕过逻辑删除（读过滤与改写成 update 都不再生效），已被逻辑删除的行也会被删掉 */

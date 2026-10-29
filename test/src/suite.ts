@@ -1498,6 +1498,34 @@ export function liveSuite(
       assert.deepEqual([row.name, row.age], ['alice', null]);
     });
 
+    it('hands the rows before an update to interceptors that ask for them', async () => {
+      const env = await seeded();
+      const before: string[] = [];
+      const audit: Interceptor = {
+        name: 'audit',
+        before: true,
+        afterWrite: (e) => {
+          if (e.kind !== 'insert')
+            before.push(
+              ...(e.before ?? [])
+                .map((r) => String(r['title'] ?? r['body']))
+                .toSorted((a, b) => a.localeCompare(b)),
+            );
+        },
+      };
+      const db = createDb({ schema, adapter: env.adapter, interceptors: [audit] });
+      await db
+        .update(Post)
+        .set({ title: 'x' })
+        .where((p) => p.userId.eq(1))
+        .execute();
+      await db
+        .delete(Comment)
+        .where((c) => c.body.eq('nice'))
+        .execute();
+      assert.deepEqual(before, ['orm tips', 'sql 100%', 'nice']);
+    });
+
     it('notifies afterWrite interceptors after every write', async () => {
       const env = await seeded();
       const events: string[] = [];

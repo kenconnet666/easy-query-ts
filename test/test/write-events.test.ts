@@ -78,4 +78,38 @@ describe('sqlite: write events', () => {
     assert.match(events[2]!.statements[0]!.sql, /^UPDATE "t_doc" AS t0 SET "deleted" = \?/);
     assert.match(events[3]!.statements[0]!.sql, /^DELETE FROM "t_doc"/);
   });
+
+  it('声明 before 的拦截器拿到改之前的整行', async () => {
+    const env = await memoryDb();
+    const seen: string[] = [];
+    const diff: Interceptor = {
+      name: 'auditLog',
+      before: true,
+      afterWrite: (event) => {
+        if (event.kind === 'insert') return;
+        const before = (event.before ?? []).map(
+          (r) => `${String(r['title'])}/${String(r['secret'])}`,
+        );
+        seen.push(`${event.kind} ${before.join(',')}`);
+      },
+    };
+    const db = createDb({ schema, adapter: env.adapter, interceptors: [diff] });
+    await db
+      .insert(Doc)
+      .values([
+        { title: 'a', createdBy: 'u1', secret: 's1' },
+        { title: 'b', createdBy: 'u1', secret: 's2' },
+      ])
+      .execute();
+    await db
+      .update(Doc)
+      .set({ title: 'c' })
+      .where((d) => d.id.eq(1))
+      .execute();
+    // 逻辑删除改写成 update：before 照样是删之前的行；已删除的行读不到，条件与语句一致
+    await db.delete(Doc).all().execute();
+    await db.delete(Doc).all().execute();
+    // 加密列已解密
+    assert.deepEqual(seen, ['update a/s1', 'delete c/s1,b/s2', 'delete ']);
+  });
 });
