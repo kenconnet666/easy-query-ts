@@ -67,6 +67,7 @@ import {
 } from './table.ts';
 import { assembleTree, type TreeNode } from './tree.ts';
 import { query, streamRows, type Context } from './session.ts';
+import { shardedFrom, shardTables } from './sharding.ts';
 
 /** 构建时求值的 lambda：单表查询收到一个表引用，join 之后按 join 顺序收到多个 */
 type Fn<R> = (...refs: any[]) => R;
@@ -1248,11 +1249,14 @@ function build(ctx: Context, state: State, bare = false): Built {
   if (state.reverse) orderBy = orderBy.map((o) => ({ ...o, desc: !o.desc }));
 
   const entity = ctx.schema.entities[state.key]!;
-  const from = pushDown(
-    { ...scope.tableRef(entity, root[REF].alias), hint: state.hint },
-    where,
-    scope.joins.length,
-  );
+  const alias = root[REF].alias;
+  // 分表：按 where 里分片键上的条件裁剪出要查的表
+  const table = entity.sharding
+    ? (({ tables, conds }) => shardedFrom(entity, alias, tables, conds))(
+        shardTables(entity, where, alias),
+      )
+    : scope.tableRef(entity, alias);
+  const from = pushDown({ ...table, hint: state.hint }, where, scope.joins.length);
   const select: SelectNode = {
     from: from.table,
     joins: scope.joins,

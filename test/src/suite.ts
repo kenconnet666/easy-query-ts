@@ -7,6 +7,8 @@ import { entitySource } from '@zerodep-dev/easy-query-ts-cli';
 import { describe, it } from 'vitest';
 import {
   and,
+  byMod,
+  byMonth,
   caseWhen,
   col,
   entity,
@@ -1789,6 +1791,137 @@ export function liveSuite(
         );
       } finally {
         await v1.dropTables(SyncA);
+      }
+    });
+  });
+
+  describe(`${name}: table sharding`, { skip: options.ddl === false }, () => {
+    const ShardLog = entity(
+      't_shard_log',
+      { id: col.int().primaryKey(), userId: col.int(), msg: col.string(50) },
+      { sharding: byMod('userId', 3) },
+    );
+    const ShardOrder = entity(
+      't_shard_order',
+      { id: col.int().primaryKey(), at: col.datetime(), amount: col.int() },
+      {
+        sharding: byMonth('at', {
+          from: '2026-01-01T00:00:00Z',
+          to: () => new Date('2026-03-15T00:00:00Z'),
+        }),
+      },
+    );
+    const shardSchema = defineSchema({ ShardLog, ShardOrder });
+    const open = async () => {
+      const env = await seeded();
+      const db = createDb({ schema: shardSchema, adapter: env.adapter });
+      await db.dropTables(ShardLog, ShardOrder);
+      await db.createTables();
+      return db;
+    };
+    const day = (text: string) => new Date(`${text}T08:00:00Z`);
+
+    it('routes inserts by the sharding key and prunes the tables a query reads', async () => {
+      const db = await open();
+      try {
+        const names = (await db.introspect()).map((t) => t.name.toLowerCase());
+        for (const t of [
+          't_shard_log_0',
+          't_shard_log_1',
+          't_shard_log_2',
+          't_shard_order_202601',
+          't_shard_order_202603',
+        ])
+          assert.ok(names.includes(t), t);
+        await db
+          .insert(ShardLog)
+          .values([1, 2, 3, 4, 5, 6].map((u) => ({ id: u, userId: u, msg: `m${u}` })))
+          .execute();
+        const [counted] = await db.sql<{
+          n: number;
+        }>`SELECT COUNT(*) AS n FROM ${db.sql.ident('t_shard_log_0')}`;
+        assert.equal(Number(counted!.n), 2);
+        // 等于：只查一张表
+        const one = db.queryable(ShardLog).where((l) => l.userId.eq(4));
+        assert.ok(one.toSQL().sql.includes('t_shard_log_1') && !/UNION/i.test(one.toSQL().sql));
+        assert.deepEqual(
+          (await one.toList()).map((l) => l.msg),
+          ['m4'],
+        );
+        // IN：两张表 UNION ALL；没条件：全部表，排序、计数、分页都在库里
+        const two = db.queryable(ShardLog).where((l) => l.userId.in([1, 2]));
+        assert.equal((two.toSQL().sql.match(/UNION ALL/gi) ?? []).length, 1);
+        assert.deepEqual(
+          (await two.orderBy((l) => l.id).toList()).map((l) => l.id),
+          [1, 2],
+        );
+        assert.equal(await db.queryable(ShardLog).count(), 6);
+        const page = await db
+          .queryable(ShardLog)
+          .orderBy((l) => l.id.desc())
+          .toPage(2, 4);
+        assert.deepEqual([page.rows.map((l) => l.id), page.total], [[2, 1], 6]);
+      } finally {
+        await db.dropTables(ShardLog, ShardOrder);
+      }
+    });
+
+    it('prunes month tables by range and updates or deletes table by table', async () => {
+      const db = await open();
+      try {
+        await db
+          .insert(ShardOrder)
+          .values([
+            { id: 1, at: day('2026-01-10'), amount: 10 },
+            { id: 2, at: day('2026-02-03'), amount: 20 },
+            { id: 3, at: day('2026-02-20'), amount: 30 },
+            { id: 4, at: day('2026-03-05'), amount: 40 },
+          ])
+          .execute();
+        const feb = db
+          .queryable(ShardOrder)
+          .where((o) => [
+            o.at.ge(new Date('2026-02-01T00:00:00Z')),
+            o.at.lt(new Date('2026-03-01T00:00:00Z')),
+          ]);
+        assert.ok(
+          feb.toSQL().sql.includes('t_shard_order_202602') && !/UNION/i.test(feb.toSQL().sql),
+        );
+        assert.equal(await feb.sum((o) => o.amount), 50);
+        const later = db.queryable(ShardOrder).where((o) => o.at.ge(day('2026-02-15')));
+        assert.equal((later.toSQL().sql.match(/UNION ALL/gi) ?? []).length, 1);
+        assert.deepEqual(
+          (await later.orderBy((o) => o.id).toList()).map((o) => o.id),
+          [3, 4],
+        );
+        // 分片键落在没有表的月份：查不到，不报错
+        assert.equal(
+          await db
+            .queryable(ShardOrder)
+            .where((o) => o.at.eq(day('2026-07-01')))
+            .count(),
+          0,
+        );
+        // 更新、删除：只碰裁剪出的表，行数合计
+        assert.equal(
+          await db
+            .update(ShardOrder)
+            .set({ amount: 0 })
+            .where((o) => o.at.ge(day('2026-02-01')))
+            .execute(),
+          3,
+        );
+        assert.equal(await db.queryable(ShardOrder).sum((o) => o.amount), 10);
+        assert.equal(
+          await db
+            .delete(ShardOrder)
+            .where((o) => o.id.in([1, 4]))
+            .execute(),
+          2,
+        );
+        assert.equal(await db.queryable(ShardOrder).count(), 2);
+      } finally {
+        await db.dropTables(ShardLog, ShardOrder);
       }
     });
   });

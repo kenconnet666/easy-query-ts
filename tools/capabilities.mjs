@@ -286,7 +286,11 @@ export const capabilities = {
     status: 'done',
     ts: 'createTables / createTablesSql（注释、索引、外键）、planSync / syncTables（只增不删，renamedFrom 改名，差异只列出）、introspect、tableExists、dropTables；suite.ts code-first sync、各方言 sql.test',
   },
-  sharding: { title: '分库分表', status: 'todo', ts: '待做（16.6.2、16.6.3）' },
+  sharding: {
+    title: '分库分表',
+    status: 'todo',
+    ts: '分表已做（byMod / byTime，按条件裁剪、UNION ALL、写入路由；suite.ts table sharding）；分库待做（16.6.3）',
+  },
   cache: {
     title: '二级缓存',
     status: 'done',

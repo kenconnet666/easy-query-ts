@@ -409,7 +409,7 @@ export class Db<S extends AnySchema> {
   async dropTables(...entities: Entity[]): Promise<void> {
     const tables = await this.introspect();
     await this.runDdl(
-      entities
+      this.targets(entities)
         .filter((e) => findTable(tables, e.table))
         .map((e) => this.ctx.dialect.dropTable(e.table)),
     );
@@ -420,11 +420,17 @@ export class Db<S extends AnySchema> {
     return new Db(primary(this.ctx), this.adapter, this.keys, this.inTransaction);
   }
 
-  /** 没给实体时是 schema 里全部非派生的实体 */
+  /** 没给实体时是 schema 里全部非派生的实体；分表实体展开成它的每一张实际表 */
   private targets(entities: readonly Entity[]): Entity[] {
-    return entities.length > 0
-      ? [...entities]
-      : Object.values(this.ctx.schema.entities).filter((e) => !e.derived);
+    const list =
+      entities.length > 0
+        ? entities
+        : Object.values(this.ctx.schema.entities).filter((e) => !e.derived);
+    return list.flatMap((e) => {
+      if (!e.sharding) return [e];
+      const { sharding: _sharding, ...plain } = e;
+      return e.sharding.tables(e.table).map((table): Entity => ({ ...plain, table }));
+    });
   }
 
   /** 逐条执行 DDL；能放进事务的库在一个事务里执行 */

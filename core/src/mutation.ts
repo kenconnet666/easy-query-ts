@@ -34,6 +34,7 @@ import {
   type WriteDetail,
 } from './interceptor.ts';
 import { execute, query, type Context } from './session.ts';
+import { shardTables } from './sharding.ts';
 
 type EntityOf<S extends AnySchema, K extends EntityKey<S>> = S['entities'][K];
 
@@ -620,6 +621,18 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     return { kind: 'insert', rows: this.filled().map(nestRow) };
   }
 
+  /** 这一行写进哪张表：分表时按分片键算 */
+  private tableOf(row: Readonly<Record<string, unknown>>): string {
+    const rule = this.entity.sharding;
+    if (!rule) return this.entity.table;
+    const value = row[rule.column];
+    if (value === undefined || value === null)
+      throw new Error(
+        `insert into the sharded ${this.entity.table} needs the sharding column '${rule.column}'`,
+      );
+    return rule.tableOf(this.entity.table, value);
+  }
+
   private filled(): Record<string, unknown>[] {
     return (this.filledRows ??= this.rows.map((r) =>
       this.ctx.interceptors.beforeInsert(r, this.entity),
@@ -628,16 +641,20 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
 
   toSQL(): Statement[] {
     if (this.rows.length === 0) return [];
-    const groups = new Map<string, Record<string, unknown>[]>();
+    // 列相同、目标表相同（分表时按分片键路由）的行分一组
+    const groups = new Map<
+      string,
+      { table: string; props: string[]; rows: Record<string, unknown>[] }
+    >();
     for (const row of this.filled()) {
       const props = Object.keys(this.entity.columns).filter((p) => row[p] !== undefined);
-      const id = props.join(',');
+      const table = this.tableOf(row);
+      const id = `${table}|${props.join(',')}`;
       let group = groups.get(id);
-      if (!group) groups.set(id, (group = []));
-      group.push(row);
+      if (!group) groups.set(id, (group = { table, props, rows: [] }));
+      group.rows.push(row);
     }
-    return [...groups].flatMap(([id, rows]) => {
-      const props = id === '' ? [] : id.split(',');
+    return [...groups.values()].flatMap(({ table, props, rows }) => {
       if (props.length === 0) throw new Error(`insert into ${this.entity.table} has no values`);
       // 每行占 props.length 个参数；按方言的绑定参数上限切块，一块一条语句（至少一行）
       const perStatement = Math.max(1, Math.floor(this.ctx.dialect.maxBindParams / props.length));
@@ -646,7 +663,7 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
         const w = new SqlWriter();
         const sql = this.ctx.dialect.insert(
           {
-            table: this.entity.table,
+            table,
             columns: props.map((p) => this.entity.columnNames[p]!),
             rows: rows
               .slice(from, from + perStatement)
@@ -775,10 +792,40 @@ abstract class Filtered {
   }
 
   async execute(): Promise<number> {
-    // 只构建一次：$onUpdate、逻辑删除的时间这类值每次求值都不同，语句与事件要是同一份
-    const { statement, detail } = this.build();
-    const before = await this.rowsBefore();
-    const affected = (await execute(this.ctx, statement)).affected;
+    const tables = this.shardTargets();
+    if (!tables) return this.run(true);
+    // 分表：裁剪出的表逐张执行（同一个事务里的话一起回滚），行数合计后再检查 expectRows 与乐观锁
+    let affected = 0;
+    for (const table of tables) affected += await this.retarget(this.onTable(table)).run(false);
+    this.check(affected);
+    return affected;
+  }
+
+  /** 分表实体：这条语句要碰的表；不分表时 undefined */
+  private shardTargets(): string[] | undefined {
+    const entity = this.ctx.schema.entities[this.key]!;
+    if (!entity.sharding) return undefined;
+    if (this.state.returning)
+      throw new Error(`returning() is not supported on the sharded ${entity.table}`);
+    const { root, where } = this.scope();
+    return shardTables(entity, where, root[REF].alias).tables;
+  }
+
+  /** 实体换成其中一张实际表的构建现场 */
+  private onTable(table: string): Context {
+    const entities = this.ctx.schema.entities;
+    const entity = { ...entities[this.key]!, table };
+    delete (entity as { sharding?: unknown }).sharding;
+    return {
+      ...this.ctx,
+      schema: { ...this.ctx.schema, entities: { ...entities, [this.key]: entity } },
+    };
+  }
+
+  /** 同样的语句，换一个构建现场 */
+  protected abstract retarget(ctx: Context): Filtered;
+
+  private check(affected: number): void {
     const expect = this.state.expect;
     if (expect && affected !== expect.count) throw expect.error(affected);
     // 带乐观锁条件却一行也没改到：行已被删除或已被别人改过
@@ -786,6 +833,15 @@ abstract class Filtered {
       throw new Error(
         `optimistic lock failed: ${this.ctx.schema.entities[this.key]!.table} row was changed or deleted by someone else`,
       );
+  }
+
+  /** 执行一条语句；checks 为 false 时由调用方合计后再检查 */
+  protected async run(checks: boolean): Promise<number> {
+    // 只构建一次：$onUpdate、逻辑删除的时间这类值每次求值都不同，语句与事件要是同一份
+    const { statement, detail } = this.build();
+    const before = await this.rowsBefore();
+    const affected = (await execute(this.ctx, statement)).affected;
+    if (checks) this.check(affected);
     await this.ctx.interceptors.afterWrite(
       {
         ...detail,
@@ -1030,6 +1086,10 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     return new Updatable(withToggle(this.ctx, toggle), this.key as K, this.state, this.values);
   }
 
+  protected retarget(ctx: Context): Updatable<S, K> {
+    return new Updatable(ctx, this.key as K, this.state, this.values);
+  }
+
   private withState(change: Partial<WriteState>): Updatable<S, K> {
     return new Updatable(this.ctx, this.key as K, { ...this.state, ...change }, this.values);
   }
@@ -1142,6 +1202,10 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     );
   }
 
+  protected retarget(ctx: Context): Deletable<S, K> {
+    return new Deletable(ctx, this.key as K, this.state);
+  }
+
   private withState(change: Partial<WriteState>): Deletable<S, K> {
     return new Deletable(this.ctx, this.key as K, { ...this.state, ...change });
   }
@@ -1246,6 +1310,10 @@ export class LockRow extends Filtered {
 
   override async execute(): Promise<number> {
     return (await execute(this.ctx, this.toSQL())).affected;
+  }
+
+  protected retarget(ctx: Context): LockRow {
+    return new LockRow(ctx, this.key, this.state.where[0]!);
   }
 
   protected build(): { statement: Statement; detail: WriteDetail } {

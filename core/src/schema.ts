@@ -1,5 +1,6 @@
 import type { SelectNode } from './ast.ts';
 import type { Expr } from './expr.ts';
+import type { ShardingRule } from './sharding.ts';
 
 /**
  * 实体与列的定义。列的 TS 类型、是否可空、是否由库生成都记在类型参数里，查询与插入的类型由它推导，不需要代码生成。
@@ -547,6 +548,8 @@ export interface Entity<Name extends string = string, F extends Fields = Fields>
   readonly indexes?: readonly TableIndex[];
   /** 库里原来的表名：改了表名之后 syncTables 把旧表改名，而不是新建 */
   readonly renamedFrom?: string;
+  /** 单库分表的规则（byMod / byTime …）：查询按条件裁剪出要查的表，写入按分片键路由 */
+  readonly sharding?: ShardingRule;
 }
 
 /** 一个索引：名字、库里的列名（按顺序）、是否唯一 */
@@ -571,6 +574,8 @@ export interface EntityOptions<F extends Fields = Fields> {
     readonly name?: string;
   }[];
   readonly renamedFrom?: string;
+  /** 分表：`byMonth('createdAt', { from: '2025-01' })`、`byMod('userId', 4)`，见 sharding.ts */
+  readonly sharding?: ShardingRule<IndexColumn<F>>;
 }
 
 /** 一条查询的结果行（Out，列名 → 类型）对应的派生实体的列：值可空的列对应可空列 */
@@ -646,7 +651,18 @@ export function entity(
     ...(options?.comment !== undefined ? { comment: options.comment } : {}),
     ...(indexes.length > 0 ? { indexes } : {}),
     ...(options?.renamedFrom !== undefined ? { renamedFrom: options.renamedFrom } : {}),
+    ...(options?.sharding ? { sharding: checkSharding(table, options.sharding, columns) } : {}),
   };
+}
+
+function checkSharding(
+  table: string,
+  rule: ShardingRule,
+  columns: Readonly<Record<string, AnyColumn>>,
+): ShardingRule {
+  if (!(rule.column in columns))
+    throw new Error(`${table}: sharding column '${rule.column}' is not a column`);
+  return rule;
 }
 
 /** 一列（或值对象）读出来的类型 */

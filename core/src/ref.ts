@@ -44,6 +44,7 @@ import {
   type Row,
   type ValueOf,
 } from './schema.ts';
+import { shardedFrom } from './sharding.ts';
 
 export const REF: unique symbol = Symbol('eqts.ref');
 
@@ -131,6 +132,8 @@ export class Scope {
    * 子查询里用到的 CTE 一并上提，WITH 不能嵌在子查询里。
    */
   tableRef(entity: Entity, alias: string): TableRef {
+    // 分表实体经导航、join 进来时查它的全部表（只有查询的主表按条件裁剪）
+    if (entity.sharding) return shardedFrom(entity, alias, entity.sharding.tables(entity.table));
     const d = entity.derived;
     if (!d) return { table: entity.table, alias };
     for (const inner of d.q.ctes ?? []) this.useCte(inner);
