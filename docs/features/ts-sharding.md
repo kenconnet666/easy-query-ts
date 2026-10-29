@@ -1,4 +1,4 @@
-# TS：单库分表（对应官方 super/sharding-table、sharding-mod、sharding-time）
+# TS：分表与分库（对应官方 super/*）
 
 ```ts
 import { byMod, byMonth } from '@zerodep-dev/easy-query-ts';
@@ -37,6 +37,24 @@ await db.queryable(Order).where((o) => o.createdAt.ge(start)).orderBy((o) => o.c
 
 - 官方的分表跨表查询在内存里归并（排序、分页、聚合），这里交给库的 `UNION ALL`，代码简单、行为与普通查询一致；表很多时注意执行计划。
 - 官方按时间分表有定时任务建下一个月的表；这里 `syncTables()` / `createTables()` 建到 `to`，由部署时或定时任务调用。
-- 分库（多个库之间路由、跨库归并）见 16.6.3。
 
-SQLite、MySQL 8.4、PG 17 实测（`suite.ts` table sharding：路由、单表裁剪、IN / 范围 UNION ALL、计数分页求和、逐表更新删除）；规则单测 `sharding.test.ts`。
+## 分库（对应官方 sharding-datasource、sharding-all）
+
+```ts
+const sdb = shardDatabases({
+  shards: { ds0: db0, ds1: db1 }, // 同一个 schema、各连一个库的 Db
+  routes: { Order: byMod('userId', 2, { table: (_, i) => `ds${i}` }) }, // 规则复用分表的，"表名"就是库名
+});
+await sdb.insert(Order, rows); // 按行路由
+await sdb.query(Order, (q) => q.where((o) => o.userId.eq(7))).toList(); // 只查 ds1
+await sdb.query(Order, (q) => q.orderBy((o) => o.createdAt.desc())).toPage(3, 20); // 各库取前 60 条归并再切
+await sdb.update(Order, (u) => u.set({ state: 'closed' }).where((o) => o.userId.in(ids)));
+```
+
+- 路由同样读 where 里分片键的条件；没有路由的实体只在 `defaultShard`（默认第一个库）。
+- 跨库查询：各库并发（`concurrency`，默认 4）执行同一个查询，按查询自己的 `orderBy` 在内存里归并——排序的表达式要在结果里（select 出来或整行）；
+  `toPage` 各库取前 page × size 条、总数相加；`count` / `sum`（decimal 文字精确相加）/ `min` / `max` 各库算完再合并。
+- 不支持跨库的 `groupBy`、`avg`、带 `limit` / `offset` 的 `toList`（用 `toPage`）；空值排序按"NULL 最小"，PG 上与库里的默认不同。
+- 写入只在各自的库里，跨库写入不是分布式事务；要事务就 `sdb.shard(name).transaction(…)` 在一个库里做。
+
+SQLite、MySQL 8.4、PG 17 实测（`suite.ts` table sharding：路由、单表裁剪、IN / 范围 UNION ALL、计数分页求和、逐表更新删除）；规则单测 `sharding.test.ts`；分库 `shards.test.ts`（两个 SQLite 库：路由、裁剪、跨库排序分页、聚合、更新删除）。

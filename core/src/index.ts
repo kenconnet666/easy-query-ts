@@ -33,6 +33,8 @@ export type {
 export { defineComputed, defineSchema } from './relations.ts';
 export { assembleTables, bareName } from './ddl.ts';
 export { byDay, byMod, byMonth, byTime, byYear } from './sharding.ts';
+export { shardDatabases, ShardedDb, ShardedQuery } from './shards.ts';
+export type { ShardOptions } from './shards.ts';
 export type { ShardingRule, ShardKeyFilter, TimeUnit as ShardTimeUnit } from './sharding.ts';
 export type {
   DbColumn,

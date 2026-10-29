@@ -112,5 +112,5 @@
 | code-first/custom、dynamic-table                                       | 自定义类型映射（`dbType`）；换表用 `mapTables` 后同步                     | ✓ 16.5.1         |
 | cache/*                                                                | `easy-query-ts-cache`：kv / all、拦截器失效、延迟双删                     | ✓ 16.6.1         |
 | super/sharding-table、time、mod、multi、sequence、dna、default-route-* | `byMod` / `byTime`：按条件裁剪、UNION ALL、写入路由                       | ✓ 16.6.2         |
-| super/sharding-datasource、sharding-all、sharding-all-time             | 分库                                                                      | ✗ 16.6.3         |
+| super/sharding-datasource、sharding-all、sharding-all-time             | `shardDatabases`：按键路由、跨库归并排序分页聚合                          | ✓ 16.6.3         |
 | super/README（读写分离）                                               | `createDb({ replicas })`、`usePrimary()`                                  | ✓ 16.6.4         |

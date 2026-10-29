@@ -288,8 +288,8 @@ export const capabilities = {
   },
   sharding: {
     title: '分库分表',
-    status: 'todo',
-    ts: '分表已做（byMod / byTime，按条件裁剪、UNION ALL、写入路由；suite.ts table sharding）；分库待做（16.6.3）',
+    status: 'different',
+    ts: '分表 byMod / byTime（按条件裁剪、库里 UNION ALL、写入路由）；分库 shardDatabases（路由、内存归并排序分页、count / sum / min / max）；跨库 groupBy 不做；suite.ts table sharding、shards.test.ts',
   },
   cache: {
     title: '二级缓存',

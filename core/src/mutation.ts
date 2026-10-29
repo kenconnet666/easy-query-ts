@@ -801,6 +801,12 @@ abstract class Filtered {
     return affected;
   }
 
+  /** @internal 条件（含拦截器加的）与主表别名：分库按分片键路由用 */
+  conditions(): { alias: string; where: Node[] } {
+    const { root, where } = this.scope();
+    return { alias: root[REF].alias, where };
+  }
+
   /** 分表实体：这条语句要碰的表；不分表时 undefined */
   private shardTargets(): string[] | undefined {
     const entity = this.ctx.schema.entities[this.key]!;
