@@ -3,7 +3,7 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1705、写法不同 346、待做 124、不适用 74。
+合计：已对应 1756、写法不同 346、待做 73、不适用 74。
 
 ## 按能力
 
@@ -16,8 +16,8 @@
 | DuckDB 方言（`dialect.duckdb`）                                  | 16     | 待做     | 待做（16.7.3）                                                                                                                                                                                      |
 | H2 方言（`dialect.h2`）                                          | 74     | 不适用   | 不适用：H2 运行在 JVM 里，Node 没有驱动                                                                                                                                                             |
 | 人大金仓方言（`dialect.kingbase`）                               | 2      | 待做     | 待做（16.7.5）                                                                                                                                                                                      |
-| SQL Server 方言（`dialect.mssql`）                               | 38     | 待做     | 待做（16.7.1）                                                                                                                                                                                      |
-| SQL Server 2008 及以前（ROW_NUMBER 分页）（`dialect.mssql2008`） | 13     | 待做     | 待做（16.7.1）                                                                                                                                                                                      |
+| SQL Server 方言（`dialect.mssql`）                               | 38     | 已对应   | easy-query-ts-mssql：共用套件全绿（SQL Server 2022）、MsSql.* 专属函数、建表与读库结构；ts-sqlserver.md                                                                                             |
+| SQL Server 2008 及以前（ROW_NUMBER 分页）（`dialect.mssql2008`） | 13     | 已对应   | mssql(pool, { version: 2008 })：ROW_NUMBER 分页等按版本渲染，没有旧写法的报出最低版本；mssql live / sql.test                                                                                        |
 | 按 DTO 自动带出（selectAutoInclude）（`dto.autoInclude`）        | 35     | 写法不同 | defineView + select(View)；suite.ts views                                                                                                                                                           |
 | 按对象筛选排序（whereObject / orderByObject）（`dto.object`）    | 101    | 已对应   | filterBy(input, rules)（同名列直接写比较方式，{ op, column } 多列任一满足、经过导航，没填的跳过）、sortBy(sort, 白名单)、table(request, { filterable, sortable })；filter-by.test.ts、table.test.ts |
 | CASE WHEN（`expr.case`）                                         | 27     | 已对应   | caseWhen；suite.ts functions and CASE                                                                                                                                                               |
@@ -271,7 +271,7 @@
 | kingbase/MyKingbaseESTest.java#testaa  | `SELECT `id`,`create_time`,`update_time`,`create_by`,`update_by`,`deleted`,`delete_by`,`del…` |
 | kingbase/MyKingbaseESTest.java#testaa1 | `SELECT `id`,`create_time`,`update_time`,`create_by`,`update_by`,`deleted`,`delete_by`,`del…` |
 
-### SQL Server 方言（`dialect.mssql`，待做）
+### SQL Server 方言（`dialect.mssql`，已对应）
 
 | 用例                                           | 断言的 SQL（摘要）                                                                            |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -314,7 +314,7 @@
 | mssql/MsSQLUpdateJoinTest.java#testUpdateJoin1 | `UPDATE t SET t.[Type] = t1.[Name] FROM [doc_bank_card] t INNER JOIN [doc_user] t1 ON t1.[I…` |
 | mssql/MsSQLUpdateJoinTest.java#testUpdateJoin2 | `UPDATE t SET t.[Type] = t1.[Name] FROM [doc_bank_card] t INNER JOIN [doc_bank] t1 ON t1.[I…` |
 
-### SQL Server 2008 及以前（ROW_NUMBER 分页）（`dialect.mssql2008`，待做）
+### SQL Server 2008 及以前（ROW_NUMBER 分页）（`dialect.mssql2008`，已对应）
 
 | 用例                                                   | 断言的 SQL（摘要）                                                                            |
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |

@@ -7,6 +7,7 @@
     { "path": "mysql/tsconfig.build.json" },
     { "path": "pg/tsconfig.build.json" },
     { "path": "hana/tsconfig.build.json" },
+    { "path": "mssql/tsconfig.build.json" },
     { "path": "decimal/tsconfig.build.json" },
     { "path": "date/tsconfig.build.json" },
     { "path": "crypto/tsconfig.build.json" },

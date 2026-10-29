@@ -301,11 +301,15 @@ export const capabilities = {
     status: 'done',
     ts: 'parseSearchRequest：官方参数约定（-op、-1/-2、sort、current/pageSize、strict）解析成 TableRequest，交给 table()；search.test.ts',
   },
-  'dialect.mssql': { title: 'SQL Server 方言', status: 'todo', ts: '待做（16.7.1）' },
+  'dialect.mssql': {
+    title: 'SQL Server 方言',
+    status: 'done',
+    ts: 'easy-query-ts-mssql：共用套件全绿（SQL Server 2022）、MsSql.* 专属函数、建表与读库结构；ts-sqlserver.md',
+  },
   'dialect.mssql2008': {
     title: 'SQL Server 2008 及以前（ROW_NUMBER 分页）',
-    status: 'todo',
-    ts: '待做（16.7.1）',
+    status: 'done',
+    ts: 'mssql(pool, { version: 2008 })：ROW_NUMBER 分页等按版本渲染，没有旧写法的报出最低版本；mssql live / sql.test',
   },
   'dialect.dameng': { title: '达梦方言', status: 'todo', ts: '待做（16.7.4）' },
   'dialect.kingbase': { title: '人大金仓方言', status: 'todo', ts: '待做（16.7.5）' },

@@ -120,6 +120,8 @@ export interface InsertNode {
   readonly conflict: ConflictNode | undefined;
   /** INSERT … SELECT：行来自这条查询（此时 rows 为空，columns 与查询的输出列按位置对应） */
   readonly source?: SelectNode | undefined;
+  /** 给自增列写了值（SQL Server 要先 SET IDENTITY_INSERT … ON） */
+  readonly identityInsert?: boolean | undefined;
 }
 
 /** upsert：target 列冲突时，update 为空表示忽略这一行，否则用新值更新这些列 */

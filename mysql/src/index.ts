@@ -189,10 +189,14 @@ export class MySqlDialect extends Dialect {
     return ` ON DUPLICATE KEY UPDATE ${update.join(', ')}`;
   }
 
-  override limitOffset(limit: number | undefined, offset: number | undefined): string {
+  override limitOffset(
+    limit: number | undefined,
+    offset: number | undefined,
+    ordered = false,
+  ): string {
     if (limit === undefined && offset !== undefined && offset > 0)
       return ` LIMIT ${NO_LIMIT} OFFSET ${offset}`;
-    return super.limitOffset(limit, offset);
+    return super.limitOffset(limit, offset, ordered);
   }
 }
 

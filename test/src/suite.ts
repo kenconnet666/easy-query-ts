@@ -77,6 +77,8 @@ export interface LiveSuiteOptions {
   readonly returning?: boolean;
   /** 是否测试代码优先建表（createTables）的往返 */
   readonly ddl?: boolean;
+  /** 窗口函数 NTH_VALUE（SQL Server 没有） */
+  readonly nthValue?: boolean;
 }
 
 export function liveSuite(
@@ -3223,13 +3225,26 @@ export function liveSuite(
           last: win.lastValue(p.title, (w) =>
             w.partitionBy(p.userId).orderBy(p.id).rows('unboundedPreceding', 'unboundedFollowing'),
           ),
+        }))
+        .toList();
+      assert.deepEqual(rows[0], { first: 'orm tips', last: 'sql 100%' });
+      assert.deepEqual(rows[3], { first: 'orm_v2', last: 'hello' });
+      const nth = db
+        .queryable(Post)
+        .orderBy((p) => p.id)
+        .select((p) => ({
           second: win.nthValue(p.title, 2, (w) =>
             w.partitionBy(p.userId).orderBy(p.id).rows('unboundedPreceding', 'unboundedFollowing'),
           ),
-        }))
-        .toList();
-      assert.deepEqual(rows[0], { first: 'orm tips', last: 'sql 100%', second: 'sql 100%' });
-      assert.deepEqual(rows[3], { first: 'orm_v2', last: 'hello', second: 'hello' });
+        }));
+      if (options.nthValue === false) {
+        assert.throws(() => nth.toSQL(), /nthValue\(\) is not supported/);
+        return;
+      }
+      assert.deepEqual(
+        (await nth.toList()).map((r) => r.second),
+        ['sql 100%', 'sql 100%', 'hello', 'hello'],
+      );
     });
   });
 

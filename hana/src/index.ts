@@ -175,10 +175,14 @@ export class HanaDialect extends Dialect {
     return typeof v === 'number' || typeof v === 'bigint' ? String(v) : v;
   }
 
-  override limitOffset(limit: number | undefined, offset: number | undefined): string {
+  override limitOffset(
+    limit: number | undefined,
+    offset: number | undefined,
+    ordered = false,
+  ): string {
     if (limit === undefined && offset !== undefined && offset > 0)
       return ` LIMIT ${NO_LIMIT} OFFSET ${offset}`;
-    return super.limitOffset(limit, offset);
+    return super.limitOffset(limit, offset, ordered);
   }
 }
 

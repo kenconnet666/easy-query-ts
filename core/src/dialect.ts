@@ -61,8 +61,44 @@ export function coalesceEach(args: readonly string[]): string {
     .join(', ');
 }
 
+/** 方言的选项：面向的服务器版本 */
+export interface DialectOptions {
+  /** 服务器版本（'2017'、'8.0.18'、'12.2'）：低于某个特性的最低版本时退回旧写法，没有旧写法就报错。不给按最新 */
+  readonly version?: string | number | undefined;
+}
+
+/** 点分版本比较：'8.0.18' 与 '8.0.9' 按数字逐段比 */
+export function compareVersions(a: string, b: string): number {
+  const x = a.split('.').map(Number);
+  const y = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 export abstract class Dialect {
   abstract readonly name: string;
+  /** 面向的服务器版本；undefined 表示最新 */
+  readonly version: string | undefined;
+
+  constructor(options: DialectOptions = {}) {
+    this.version = options.version === undefined ? undefined : String(options.version);
+  }
+
+  /** 服务器版本至少是 min（没配置版本时按最新，总是真） */
+  protected atLeast(min: string): boolean {
+    return this.version === undefined || compareVersions(this.version, min) >= 0;
+  }
+
+  /** 用到的特性要求更高的版本时报错，说清要哪个版本、配置的是哪个 */
+  protected requires(feature: string, min: string): void {
+    if (!this.atLeast(min))
+      throw new Error(
+        `${feature} needs ${this.name} ${min} or later (the dialect is configured for ${this.version})`,
+      );
+  }
 
   private cachedFunctions: Record<string, FunctionRenderer> | undefined;
 
@@ -181,6 +217,13 @@ export abstract class Dialect {
   protected aggOrder(order: readonly OrderNode[], w: SqlWriter): string {
     if (order.length === 0) return '';
     return ` ORDER BY ${order.map((o) => this.node(o.e, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
+  }
+
+  /**
+   * 当作值用的表达式（select 的列、set 的值）。默认原样渲染；比较、AND / OR 这类条件不能直接当值的库（SQL Server）覆盖，写成 CASE WHEN … THEN 1 ELSE 0 END
+   */
+  protected value(n: Node, w: SqlWriter): string {
+    return this.node(n, w);
   }
 
   /**
@@ -409,7 +452,8 @@ export abstract class Dialect {
     return value;
   }
 
-  limitOffset(limit: number | undefined, offset: number | undefined): string {
+  /** 分页子句；ordered 说明前面有没有 ORDER BY（SQL Server 的 OFFSET … FETCH 要求有） */
+  limitOffset(limit: number | undefined, offset: number | undefined, _ordered = false): string {
     let s = '';
     if (limit !== undefined) s += ` LIMIT ${int(limit)}`;
     if (offset !== undefined && offset > 0) s += ` OFFSET ${int(offset)}`;
@@ -448,6 +492,9 @@ export abstract class Dialect {
     return `ROLLBACK TO SAVEPOINT ${name}`;
   }
 
+  /** 递归 CTE 的关键字（SQL Server、Oracle 不写，直接 WITH） */
+  protected readonly recursiveKeyword: string = 'RECURSIVE ';
+
   /** 是否支持递归 CTE（WITH RECURSIVE）。HANA 没有，用层级函数代替 */
   readonly supportsRecursiveCte: boolean = true;
 
@@ -469,14 +516,14 @@ export abstract class Dialect {
       (c) =>
         `${this.quote(c.name)} (${c.columns.map((x) => this.quote(x)).join(', ')}) AS (${this.select(c.q, w)})`,
     );
-    return `WITH ${recursive ? 'RECURSIVE ' : ''}${parts.join(', ')} `;
+    return `WITH ${recursive ? this.recursiveKeyword : ''}${parts.join(', ')} `;
   }
 
   private selectCore(q: SelectNode, w: SqlWriter): string {
     const cols =
       q.columns.length === 0
         ? '1'
-        : q.columns.map((c) => `${this.node(c.e, w)} AS ${this.quote(c.as)}`).join(', ');
+        : q.columns.map((c) => `${this.value(c.e, w)} AS ${this.quote(c.as)}`).join(', ');
     let s = `SELECT ${q.distinct ? 'DISTINCT ' : ''}${cols} FROM ${q.from.sub ? `(${this.select(q.from.sub, w)})` : this.table(q.from.table)} ${q.from.alias}${q.from.hint ? ` ${q.from.hint}` : ''}`;
     s += this.joinClauses(q.joins, w);
     if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
@@ -488,7 +535,7 @@ export abstract class Dialect {
     if (q.having.length > 0) s += ` HAVING ${this.conjunction(q.having, w)}`;
     if (q.orderBy.length > 0)
       s += ` ORDER BY ${q.orderBy.map((o) => this.node(o.e, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
-    s += this.limitOffset(q.limit, q.offset);
+    s += this.limitOffset(q.limit, q.offset, q.orderBy.length > 0);
     if (q.forUpdate) s += this.forUpdate(q.lockWait);
     return s;
   }
@@ -534,7 +581,7 @@ export abstract class Dialect {
    * 表达式照旧引用 t0，LEFT JOIN 的语义不变（目标不存在的行照样更新，导航的列为 NULL）；PG、SQLite 3.33+ 都认这种自连接
    */
   update(q: UpdateNode, w: SqlWriter = new SqlWriter()): string {
-    const set = q.set.map((s) => `${this.quote(s.column)} = ${this.node(s.e, w)}`).join(', ');
+    const set = q.set.map((s) => `${this.quote(s.column)} = ${this.value(s.e, w)}`).join(', ');
     if (!q.joins?.length) {
       let s = `UPDATE ${this.table(q.from.table)} AS ${q.from.alias} SET ${set}`;
       if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;

@@ -669,6 +669,7 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
               .slice(from, from + perStatement)
               .map((r) => props.map((p) => columnValue(this.entity.columns[p]!, r[p]))),
             conflict: this.conflict,
+            identityInsert: props.some((p) => this.entity.columns[p]!.options.generated),
           },
           w,
         );
