@@ -143,7 +143,7 @@ function columnBuilder(column: DbColumn): { builder: string; note?: string } {
     return { builder: `col.string(${args?.[0] ?? 1}).dbType(${quote(raw)})` };
   if (/^(text|mediumtext|longtext|tinytext|n?clob)$/.test(base))
     return { builder: `col.string().dbType(${quote(raw)})` };
-  if (t === 'tinyint(1)' || /^(boolean|bool)$/.test(base)) return { builder: 'col.boolean()' };
+  if (t === 'tinyint(1)' || /^(boolean|bool|bit)$/.test(base)) return { builder: 'col.boolean()' };
   if (/^(int|integer|int4|smallint|int2|mediumint|tinyint|serial)$/.test(base))
     return { builder: 'col.int()' };
   if (/^(bigint|int8|bigserial)$/.test(base)) return { builder: 'col.bigint()' };

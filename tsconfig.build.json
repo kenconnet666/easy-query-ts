@@ -9,6 +9,7 @@
     { "path": "hana/tsconfig.build.json" },
     { "path": "mssql/tsconfig.build.json" },
     { "path": "oracle/tsconfig.build.json" },
+    { "path": "dameng/tsconfig.build.json" },
     { "path": "duckdb/tsconfig.build.json" },
     { "path": "decimal/tsconfig.build.json" },
     { "path": "date/tsconfig.build.json" },

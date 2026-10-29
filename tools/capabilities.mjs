@@ -311,7 +311,11 @@ export const capabilities = {
     status: 'done',
     ts: 'mssql(pool, { version: 2008 })：ROW_NUMBER 分页等按版本渲染，没有旧写法的报出最低版本；mssql live / sql.test',
   },
-  'dialect.dameng': { title: '达梦方言', status: 'todo', ts: '待做（16.7.4）' },
+  'dialect.dameng': {
+    title: '达梦方言',
+    status: 'done',
+    ts: 'easy-query-ts-dameng：方言继承 Oracle 方言后覆盖差异（BIT、CLOB、IDENTITY_INSERT、多行 VALUES、DATEADD）；共用套件在 DM8 上全绿；ts-dameng.md',
+  },
   'dialect.kingbase': { title: '人大金仓方言', status: 'todo', ts: '待做（16.7.5）' },
   'dialect.duckdb': {
     title: 'DuckDB 方言',
