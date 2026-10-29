@@ -5,6 +5,7 @@ export type {
   ColumnOptions,
   DateText,
   DecimalText,
+  Encryption,
   Entity,
   Fields,
   Insert,

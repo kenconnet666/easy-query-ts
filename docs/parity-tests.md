@@ -3,14 +3,14 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1653、写法不同 288、待做 234、不适用 74。
+合计：已对应 1643、写法不同 298、待做 234、不适用 74。
 
 ## 按能力
 
 | 能力                                                             | 用例数 | 状态     | TS 侧（实现与测试）                                                                                                                                                                                 |
 | ---------------------------------------------------------------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 建表与迁移（code-first）（`codeFirst`）                          | 17     | 待做     | 部分：createTables；syncTables 待做（16.5）                                                                                                                                                         |
-| 列加密（`column.encryption`）                                    | 8      | 已对应   | encrypted（可分段搜索）、sqlConvert；guards.test.ts、sql-convert.test.ts                                                                                                                            |
+| 列加密（`column.encryption`）                                    | 8      | 已对应   | encrypted（可分段搜索）、sqlConvert；easy-query-ts-crypto 的 aesEncryption / sm4Encryption（与 Java 版分段兼容）；crypto.test.ts、guards.test.ts、sql-convert.test.ts                               |
 | ClickHouse 方言（`dialect.clickhouse`）                          | 4      | 待做     | 待做（16.7.6）                                                                                                                                                                                      |
 | 达梦方言（`dialect.dameng`）                                     | 51     | 待做     | 待做（16.7.4）                                                                                                                                                                                      |
 | DuckDB 方言（`dialect.duckdb`）                                  | 16     | 待做     | 待做（16.7.3）                                                                                                                                                                                      |
@@ -55,10 +55,11 @@
 | 树（toTreeList / asTreeCTE）（`tree`）                           | 25     | 已对应   | toTree、descendantsOf / ancestorsOf；tree.test.ts                                                                                                                                                   |
 | 乐观锁版本（`version`）                                          | 13     | 已对应   | version() / version({ initial, next })、withVersion；changes.test.ts                                                                                                                                |
 | 窗口函数与分区（`window`）                                       | 38     | 已对应   | win.* 含 firstValue / lastValue / nthValue；suite.ts function library、windows                                                                                                                      |
-| 删除（`write.delete`）                                           | 25     | 已对应   | delete()、hard()、hardDelete 护栏；suite.ts、guards.test.ts                                                                                                                                         |
+| 删除（`write.delete`）                                           | 21     | 已对应   | delete()、hard()、hardDelete 护栏；suite.ts、guards.test.ts                                                                                                                                         |
 | 插入（`write.insert`）                                           | 44     | 已对应   | insert().values / fromQuery / returnId / returnEntity；suite.ts writes                                                                                                                              |
+| 更新 / 删除里用导航（UPDATE / DELETE 带 JOIN）（`write.join`）   | 10     | 写法不同 | 条件、set 里的多对一导航生成 LEFT JOIN；MySQL 原生多表 UPDATE / DELETE，PG / SQLite 按主键自连接（保留 LEFT 语义，官方在 PG 上等于 INNER）；suite.ts、sqlite.sql.test.ts                            |
 | 写哪些列、批量执行（`write.strategy`）                           | 19     | 写法不同 | values / entity / entities 的 { columns: notNull \| null }；entities(..).batch() 合成 CASE WHEN 一条语句（不依赖驱动批量接口）；suite.ts                                                            |
-| 更新（`write.update`）                                           | 56     | 已对应   | update().set / entity / changes / withVersion；suite.ts、changes.test.ts                                                                                                                            |
+| 更新（`write.update`）                                           | 50     | 已对应   | update().set / entity / changes / withVersion；suite.ts、changes.test.ts                                                                                                                            |
 | upsert（`write.upsert`）                                         | 13     | 已对应   | onConflict().merge / ignore；suite.ts upsert                                                                                                                                                        |
 
 ## 逐条
@@ -2400,8 +2401,6 @@
 | DeleteTest.java#deletex                            | `DELETE FROM `t_blog`WHERE`id` = ?`                                                         |
 | DeleteTest.java#deletex1                           | `UPDATE `t_blog`SET`deleted`= ? WHERE`deleted`= ? AND`id` = ?`                              |
 | mysql8/MySQL8Test2.java#testDelete                 | `SELECT t.`id`,t.`uid`,t.`code`,t.`type`,t.`bank_id`,t.`open_time`FROM`t_bank_card` t INN…` |
-| pgsql/DeleteUpdateJoinTest.java#testDeleteJoin1    | `DELETE FROM \`                                                                             |
-| pgsql/DeleteUpdateJoinTest.java#testDeleteJoin2    | `DELETE FROM \`                                                                             |
 | QueryTest12.java#testDoc23                         | `DELETE FROM `relation_user`t WHERE EXISTS(SELECT 1 FROM`relation_teacher` t1 WHERE EXIST…` |
 | QueryTest26.java#testAAA                           |                                                                                             |
 | TestDeleteFlatAndPredicate.java#testExpressionKey  |                                                                                             |
@@ -2412,8 +2411,6 @@
 | TestDeleteFlatAndPredicate.java#testExpressionKey6 |                                                                                             |
 | TestDeleteFlatAndPredicate.java#testExpressionKey7 |                                                                                             |
 | TestDeleteFlatAndPredicate.java#testExpressionKey8 |                                                                                             |
-| UpdateDeleteJoinTest.java#testDeleteJoin1          | `DELETE t FROM `doc_bank_card`t INNER JOIN`doc_user` t1 ON t1.`id` = t.`uid` WHERE t1.`na…` |
-| UpdateDeleteJoinTest.java#testDeleteJoin2          | `DELETE t FROM `doc_bank_card`t INNER JOIN`doc_user` t1 ON t1.`id` = t.`uid` WHERE t1.`na…` |
 
 ### 插入（`write.insert`，已对应）
 
@@ -2464,6 +2461,21 @@
 | UpperPropertyTest.java#test1                           |                                                                                               |
 | UpperPropertyTest.java#test2                           |                                                                                               |
 
+### 更新 / 删除里用导航（UPDATE / DELETE 带 JOIN）（`write.join`，写法不同）
+
+| 用例                                            | 断言的 SQL（摘要）                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| pgsql/DeleteUpdateJoinTest.java#testDeleteJoin1 | `DELETE FROM \`                                                                             |
+| pgsql/DeleteUpdateJoinTest.java#testDeleteJoin2 | `DELETE FROM \`                                                                             |
+| pgsql/DeleteUpdateJoinTest.java#testUpdateJoin1 | `UPDATE \`                                                                                  |
+| pgsql/DeleteUpdateJoinTest.java#testUpdateJoin2 | `UPDATE \`                                                                                  |
+| pgsql/DeleteUpdateJoinTest.java#testUpdateJoin3 |                                                                                             |
+| pgsql/DeleteUpdateJoinTest.java#testUpdateJoin4 |                                                                                             |
+| UpdateDeleteJoinTest.java#testDeleteJoin1       | `DELETE t FROM `doc_bank_card`t INNER JOIN`doc_user` t1 ON t1.`id` = t.`uid` WHERE t1.`na…` |
+| UpdateDeleteJoinTest.java#testDeleteJoin2       | `DELETE t FROM `doc_bank_card`t INNER JOIN`doc_user` t1 ON t1.`id` = t.`uid` WHERE t1.`na…` |
+| UpdateDeleteJoinTest.java#testUpdateJoin1       | `UPDATE `doc_bank_card`t INNER JOIN`doc_user` t1 ON t1.`id` = t.`uid` SET t.`type` = t1.`…` |
+| UpdateDeleteJoinTest.java#testUpdateJoin2       | `UPDATE `doc_bank_card`t INNER JOIN`doc_bank` t1 ON t1.`id` = t.`bank_id`INNER JOIN`doc…`   |
+
 ### 写哪些列、批量执行（`write.strategy`，写法不同）
 
 | 用例                                 | 断言的 SQL（摘要）                                                                            |
@@ -2494,10 +2506,6 @@
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | mysql8/M8BankTest.java#testaa1                     |                                                                                             |
 | mysql8/ManyJoinTest.java#test2GroupJoinCombine     | `UPDATE `t_sys_user` t LEFT JOIN (SELECT t1.`uid`AS`**group_key1**`,(COUNT(?) > 0) AS `__…` |
-| pgsql/DeleteUpdateJoinTest.java#testUpdateJoin1    | `UPDATE \`                                                                                  |
-| pgsql/DeleteUpdateJoinTest.java#testUpdateJoin2    | `UPDATE \`                                                                                  |
-| pgsql/DeleteUpdateJoinTest.java#testUpdateJoin3    |                                                                                             |
-| pgsql/DeleteUpdateJoinTest.java#testUpdateJoin4    |                                                                                             |
 | QueryTest18.java#test123                           |                                                                                             |
 | QueryTest21.java#TestReverse                       | `SELECT COUNT(*) FROM `t_topic`WHERE`id` IS NOT NULL`                                       |
 | QueryTest24.java#test123                           |                                                                                             |
@@ -2513,8 +2521,6 @@
 | TestUpdateFlatAndPredicate.java#testExpressionKey6 |                                                                                             |
 | TestUpdateFlatAndPredicate.java#testExpressionKey7 |                                                                                             |
 | TestUpdateFlatAndPredicate.java#testExpressionKey8 |                                                                                             |
-| UpdateDeleteJoinTest.java#testUpdateJoin1          | `UPDATE `doc_bank_card`t INNER JOIN`doc_user` t1 ON t1.`id` = t.`uid` SET t.`type` = t1.`…` |
-| UpdateDeleteJoinTest.java#testUpdateJoin2          | `UPDATE `doc_bank_card`t INNER JOIN`doc_bank` t1 ON t1.`id` = t.`bank_id`INNER JOIN`doc…`   |
 | UpdateTest.java#testUpdateIdNull1                  | `UPDATE `t_topic`SET`title` = CONCAT(SUBSTR(`title`,2,10),LOWER(`id`)) WHERE `id` = ?`      |
 | UpdateTest.java#updateEntityWhere                  | `UPDATE `t_blog`SET`create_time` = ?,`update_time` = ?,`create_by` = ?,`update_by` = ?,`t…` |
 | UpdateTest.java#updateSet1                         | `UPDATE `t_topic`SET`stars` = ?,`stars` = CAST(`title` AS SIGNED),`title` = ?,`title` = D…` |

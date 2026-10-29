@@ -79,6 +79,7 @@ TS 版的状态按 `packages/easy-query/core/src` 的实现核过。"写法不�
 | 版本策略（int、long、UUID、时间戳）、表达式更新 `withVersion`                  | `version()`（整数）、`version({ initial, next })`、`withVersion(v)`                       | ✓    |                                                                       |
 | 逻辑删除时写删除人（自定义逻辑删除策略）                                       | 列修饰 `$onDelete(() => user)`                                                            | ≈    | 与 `$onUpdate` 对称                                                   |
 | 加密列模糊搜索 `supportQueryLike`                                              | `encrypted({ …, searchable: true })`                                                      | ✓    | 不可分段的策略上 like 直接报错                                        |
+| 内置 AES / SM4 加密策略（含可分段的 Safe 版）                                  | `@zerodep-dev/easy-query-ts-crypto`：`aesEncryption` / `sm4Encryption({ searchable })`    | ✓    | 分段与 Base64 与 Java 版一致，能读 Java 版写的密文                    |
 | 数据库函数生成列 `generatedSQLColumnGenerator`                                 | 插入值或 `$default` 返回 `sql` 片段                                                       | ≈    |                                                                       |
 
 ## 其他

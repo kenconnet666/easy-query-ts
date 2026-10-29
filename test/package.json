@@ -13,6 +13,7 @@
     "@zerodep-dev/easy-query-ts-sqlite": "workspace:*",
     "@zerodep-dev/easy-query-ts-decimal": "workspace:*",
     "@zerodep-dev/easy-query-ts-date": "workspace:*",
+    "@zerodep-dev/easy-query-ts-crypto": "workspace:*",
     "vitest": "catalog:"
   },
   "devDependencies": {

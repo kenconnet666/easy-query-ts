@@ -17,6 +17,7 @@ export const fileRules = [
   [/^duckdb\//, 'dialect.duckdb'],
   [/^click\//, 'dialect.clickhouse'],
   [/^h2\//, 'dialect.h2'],
+  [/UpdateDeleteJoinTest|DeleteUpdateJoinTest/, 'write.join'],
   [/Encryption|^encryption\//, 'column.encryption'],
   [/LogicDelete|^logicdel\//, 'logicDelete'],
   [/VersionTest|^version\//, 'version'],
@@ -225,6 +226,11 @@ export const capabilities = {
     status: 'done',
     ts: 'delete()、hard()、hardDelete 护栏；suite.ts、guards.test.ts',
   },
+  'write.join': {
+    title: '更新 / 删除里用导航（UPDATE / DELETE 带 JOIN）',
+    status: 'different',
+    ts: '条件、set 里的多对一导航生成 LEFT JOIN；MySQL 原生多表 UPDATE / DELETE，PG / SQLite 按主键自连接（保留 LEFT 语义，官方在 PG 上等于 INNER）；suite.ts、sqlite.sql.test.ts',
+  },
   'write.strategy': {
     title: '写哪些列、批量执行',
     status: 'different',
@@ -263,7 +269,7 @@ export const capabilities = {
   'column.encryption': {
     title: '列加密',
     status: 'done',
-    ts: 'encrypted（可分段搜索）、sqlConvert；guards.test.ts、sql-convert.test.ts',
+    ts: 'encrypted（可分段搜索）、sqlConvert；easy-query-ts-crypto 的 aesEncryption / sm4Encryption（与 Java 版分段兼容）；crypto.test.ts、guards.test.ts、sql-convert.test.ts',
   },
   'column.converter': {
     title: '值转换、枚举',
