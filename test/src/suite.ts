@@ -1498,6 +1498,52 @@ export function liveSuite(
       assert.deepEqual([row.name, row.age], ['alice', null]);
     });
 
+    it('updates and deletes through many-to-one navigations', async () => {
+      const { db } = await seeded();
+      // set 与条件里都用导航：帖子标题改成作者名
+      assert.equal(
+        await db
+          .update(Post)
+          .set((p) => ({ title: p.user.name }))
+          .where((p) => p.user.name.eq('bob'))
+          .execute(),
+        2,
+      );
+      // LEFT JOIN 的语义：没有公司的 carol 也算"公司名为空"
+      assert.equal(
+        await db
+          .update(User)
+          .set({ age: 99 })
+          .where((u) => u.company.name.isNull())
+          .execute(),
+        1,
+      );
+      // 两层导航：删掉 alice 帖子下的评论
+      assert.equal(
+        await db
+          .delete(Comment)
+          .where((c) => c.post.user.name.eq('alice'))
+          .execute(),
+        2,
+      );
+      const titles = await db
+        .queryable(Post)
+        .orderBy((p) => p.id)
+        .select((p) => p.title)
+        .toList();
+      assert.deepEqual(titles, ['orm tips', 'sql 100%', 'bob', 'bob']);
+      assert.equal((await db.queryable(User).findOrThrow(3)).age, 99);
+      assert.equal(await db.queryable(Comment).count(), 0);
+      assert.throws(
+        () =>
+          db
+            .delete(Comment)
+            .where((c) => c.post.title.eq('x'))
+            .returning('id'),
+        /returning\(\) cannot be used/,
+      );
+    });
+
     it('hands the rows before an update to interceptors that ask for them', async () => {
       const env = await seeded();
       const before: string[] = [];

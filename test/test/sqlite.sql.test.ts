@@ -134,14 +134,25 @@ describe('sqlite: SQL text', async () => {
     assert.throws(() => db.update(Post).set({ title: 'x' }).toSQL(), /all\(\)/);
   });
 
-  it('rejects joins in writes', () => {
-    assert.throws(
-      () =>
-        db
-          .delete(User)
-          .where((u) => u.company.name.eq('acme'))
-          .toSQL(),
-      /JOIN/,
+  it('joins navigations in writes through a self-join on the primary key', () => {
+    const update = db
+      .update(User)
+      .set((u) => ({ name: u.company.name.orElse(u.name) }))
+      .where((u) => u.company.name.startsWith('ac'))
+      .toSQL();
+    assert.equal(
+      update.sql,
+      'UPDATE "t_user" AS t0_w SET "name" = COALESCE(t1."name", t0."name") FROM "t_user" t0 LEFT JOIN "t_company" t1 ON t1."id" = t0."company_id"' +
+        String.raw` WHERE t0_w."id" = t0."id" AND t1."name" LIKE ? ESCAPE '\'`,
+    );
+    const remove = db
+      .delete(User)
+      .where((u) => u.company.name.eq('acme'))
+      .toSQL();
+    assert.equal(
+      remove.sql,
+      'DELETE FROM "t_user" AS t0_w WHERE EXISTS (SELECT 1 FROM "t_user" t0 LEFT JOIN "t_company" t1 ON t1."id" = t0."company_id"' +
+        ' WHERE t0_w."id" = t0."id" AND t1."name" = ?)',
     );
   });
 

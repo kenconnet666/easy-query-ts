@@ -132,11 +132,18 @@ export interface UpdateNode {
   readonly from: TableRef;
   readonly set: readonly { readonly column: string; readonly e: Node }[];
   readonly where: readonly Node[];
+  /** 条件、set 里经过多对一导航产生的 join；各库写法不同，见 Dialect.update */
+  readonly joins?: readonly Join[];
+  /** 目标表的主键列（库里的名字）：有 join 时按它把目标表与 FROM 里的同一张表对上 */
+  readonly key?: readonly string[];
 }
 
 export interface DeleteNode {
   readonly from: TableRef;
   readonly where: readonly Node[];
+  /** 同 UpdateNode */
+  readonly joins?: readonly Join[];
+  readonly key?: readonly string[];
 }
 
 /** 访问一棵树里引用到的表别名与声明的表别名，用来发现跨查询误用的导航 */

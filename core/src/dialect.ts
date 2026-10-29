@@ -6,6 +6,7 @@ import type {
   CteNode,
   DeleteNode,
   InsertNode,
+  Join,
   JoinKind,
   Node,
   OrderNode,
@@ -376,11 +377,7 @@ export abstract class Dialect {
         ? '1'
         : q.columns.map((c) => `${this.node(c.e, w)} AS ${this.quote(c.as)}`).join(', ');
     let s = `SELECT ${q.distinct ? 'DISTINCT ' : ''}${cols} FROM ${q.from.sub ? `(${this.select(q.from.sub, w)})` : this.table(q.from.table)} ${q.from.alias}${q.from.hint ? ` ${q.from.hint}` : ''}`;
-    for (const j of q.joins) {
-      const source = j.sub ? `(${this.select(j.sub, w)})` : this.table(j.table);
-      s += ` ${JOIN_WORDS[j.kind ?? 'left']} ${source} ${j.alias}${j.hint ? ` ${j.hint}` : ''}`;
-      if (j.on) s += ` ON ${this.node(j.on, w)}`;
-    }
+    s += this.joinClauses(q.joins, w);
     if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
     if (q.groupBy.length > 0)
       s += ` GROUP BY ${this.groupByKeys(
@@ -419,20 +416,62 @@ export abstract class Dialect {
     return ` ON CONFLICT ${target} DO UPDATE SET ${c.update.map((u) => `${this.quote(u)} = excluded.${this.quote(u)}`).join(', ')}`;
   }
 
+  /** JOIN 子句（连着前面的 FROM） */
+  protected joinClauses(joins: readonly Join[], w: SqlWriter): string {
+    let s = '';
+    for (const j of joins) {
+      const source = j.sub ? `(${this.select(j.sub, w)})` : this.table(j.table);
+      s += ` ${JOIN_WORDS[j.kind ?? 'left']} ${source} ${j.alias}${j.hint ? ` ${j.hint}` : ''}`;
+      if (j.on) s += ` ON ${this.node(j.on, w)}`;
+    }
+    return s;
+  }
+
+  /**
+   * 带 join 时（条件、set 里用了多对一导航）：目标表另起别名，FROM 里放原别名的同一张表与各个 join，按主键对上——
+   * `UPDATE t AS t0_w SET c = t1.x FROM t t0 LEFT JOIN u t1 ON … WHERE t0_w.id = t0.id AND …`。
+   * 表达式照旧引用 t0，LEFT JOIN 的语义不变（目标不存在的行照样更新，导航的列为 NULL）；PG、SQLite 3.33+ 都认这种自连接
+   */
   update(q: UpdateNode, w: SqlWriter = new SqlWriter()): string {
     const set = q.set.map((s) => `${this.quote(s.column)} = ${this.node(s.e, w)}`).join(', ');
-    let s = `UPDATE ${this.table(q.from.table)} AS ${q.from.alias} SET ${set}`;
-    if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
-    return s;
+    if (!q.joins?.length) {
+      let s = `UPDATE ${this.table(q.from.table)} AS ${q.from.alias} SET ${set}`;
+      if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
+      return s;
+    }
+    const self = `${q.from.alias}_w`;
+    const from = `${this.table(q.from.table)} ${q.from.alias}${this.joinClauses(q.joins, w)}`;
+    const where = this.conjunction([...this.sameRow(q, self), ...q.where], w);
+    return `UPDATE ${this.table(q.from.table)} AS ${self} SET ${set} FROM ${from} WHERE ${where}`;
   }
 
+  /** 带 join 时：`DELETE FROM t AS t0_w WHERE EXISTS (SELECT 1 FROM t t0 LEFT JOIN … WHERE t0_w.id = t0.id AND …)`，各库都认 */
   delete(q: DeleteNode, w: SqlWriter = new SqlWriter()): string {
-    let s = `DELETE FROM ${this.table(q.from.table)} AS ${q.from.alias}`;
-    if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
-    return s;
+    if (!q.joins?.length) {
+      let s = `DELETE FROM ${this.table(q.from.table)} AS ${q.from.alias}`;
+      if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
+      return s;
+    }
+    const self = `${q.from.alias}_w`;
+    const from = `${this.table(q.from.table)} ${q.from.alias}${this.joinClauses(q.joins, w)}`;
+    const where = this.conjunction([...this.sameRow(q, self), ...q.where], w);
+    return `DELETE FROM ${this.table(q.from.table)} AS ${self} WHERE EXISTS (SELECT 1 FROM ${from} WHERE ${where})`;
   }
 
-  /** 表名可以带 schema 前缀（a.b） */
+  /** 自连接的两份目标表按主键对上 */
+  private sameRow(q: UpdateNode | DeleteNode, self: string): Node[] {
+    if (!q.key?.length)
+      throw new Error(
+        `update / delete through a navigation needs a primary key on ${q.from.table}`,
+      );
+    return q.key.map((name) => ({
+      k: 'op',
+      op: '=',
+      l: { k: 'col', alias: self, name },
+      r: { k: 'col', alias: q.from.alias, name },
+    }));
+  }
+
   /** 表名可以带 schema 前缀（a.b）与跨库链接（a.b@link，链接名原样） */
   table(name: string): string {
     const [table = '', link] = name.split('@');
@@ -524,7 +563,7 @@ export abstract class Dialect {
     }
   }
 
-  private conjunction(items: readonly Node[], w: SqlWriter): string {
+  protected conjunction(items: readonly Node[], w: SqlWriter): string {
     return items.map((i) => this.wrap(i, 'and', w)).join(' AND ');
   }
 

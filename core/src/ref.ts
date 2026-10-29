@@ -229,7 +229,7 @@ function joinOne(
   const info = parent[REF];
   if (!scope.allowJoins) {
     throw new Error(
-      `navigation ${info.key}.${prop} needs a JOIN, which update/delete do not support; use a many-navigation any() or a subquery instead`,
+      `navigation ${info.key}.${prop} needs a JOIN, which is not available here (onConflict / merge take plain columns)`,
     );
   }
   const target = scope.schema.entities[rel.target]!;
@@ -797,10 +797,7 @@ export class GroupJoin<S extends AnySchema, K extends EntityKey<S>> {
   private join() {
     if (this.joined) return this.joined;
     const { scope, relation, parent } = this.many;
-    if (!scope.allowJoins)
-      throw new Error(
-        'groupJoin() needs a JOIN, which update/delete do not support; use count() instead',
-      );
+    if (!scope.allowJoins) throw new Error('groupJoin() needs a JOIN, which is not available here');
     const inner = scope.child(this.many.toggles);
     const root = inner.root(relation.target);
     const link = linkColumns(inner, relation, root);

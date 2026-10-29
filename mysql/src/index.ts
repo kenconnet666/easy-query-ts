@@ -13,6 +13,7 @@ import {
   type ColumnOptions,
   type Adapter,
   type ConflictNode,
+  type DeleteNode,
   type Driver,
   type ExecuteResult,
   sqlString,
@@ -20,8 +21,9 @@ import {
   type FunctionRenderer,
   type Node,
   type Session,
-  type SqlWriter,
+  SqlWriter,
   type TransactionOptions,
+  type UpdateNode,
 } from '@zerodep-dev/easy-query-ts';
 import { mysqlFunctions } from './functions.ts';
 
@@ -32,6 +34,24 @@ export type { MatchMode } from './functions.ts';
 const NO_LIMIT = '18446744073709551615';
 
 export class MySqlDialect extends Dialect {
+  /** 带 join：MySQL 的多表 UPDATE，JOIN 写在 SET 前面，SET 的列带上别名 */
+  override update(q: UpdateNode, w: SqlWriter = new SqlWriter()): string {
+    if (!q.joins?.length) return super.update(q, w);
+    const alias = q.from.alias;
+    let s = `UPDATE ${this.table(q.from.table)} AS ${alias}${this.joinClauses(q.joins, w)}`;
+    s += ` SET ${q.set.map((c) => `${alias}.${this.quote(c.column)} = ${this.node(c.e, w)}`).join(', ')}`;
+    if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
+    return s;
+  }
+
+  /** 带 join：`DELETE t0 FROM t AS t0 LEFT JOIN …` */
+  override delete(q: DeleteNode, w: SqlWriter = new SqlWriter()): string {
+    if (!q.joins?.length) return super.delete(q, w);
+    let s = `DELETE ${q.from.alias} FROM ${this.table(q.from.table)} AS ${q.from.alias}${this.joinClauses(q.joins, w)}`;
+    if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
+    return s;
+  }
+
   readonly name = 'mysql';
   /** MySQL 预处理语句最多 65535 个占位符 */
   override readonly maxBindParams = 65535;

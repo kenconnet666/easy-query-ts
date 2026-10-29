@@ -121,6 +121,31 @@ await tx.update(User).changes(before, form).execute(); // 只 set 变了的列�
 对应 Java 版追踪模式下的差异更新，但不需要追踪上下文：按列的编码比较（日期比时刻、JSON 比内容、decimal.js 比文字、值对象逐项），
 按 before 的主键（与版本）定位，after 可以只是表单提交的几项。表达式更新要乐观锁时写 `.withVersion(current)`。
 
+## 更新 / 删除里用导航（对应官方 UpdateDeleteJoinTest）
+
+```ts
+await db
+  .update(Post)
+  .set((p) => ({ title: p.user.name }))
+  .where((p) => p.user.name.eq('bob'))
+  .execute();
+await db
+  .delete(Comment)
+  .where((c) => c.post.user.name.eq('alice'))
+  .execute();
+```
+
+条件、set 里的多对一导航照查询时一样生成 LEFT JOIN（拦截器条件进 ON），按方言渲染：
+
+| 库         | 更新                                                                                   | 删除                                                        |
+| ---------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| MySQL      | `UPDATE t AS t0 LEFT JOIN u t1 ON … SET t0.c = … WHERE …`                              | `DELETE t0 FROM t AS t0 LEFT JOIN … WHERE …`                |
+| PG、SQLite | `UPDATE t AS t0_w SET c = … FROM t t0 LEFT JOIN u t1 ON … WHERE t0_w.id = t0.id AND …` | `DELETE FROM t AS t0_w WHERE EXISTS (SELECT 1 FROM t t0 …)` |
+
+官方在 PG 上把导航放进 `FROM`、条件放进 `WHERE`，等于 INNER JOIN——目标不存在的行不会被更新。这里 PG / SQLite 用自连接（目标表另起别名，按主键对上），
+LEFT JOIN 的语义与查询一致：`where(u => u.company.name.isNull())` 也会选中没有公司的用户。代价是要有主键；`returning()` 不能与导航一起用（自连接里列名重名）。
+可空导航写进不可空列时编译期报错，要 `orElse(…)` 兜底。
+
 ## 验证与限制
 
-SQLite、MySQL 8.0.18 / 8.4、PG 17 实测（含 `save` 失败整体回滚、afterWrite 抛错回滚事务）。Java 版 `Savable` 的多层级联、多对多保存没有做（取舍见 decisions/0003）。
+SQLite、MySQL 8.0.18 / 8.4、PG 17 实测（含 `save` 失败整体回滚、afterWrite 抛错回滚事务）。

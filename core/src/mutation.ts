@@ -1,7 +1,13 @@
 /**
  * 插入、更新、删除。更新与删除没有条件时拒绝执行，要整表操作显式调用 all()；条件全被跳过（例如 `id && u.id.eq(id)` 里 id 为空）同样算没有条件。
  */
-import { checkAliases, type ConflictNode, type Node, type SelectNode } from './ast.ts';
+import {
+  checkAliases,
+  type ConflictNode,
+  type Node,
+  type SelectNode,
+  type UpdateNode,
+} from './ast.ts';
 import { SqlWriter, type Statement } from './dialect.ts';
 import { and, condNode, Expr, or, toNode, type Cond } from './expr.ts';
 import { newQueryable, type Built, type Query } from './query.ts';
@@ -695,6 +701,8 @@ interface WriteState {
   readonly unchanged?: boolean;
   /** delete 显式写了 hard()：hardDelete: 'forbid' 时也执行物理删除 */
   readonly hard?: boolean;
+  /** 带 RETURNING：不能再有导航产生的 join（自连接里两份目标表的列名会重名） */
+  readonly returning?: boolean;
   /** expectRows：改到的行数必须是 count，否则抛 error(实际行数) */
   readonly expect?: { readonly count: number; readonly error: (affected: number) => Error };
 }
@@ -710,10 +718,10 @@ abstract class Filtered {
     this.state = state;
   }
 
-  /** 新的构建现场：不允许 join（各库对 UPDATE/DELETE 带 JOIN 的写法不一致） */
+  /** 新的构建现场：条件、set 里用到的多对一导航生成 join（放进 scope.joins，各库的写法见 Dialect.update / delete） */
   protected scope(): { scope: Scope; root: any; where: Node[] } {
     const kind = this.verb === 'delete' ? 'delete' : 'update';
-    const scope = new Scope(this.ctx.schema, { n: 0 }, false, this.ctx.interceptors, kind);
+    const scope = new Scope(this.ctx.schema, { n: 0 }, true, this.ctx.interceptors, kind);
     const root = scope.root(this.key);
     const where = this.state.where
       .map((f) => condNode(f(root)))
@@ -728,6 +736,20 @@ abstract class Filtered {
   }
 
   protected abstract readonly verb: string;
+
+  /** 语句的目标：表与别名、导航产生的 join、主键列（有 join 时各库按它对上同一行） */
+  protected target(scope: Scope, root: any): Pick<UpdateNode, 'from' | 'joins' | 'key'> {
+    const entity = this.ctx.schema.entities[this.key]!;
+    if (this.state.returning && scope.joins.length > 0)
+      throw new Error(
+        `returning() cannot be used when an update / delete of ${entity.table} goes through a navigation`,
+      );
+    return {
+      from: { table: entity.table, alias: root[REF].alias },
+      joins: scope.joins,
+      key: entity.primaryKey.map((k) => entity.columnNames[k]!),
+    };
+  }
 
   async execute(): Promise<number> {
     // 只构建一次：$onUpdate、逻辑删除的时间这类值每次求值都不同，语句与事件要是同一份
@@ -752,12 +774,12 @@ abstract class Filtered {
    */
   protected async rowsBefore(): Promise<Record<string, unknown>[] | undefined> {
     if (!this.ctx.interceptors.wantsBefore) return undefined;
-    const { root, where } = this.scope();
+    const { scope, root, where } = this.scope();
     const entity = this.ctx.schema.entities[this.key]!;
     const props = Object.keys(entity.columns);
     const node: SelectNode = {
       from: { table: entity.table, alias: root[REF].alias },
-      joins: [],
+      joins: scope.joins,
       where,
       groupBy: [],
       having: [],
@@ -946,7 +968,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   ): Returning<Pick<Row<EntityOf<S, K>>, C>>;
   returning(...columns: string[]): Returning<unknown> {
     const entity = this.ctx.schema.entities[this.key]!;
-    const { statement, detail } = this.build();
+    const { statement, detail } = this.withState({ returning: true }).build();
     return new Returning(
       this.ctx,
       entity,
@@ -983,6 +1005,10 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     return new Updatable(withToggle(this.ctx, toggle), this.key as K, this.state, this.values);
   }
 
+  private withState(change: Partial<WriteState>): Updatable<S, K> {
+    return new Updatable(this.ctx, this.key as K, { ...this.state, ...change }, this.values);
+  }
+
   all(): Updatable<S, K> {
     return new Updatable(this.ctx, this.key as K, { ...this.state, all: true }, this.values);
   }
@@ -991,7 +1017,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     if (!this.values) throw new Error('update needs set(...)');
     if (this.state.unchanged)
       throw new Error('changes(): nothing changed, so there is no statement (execute() returns 0)');
-    const { root, where } = this.scope();
+    const { scope, root, where } = this.scope();
     const entity = this.ctx.schema.entities[this.key]!;
     const given = flattenRow(entity, this.values(root));
     for (const p of Object.keys(given)) {
@@ -1030,7 +1056,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       });
     }
     if (set.length === 0) throw new Error(`update of ${entity.table} sets no columns`);
-    const node = { from: { table: entity.table, alias: root[REF].alias }, set, where };
+    const node = { ...this.target(scope, root), set, where };
     checkAliases(node);
     const w = new SqlWriter();
     const written = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
@@ -1071,7 +1097,7 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   ): Returning<Pick<Row<EntityOf<S, K>>, C>>;
   returning(...columns: string[]): Returning<unknown> {
     const entity = this.ctx.schema.entities[this.key]!;
-    const { statement, detail } = this.build();
+    const { statement, detail } = this.withState({ returning: true }).build();
     return new Returning(
       this.ctx,
       entity,
@@ -1080,6 +1106,10 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       detail,
       () => this.rowsBefore(),
     );
+  }
+
+  private withState(change: Partial<WriteState>): Deletable<S, K> {
+    return new Deletable(this.ctx, this.key as K, { ...this.state, ...change });
   }
 
   /** 物理删除：绕过逻辑删除（读过滤与改写成 update 都不再生效），已被逻辑删除的行也会被删掉 */
@@ -1106,9 +1136,9 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   }
 
   protected build(): { statement: Statement; detail: WriteDetail } {
-    const { root, where } = this.scope();
+    const { scope, root, where } = this.scope();
     const entity = this.ctx.schema.entities[this.key]!;
-    const from = { table: entity.table, alias: root[REF].alias };
+    const target = this.target(scope, root);
     // 逻辑删除：delete 改写成把标记列设为"已删除"的 update，条件不变（读过滤已经保证不会重复删）
     const softSet = this.ctx.interceptors.deleteAsUpdate(entity);
     if (softSet) {
@@ -1116,7 +1146,7 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
         column: entity.columnNames[p]!,
         e: columnValue(entity.columns[p]!, v),
       }));
-      const update = { from, set, where };
+      const update = { ...target, set, where };
       checkAliases(update);
       const w = new SqlWriter();
       return {
@@ -1128,7 +1158,7 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       throw new Error(
         `physical delete of ${entity.table} is forbidden (hardDelete: 'forbid'); give it a softDelete column or call .hard()`,
       );
-    const node = { from, where };
+    const node = { ...target, where };
     checkAliases(node);
     const w = new SqlWriter();
     return {
