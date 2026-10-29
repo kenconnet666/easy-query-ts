@@ -131,7 +131,8 @@ function columnBuilder(column: DbColumn): { builder: string; note?: string } {
   const args = /\(([^)]*)\)/
     .exec(t)?.[1]
     ?.split(',')
-    .map((s) => Number(s.trim()));
+    // Oracle 的 VARCHAR2(50 CHAR)：长度后面的单位不算
+    .map((s) => Number(s.trim().replace(/\s+(char|byte)$/, '')));
   const base = t
     .replace(/\(.*$/, '')
     .replace(/\s+(unsigned|without time zone)$/, '')
@@ -146,10 +147,19 @@ function columnBuilder(column: DbColumn): { builder: string; note?: string } {
   if (/^(int|integer|int4|smallint|int2|mediumint|tinyint|serial)$/.test(base))
     return { builder: 'col.int()' };
   if (/^(bigint|int8|bigserial)$/.test(base)) return { builder: 'col.bigint()' };
+  // Oracle 的整数是 NUMBER(p)：按精度分成 int / bigint，再大的按 decimal
+  if (base === 'number' && args && (args.length === 1 || args[1] === 0)) {
+    const precision = args[0]!;
+    if (precision === 1) return { builder: `col.boolean().dbType(${quote(raw)})` };
+    if (precision <= 10) return { builder: 'col.int()' };
+    if (precision <= 19) return { builder: 'col.bigint()' };
+    return { builder: `col.decimal(${precision}, 0)` };
+  }
   if (/^(decimal|numeric|number)$/.test(base))
     return {
       builder: args && args.length === 2 ? `col.decimal(${args[0]}, ${args[1]})` : 'col.decimal()',
     };
+  if (/^(binary_double|binary_float)$/.test(base)) return { builder: 'col.double()' };
   if (/^(double|double precision|float|float8|real|float4)$/.test(base))
     return { builder: 'col.double()' };
   if (base === 'date') return { builder: 'col.date()' };

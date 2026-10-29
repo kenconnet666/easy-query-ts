@@ -65,6 +65,8 @@ export interface LiveSuiteOptions {
   readonly recursiveCte?: boolean;
   /** 是否测试只读事务；各库的拒绝写入报错不同，只断言"会失败"。HANA 未验证时可关 */
   readonly readOnlyTransactions?: boolean;
+  /** 保存点（嵌套事务）；DuckDB 没有 */
+  readonly savepoints?: boolean;
   /** 以下能力默认都测；某个库不支持就传 false */
   readonly dateTrunc?: boolean;
   readonly rollup?: boolean;
@@ -1841,7 +1843,7 @@ export function liveSuite(
           .execute();
         const [counted] = await db.sql<{
           n: number;
-        }>`SELECT COUNT(*) AS n FROM ${db.sql.ident('t_shard_log_0')}`;
+        }>`SELECT COUNT(*) AS ${db.sql.ident('n')} FROM ${db.sql.ident('t_shard_log_0')}`;
         assert.equal(Number(counted!.n), 2);
         // 等于：只查一张表
         const one = db.queryable(ShardLog).where((l) => l.userId.eq(4));
@@ -2281,53 +2283,57 @@ export function liveSuite(
       assert.ok(events.some((e) => e.kind === 'query' && e.rows === 3 && e.error === undefined));
     });
 
-    it('rolls back only the savepoint when a nested transaction fails', async () => {
-      const { db } = await seeded();
-      const titles = async () =>
-        (
-          await db
-            .queryable(Post)
-            .where((p) => p.title.startsWith('tx-'))
-            .orderBy((p) => p.title)
-            .toList()
-        ).map((p) => p.title);
-      const add = (tx: typeof db, title: string) =>
-        tx.insert(Post).values({ userId: 1, title, amount: '1.00' }).execute();
-      await db.transaction(async (tx) => {
-        await add(tx, 'tx-a');
+    it(
+      'rolls back only the savepoint when a nested transaction fails',
+      { skip: options.savepoints === false },
+      async () => {
+        const { db } = await seeded();
+        const titles = async () =>
+          (
+            await db
+              .queryable(Post)
+              .where((p) => p.title.startsWith('tx-'))
+              .orderBy((p) => p.title)
+              .toList()
+          ).map((p) => p.title);
+        const add = (tx: typeof db, title: string) =>
+          tx.insert(Post).values({ userId: 1, title, amount: '1.00' }).execute();
+        await db.transaction(async (tx) => {
+          await add(tx, 'tx-a');
+          await assert.rejects(
+            () =>
+              tx.transaction(async (inner) => {
+                await add(inner, 'tx-b');
+                throw new Error('boom');
+              }),
+            /boom/,
+          );
+          await tx.transaction(async (inner) => {
+            await add(inner, 'tx-c');
+          });
+        });
+        assert.deepEqual(await titles(), ['tx-a', 'tx-c']);
+        // 外层回滚时，成功的嵌套事务也一起回滚
         await assert.rejects(
           () =>
-            tx.transaction(async (inner) => {
-              await add(inner, 'tx-b');
-              throw new Error('boom');
+            db.transaction(async (tx) => {
+              await tx.transaction(async (inner) => {
+                await add(inner, 'tx-d');
+              });
+              throw new Error('outer');
             }),
-          /boom/,
+          /outer/,
         );
-        await tx.transaction(async (inner) => {
-          await add(inner, 'tx-c');
-        });
-      });
-      assert.deepEqual(await titles(), ['tx-a', 'tx-c']);
-      // 外层回滚时，成功的嵌套事务也一起回滚
-      await assert.rejects(
-        () =>
-          db.transaction(async (tx) => {
-            await tx.transaction(async (inner) => {
-              await add(inner, 'tx-d');
-            });
-            throw new Error('outer');
-          }),
-        /outer/,
-      );
-      assert.deepEqual(await titles(), ['tx-a', 'tx-c']);
-      await assert.rejects(
-        () =>
-          db.transaction(async (tx) => {
-            await tx.transaction(async () => undefined, { isolation: 'serializable' });
-          }),
-        /nested transaction/,
-      );
-    });
+        assert.deepEqual(await titles(), ['tx-a', 'tx-c']);
+        await assert.rejects(
+          () =>
+            db.transaction(async (tx) => {
+              await tx.transaction(async () => undefined, { isolation: 'serializable' });
+            }),
+          /nested transaction/,
+        );
+      },
+    );
 
     it('begins a transaction manually and rolls back unless committed', async () => {
       const { db } = await seeded();

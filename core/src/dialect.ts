@@ -78,6 +78,21 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+/** 本身就是条件（能直接放进 WHERE、不能直接当值）的节点 */
+const CONDITION_NODES = new Set([
+  'and',
+  'or',
+  'not',
+  'null',
+  'in',
+  'in_sub',
+  'between',
+  'like',
+  'exists',
+  'eq_ns',
+]);
+const COMPARISONS = new Set(['=', '<>', '!=', '<', '<=', '>', '>=']);
+
 export abstract class Dialect {
   abstract readonly name: string;
   /** 面向的服务器版本；undefined 表示最新 */
@@ -220,21 +235,51 @@ export abstract class Dialect {
   }
 
   /**
-   * 当作值用的表达式（select 的列、set 的值）。默认原样渲染；比较、AND / OR 这类条件不能直接当值的库（SQL Server）覆盖，写成 CASE WHEN … THEN 1 ELSE 0 END
+   * 条件能不能直接当值（`SELECT a > b`）、布尔列能不能直接当条件（`WHERE active`）。
+   * SQL Server、Oracle 23ai 之前不能：条件当值写成 CASE WHEN … THEN 1 ELSE 0 END，布尔列当条件写成 = 1
    */
+  protected readonly booleanValues: boolean = true;
+
+  /** 渲染出来本身是条件的函数（函数表里的名字）；方言专属的条件函数在子类里追加 */
+  protected conditionFunctions(): readonly string[] {
+    return ['in_csv', 'json_has'];
+  }
+
+  private cachedConditionFunctions: ReadonlySet<string> | undefined;
+
+  /** 这个节点渲染出来是不是条件 */
+  protected isCondition(n: Node): boolean {
+    if (CONDITION_NODES.has(n.k) || (n.k === 'op' && COMPARISONS.has(n.op))) return true;
+    return (
+      n.k === 'fn' &&
+      (this.cachedConditionFunctions ??= new Set(this.conditionFunctions())).has(n.name)
+    );
+  }
+
+  /** 当作值用的表达式（select 的列、set 的值、CASE 的分支） */
   protected value(n: Node, w: SqlWriter): string {
-    return this.node(n, w);
+    if (this.booleanValues || !this.isCondition(n)) return this.node(n, w);
+    return `CASE WHEN ${this.node(n, w)} THEN 1 ELSE 0 END`;
+  }
+
+  /** 当作条件用的表达式（WHERE、AND / OR / NOT 的项、CASE 的 WHEN） */
+  protected condition(n: Node, w: SqlWriter): string {
+    if (this.booleanValues || this.isCondition(n)) return this.node(n, w);
+    return `${this.node(n, w)} = 1`;
   }
 
   /**
    * CASE 分支里的值。默认原样渲染；PG 这类不能从上下文推断参数类型的库覆盖它，给参数加类型转换。
    */
   protected caseValue(n: Node, w: SqlWriter): string {
-    return this.node(n, w);
+    return this.value(n, w);
   }
 
   /** 一条语句最多能绑定多少个参数；多行插入据此自动分块。默认取各库里最小的常见上限（SQLite 32766） */
   readonly maxBindParams: number = 32766;
+
+  /** 一条 INSERT 最多写几行（Oracle 的多行写法对自增列只生成一次值，只能一行一条） */
+  readonly maxInsertRows: number = Number.POSITIVE_INFINITY;
 
   // ---- 建表（代码优先）。基类写标准 SQL，各库覆盖类型与自增的写法 ----
 
@@ -492,6 +537,12 @@ export abstract class Dialect {
     return `ROLLBACK TO SAVEPOINT ${name}`;
   }
 
+  /**
+   * WITH 只能写在语句开头、递归 CTE 只能 UNION ALL（SQL Server、Oracle）：渲染前把子查询里的 CTE 提到最外层，
+   * 递归 CTE 的 UNION 换成 UNION ALL（数据里有环时由库的递归上限报错，而不是像 UNION 那样停下）
+   */
+  protected readonly ctesAtTop: boolean = false;
+
   /** 递归 CTE 的关键字（SQL Server、Oracle 不写，直接 WITH） */
   protected readonly recursiveKeyword: string = 'RECURSIVE ';
 
@@ -500,6 +551,10 @@ export abstract class Dialect {
 
   /** 完整的查询语句：WITH 子句 + 查询体 + UNION 的各成员 */
   select(q: SelectNode, w: SqlWriter = new SqlWriter()): string {
+    if (this.ctesAtTop) {
+      const hoisted = hoistCtes(q);
+      if (hoisted !== q) return this.select(hoisted, w);
+    }
     // 绑定参数按渲染顺序收集，所以必须严格按文本顺序渲染：WITH、主体、再是 UNION 的各成员
     const withs = q.ctes && q.ctes.length > 0 ? this.withClause(q.ctes, w) : '';
     let sql = withs + this.selectCore(q, w);
@@ -654,7 +709,7 @@ export abstract class Dialect {
       case 'or':
         return n.items.map((i) => this.wrap(i, 'or', w)).join(' OR ');
       case 'not':
-        return `NOT (${this.node(n.e, w)})`;
+        return `NOT (${this.condition(n.e, w)})`;
       case 'null':
         return `${this.operand(n.e, w)} IS ${n.not ? 'NOT ' : ''}NULL`;
       case 'in':
@@ -687,7 +742,7 @@ export abstract class Dialect {
       }
       case 'case': {
         const whens = n.when
-          .map(([c, t]) => ` WHEN ${this.node(c, w)} THEN ${this.caseValue(t, w)}`)
+          .map(([c, t]) => ` WHEN ${this.condition(c, w)} THEN ${this.caseValue(t, w)}`)
           .join('');
         return `CASE${whens}${n.else ? ` ELSE ${this.caseValue(n.else, w)}` : ''} END`;
       }
@@ -717,7 +772,7 @@ export abstract class Dialect {
 
   /** AND 里的 OR、比较里的运算要加括号 */
   private wrap(n: Node, parent: 'and' | 'or', w: SqlWriter): string {
-    const s = this.node(n, w);
+    const s = this.condition(n, w);
     return (n.k === 'or' && parent === 'and') || (n.k === 'and' && parent === 'or') ? `(${s})` : s;
   }
 
@@ -776,6 +831,46 @@ export function dateFormatParts(pattern: string): DatePart[] {
     i++;
   }
   return parts;
+}
+
+/**
+ * 把子查询里的 CTE 提到最外层（SQL Server 的 WITH 只能写在语句开头），并让递归 CTE 用 UNION ALL（它不认递归里的 UNION）。
+ * 没有要动的地方时原样返回同一个对象
+ */
+function hoistCtes(q: SelectNode): SelectNode {
+  const found: NonNullable<SelectNode['ctes']>[number][] = [];
+  let changed = false;
+  const visit = (value: unknown, top: boolean): unknown => {
+    if (Array.isArray(value)) {
+      const items = value.map((v) => visit(v, false));
+      return items.some((v, i) => v !== value[i]) ? items : value;
+    }
+    if (!value || typeof value !== 'object') return value;
+    const record = value as Record<string, unknown>;
+    let out = record;
+    for (const [key, item] of Object.entries(record)) {
+      if (key === 'ctes') continue;
+      const next = visit(item, false);
+      if (next !== item) out = { ...out, [key]: next };
+    }
+    const ctes = record['ctes'] as SelectNode['ctes'];
+    if (!top && 'from' in record && 'columns' in record && ctes && ctes.length > 0) {
+      found.push(...ctes);
+      out = { ...out, ctes: undefined };
+    }
+    if (out !== record) changed = true;
+    return out;
+  };
+  const body = visit(q, true) as SelectNode;
+  const all = [...found, ...(body.ctes ?? [])];
+  const unique = all.filter((c, i) => all.findIndex((d) => d.name === c.name) === i);
+  const ctes = unique.map((c) =>
+    c.recursive && c.q.unions?.some((u) => !u.all)
+      ? { ...c, q: { ...c.q, unions: c.q.unions.map((u) => ({ ...u, all: true })) } }
+      : c,
+  );
+  if (!changed && ctes.every((c, i) => c === unique[i])) return q;
+  return { ...body, ctes: ctes.length > 0 ? ctes : undefined };
 }
 
 /** 类型同义词（先长后短）：PG 的全称、各库的别名 */

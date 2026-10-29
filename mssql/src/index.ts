@@ -49,32 +49,6 @@ export { MsSql } from './functions.ts';
 /** 支持的服务器版本（主版本年份） */
 export type SqlServerVersion = 2008 | 2012 | 2014 | 2016 | 2017 | 2019 | 2022 | 2025;
 
-/** 本身就是条件（不能直接当值、能直接放进 WHERE）的节点 */
-const CONDITIONS = new Set([
-  'and',
-  'or',
-  'not',
-  'null',
-  'in',
-  'in_sub',
-  'between',
-  'like',
-  'exists',
-  'eq_ns',
-]);
-const COMPARISONS = new Set(['=', '<>', '!=', '<', '<=', '>', '>=']);
-
-/** 渲染出来是条件的函数 */
-const CONDITION_FNS = new Set(['in_csv', 'json_has', 'sqlserver.contains', 'sqlserver.freetext']);
-
-function isCondition(n: Node): boolean {
-  return (
-    CONDITIONS.has(n.k) ||
-    (n.k === 'op' && COMPARISONS.has(n.op)) ||
-    (n.k === 'fn' && CONDITION_FNS.has(n.name))
-  );
-}
-
 const SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
 
 export class MsSqlDialect extends Dialect {
@@ -86,6 +60,7 @@ export class MsSqlDialect extends Dialect {
   override readonly indexIfNotExists = false;
   override readonly transactionalDdl = true;
   protected override readonly recursiveKeyword = '';
+  protected override readonly ctesAtTop = true;
 
   /** 2022 起有 IS [NOT] DISTINCT FROM */
   override readonly nullSafeEquals: string | undefined;
@@ -113,51 +88,20 @@ export class MsSqlDialect extends Dialect {
 
   // ---- 值与条件 ----
 
-  /** 条件当值用：CASE WHEN … THEN 1 ELSE 0 END */
-  protected override value(n: Node, w: SqlWriter): string {
-    return isCondition(n) ? `CASE WHEN ${this.node(n, w)} THEN 1 ELSE 0 END` : this.node(n, w);
+  /** 条件不能直接当值、BIT 列不能直接当条件 */
+  protected override readonly booleanValues = false;
+
+  protected override conditionFunctions(): readonly string[] {
+    return [...super.conditionFunctions(), 'sqlserver.contains', 'sqlserver.freetext'];
   }
 
-  protected override caseValue(n: Node, w: SqlWriter): string {
-    return this.value(n, w);
-  }
-
-  /** 不是条件的表达式（布尔列）当条件用：写成 = 1 */
-  private condition(n: Node, w: SqlWriter): string {
-    if (isCondition(n)) {
-      const s = this.node(n, w);
-      return n.k === 'and' || n.k === 'or' ? `(${s})` : s;
-    }
-    return `${this.node(n, w)} = 1`;
-  }
-
+  /** 没有 NTH_VALUE：渲染时说清楚，而不是让库报"不认识的函数" */
   override node(n: Node, w: SqlWriter): string {
-    switch (n.k) {
-      case 'raw':
-        if (n.parts[0] === 'NTH_VALUE(')
-          throw new Error(
-            'nthValue() is not supported by the sqlserver dialect (no NTH_VALUE); number the rows with rowNumber() instead',
-          );
-        return super.node(n, w);
-      case 'and':
-        return n.items.map((i) => this.condition(i, w)).join(' AND ');
-      case 'or':
-        return n.items.map((i) => this.condition(i, w)).join(' OR ');
-      case 'not':
-        return `NOT (${this.condition(n.e, w)})`;
-      case 'case': {
-        const whens = n.when
-          .map(([c, t]) => ` WHEN ${this.condition(c, w)} THEN ${this.caseValue(t, w)}`)
-          .join('');
-        return `CASE${whens}${n.else ? ` ELSE ${this.caseValue(n.else, w)}` : ''} END`;
-      }
-      default:
-        return super.node(n, w);
-    }
-  }
-
-  protected override conjunction(items: readonly Node[], w: SqlWriter): string {
-    return items.map((i) => this.condition(i, w)).join(' AND ');
+    if (n.k === 'raw' && n.parts[0] === 'NTH_VALUE(')
+      throw new Error(
+        'nthValue() is not supported by the sqlserver dialect (no NTH_VALUE); number the rows with rowNumber() instead',
+      );
+    return super.node(n, w);
   }
 
   // ---- 查询 ----
@@ -177,9 +121,6 @@ export class MsSqlDialect extends Dialect {
   }
 
   override select(q: SelectNode, w: SqlWriter = new SqlWriter()): string {
-    // WITH 只能写在最外层：子查询里的 CTE（IN (WITH …)）提到外面；递归 CTE 只能 UNION ALL
-    const hoisted = hoistCtes(q);
-    if (hoisted !== q) return this.select(hoisted, w);
     // 行锁：表提示写在 FROM 的表后面
     if (q.forUpdate) {
       const hint = `WITH (UPDLOCK, ROWLOCK${q.lockWait === 'skip' ? ', READPAST' : ''}${q.lockWait === 'nowait' ? ', NOWAIT' : ''})`;
@@ -513,46 +454,6 @@ export class MsSqlDialect extends Dialect {
   protected override normalizeType(type: string): string {
     return super.normalizeType(type).replace(/^float\(53\)$/, 'float');
   }
-}
-
-/**
- * 把子查询里的 CTE 提到最外层（SQL Server 的 WITH 只能写在语句开头），并让递归 CTE 用 UNION ALL（它不认递归里的 UNION）。
- * 没有要动的地方时原样返回同一个对象
- */
-function hoistCtes(q: SelectNode): SelectNode {
-  const found: NonNullable<SelectNode['ctes']>[number][] = [];
-  let changed = false;
-  const visit = (value: unknown, top: boolean): unknown => {
-    if (Array.isArray(value)) {
-      const items = value.map((v) => visit(v, false));
-      return items.some((v, i) => v !== value[i]) ? items : value;
-    }
-    if (!value || typeof value !== 'object') return value;
-    const record = value as Record<string, unknown>;
-    let out = record;
-    for (const [key, item] of Object.entries(record)) {
-      if (key === 'ctes') continue;
-      const next = visit(item, false);
-      if (next !== item) out = { ...out, [key]: next };
-    }
-    const ctes = record['ctes'] as SelectNode['ctes'];
-    if (!top && 'from' in record && 'columns' in record && ctes && ctes.length > 0) {
-      found.push(...ctes);
-      out = { ...out, ctes: undefined };
-    }
-    if (out !== record) changed = true;
-    return out;
-  };
-  const body = visit(q, true) as SelectNode;
-  const all = [...found, ...(body.ctes ?? [])];
-  const unique = all.filter((c, i) => all.findIndex((d) => d.name === c.name) === i);
-  const ctes = unique.map((c) =>
-    c.recursive && c.q.unions?.some((u) => !u.all)
-      ? { ...c, q: { ...c.q, unions: c.q.unions.map((u) => ({ ...u, all: true })) } }
-      : c,
-  );
-  if (!changed && ctes.every((c, i) => c === unique[i])) return q;
-  return { ...body, ctes: ctes.length > 0 ? ctes : undefined };
 }
 
 // ---- 驱动 ----

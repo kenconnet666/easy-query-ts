@@ -657,7 +657,13 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     return [...groups.values()].flatMap(({ table, props, rows }) => {
       if (props.length === 0) throw new Error(`insert into ${this.entity.table} has no values`);
       // 每行占 props.length 个参数；按方言的绑定参数上限切块，一块一条语句（至少一行）
-      const perStatement = Math.max(1, Math.floor(this.ctx.dialect.maxBindParams / props.length));
+      const perStatement = Math.max(
+        1,
+        Math.min(
+          this.ctx.dialect.maxInsertRows,
+          Math.floor(this.ctx.dialect.maxBindParams / props.length),
+        ),
+      );
       const statements: Statement[] = [];
       for (let from = 0; from < rows.length; from += perStatement) {
         const w = new SqlWriter();

@@ -1,0 +1,52 @@
+{
+  "name": "@zerodep-dev/easy-query-ts-oracle",
+  "version": "0.1.0",
+  "description": "Oracle dialect and driver adapter (oracledb Thin mode) for @zerodep-dev/easy-query-ts, rendering per server version",
+  "license": "Apache-2.0",
+  "author": "lionheart (https://github.com/kenconnet666)",
+  "homepage": "https://github.com/kenconnet666/vue-tsx-pro/tree/master/packages/easy-query#readme",
+  "bugs": {
+    "url": "https://github.com/kenconnet666/vue-tsx-pro/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kenconnet666/vue-tsx-pro.git",
+    "directory": "packages/easy-query/oracle"
+  },
+  "keywords": [
+    "oracle",
+    "oracledb",
+    "orm",
+    "easy-query"
+  ],
+  "exports": {
+    ".": {
+      "@vue-tsx-pro/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:^",
+    "oracledb": "^6.0.0 || ^7.0.0"
+  },
+  "devDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:*",
+    "@zerodep-dev/easy-query-ts-test": "workspace:*",
+    "oracledb": "catalog:",
+    "@types/oracledb": "catalog:"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "prepack": "tsc -b tsconfig.build.json"
+  }
+}
