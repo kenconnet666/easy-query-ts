@@ -8,6 +8,7 @@
 import {
   codecs,
   dialectFn,
+  unquoteSql,
   type Expr,
   type FunctionRenderer,
   type Pred,
@@ -36,6 +37,9 @@ export const Hana = {
   },
 };
 
+/** add / diff 的时、分、秒折合多少秒 */
+const HANA_SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
+
 const columnList = (cols: string[]) => (cols.length === 1 ? cols[0]! : `(${cols.join(', ')})`);
 
 /** 加进 HANA 方言的函数表 */
@@ -45,6 +49,25 @@ export const hanaFunctions: Record<string, FunctionRenderer> = {
   add_days: (a) => `ADD_DAYS(${a[0]}, ${a[1]})`,
   add_months: (a) => `ADD_MONTHS(${a[0]}, ${a[1]})`,
   diff_days: (a) => `DAYS_BETWEEN(${a[1]}, ${a[0]})`,
+  add_time: (a) => {
+    const unit = unquoteSql(a[2]!);
+    if (unit === 'year') return `ADD_YEARS(${a[0]}, ${a[1]})`;
+    if (unit === 'month') return `ADD_MONTHS(${a[0]}, ${a[1]})`;
+    if (unit === 'day') return `ADD_DAYS(${a[0]}, ${a[1]})`;
+    return `ADD_SECONDS(${a[0]}, (${a[1]}) * ${HANA_SECONDS[unit]})`;
+  },
+  diff_time: (a) =>
+    `CAST(SECONDS_BETWEEN(${a[1]}, ${a[0]}) / ${HANA_SECONDS[unquoteSql(a[2]!)]} AS BIGINT)`,
+  hour: (a) => `HOUR(${a[0]})`,
+  minute: (a) => `MINUTE(${a[0]})`,
+  second: (a) => `CAST(FLOOR(SECOND(${a[0]})) AS INTEGER)`,
+  day_of_year: (a) => `DAYOFYEAR(${a[0]})`,
+  // WEEKDAY：星期一 0 … 星期日 6
+  day_of_week: (a) => `MOD(WEEKDAY(${a[0]}) + 1, 7)`,
+  iso_day_of_week: (a) => `(WEEKDAY(${a[0]}) + 1)`,
+  now: () => 'CURRENT_UTCTIMESTAMP',
+  truncate: (a) => `ROUND(${a[0]}, ${a[1]}, ROUND_DOWN)`,
+  log10: (a) => `LOG(10, ${a[0]})`,
   cast_string: (a) => `CAST(${a[0]} AS NVARCHAR(5000))`,
   cast_double: (a) => `CAST(${a[0]} AS DOUBLE)`,
   'hana.contains': (a) => `CONTAINS(${columnList(a.slice(0, -1))}, ${a[a.length - 1]})`,

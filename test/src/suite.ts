@@ -6,6 +6,10 @@ import { describe, it } from 'vitest';
 import {
   and,
   caseWhen,
+  greatest,
+  least,
+  now,
+  text,
   createDb,
   defineSchema,
   defineView,
@@ -2341,6 +2345,181 @@ export function liveSuite(
         assert.deepEqual(ancestors, ['hq', 'rd']);
       },
     );
+  });
+
+  describe(`${name}: function library (official func/*)`, () => {
+    it('string functions: pad, trim, compare, notStartsWith, text template', async () => {
+      const { db } = await seeded();
+      const alice = await db
+        .queryable(User)
+        .where((u) => u.name.eq('alice'))
+        .select((u) => ({
+          left: u.name.padStart(7, '*'),
+          right: u.name.padEnd(7, '-'),
+          cut: u.name.padStart(3),
+          trimmed: text`  ${u.name}  `.ltrim().rtrim(),
+          compare: u.name.compare('bob'),
+          same: u.name.compare('alice'),
+          label: text`用户 ${u.name}，${u.age} 岁`,
+        }))
+        .single();
+      assert.deepEqual(alice, {
+        left: '**alice',
+        right: 'alice--',
+        cut: 'ali',
+        trimmed: 'alice',
+        compare: -1,
+        same: 0,
+        label: '用户 alice，30 岁',
+      });
+      const names = await db
+        .queryable(User)
+        .where((u) => [u.name.notStartsWith('a'), u.name.notEndsWith('ol')])
+        .select((u) => u.name)
+        .toList();
+      assert.deepEqual(names, ['bob']);
+    });
+
+    it('math functions', async () => {
+      const { db } = await seeded();
+      const row = await db
+        .queryable(Post)
+        .where((p) => p.title.eq('orm tips'))
+        .select((p) => ({
+          sign: p.amount.minus('20').sign(),
+          truncated: p.amount.truncate(0),
+          power: p.amount.power(2),
+          sqrt: p.amount.times(4).sqrt(),
+          ln: p.amount.ln(),
+          log10: p.amount.times(10).log10(),
+          log2: p.amount.minus('2.5').log(2),
+          atan2: p.amount.atan2(p.amount),
+        }))
+        .single();
+      assert.equal(row.sign, -1);
+      assert.equal(Number(row.truncated), 10);
+      assert.equal(row.power, 110.25);
+      assert.ok(Math.abs(row.sqrt! - Math.sqrt(42)) < 1e-9);
+      assert.ok(Math.abs(row.ln! - Math.log(10.5)) < 1e-9);
+      assert.ok(Math.abs(row.log10! - Math.log10(105)) < 1e-9);
+      assert.ok(Math.abs(row.log2! - 3) < 1e-9);
+      assert.ok(Math.abs(row.atan2! - Math.PI / 4) < 1e-9);
+    });
+
+    it('date functions: parts, format, add, diff, now', async () => {
+      const { db } = await seeded();
+      // 2026-01-02T03:04:05.006Z 是星期五
+      const row = await db
+        .queryable(User)
+        .where((u) => u.name.eq('alice'))
+        .select((u) => ({
+          hour: u.createdAt.hour(),
+          minute: u.createdAt.minute(),
+          second: u.createdAt.second(),
+          dayOfYear: u.createdAt.dayOfYear(),
+          dayOfWeek: u.createdAt.dayOfWeek(),
+          iso: u.createdAt.isoDayOfWeek(),
+          text: u.createdAt.format('yyyy/MM/dd HH:mm:ss 写入'),
+          later: u.createdAt.addHours(2),
+          nextYear: u.createdAt.addYears(1),
+          byColumn: u.createdAt.add(u.age, 'day'),
+          hours: u.createdAt.addHours(5).addMinutes(30).diff(u.createdAt, 'hour'),
+          minutes: u.createdAt.diff(u.createdAt.addMinutes(90), 'minute'),
+        }))
+        .single();
+      assert.deepEqual(
+        {
+          ...row,
+          later: row.later.toISOString(),
+          nextYear: row.nextYear.toISOString(),
+          byColumn: row.byColumn.toISOString(),
+        },
+        {
+          hour: 3,
+          minute: 4,
+          second: 5,
+          dayOfYear: 2,
+          dayOfWeek: 5,
+          iso: 5,
+          text: '2026/01/02 03:04:05 写入',
+          later: '2026-01-02T05:04:05.006Z',
+          nextYear: '2027-01-02T03:04:05.006Z',
+          byColumn: '2026-02-01T03:04:05.006Z',
+          hours: 5,
+          minutes: -90,
+        },
+      );
+      assert.equal(
+        await db
+          .queryable(User)
+          .where((u) => now().gt(u.createdAt))
+          .count(),
+        3,
+      );
+    });
+
+    it('greatest / least ignore NULL', async () => {
+      const { db } = await seeded();
+      const rows = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({ hi: greatest(u.age, 20), lo: least(u.age, 20) }))
+        .toList();
+      assert.deepEqual(rows, [
+        { hi: 30, lo: 20 },
+        { hi: 20, lo: 20 },
+        { hi: 20, lo: 17 },
+      ]);
+    });
+
+    it('joining: in groups, on navigations and on group joins', async () => {
+      const { db } = await seeded();
+      const grouped = await db
+        .queryable(Post)
+        .groupBy((p) => ({ userId: p.userId }))
+        .orderBy((g) => g.key.userId)
+        .select((g) => ({
+          userId: g.key.userId,
+          titles: g.joining((p) => p.title, { separator: '|', orderBy: (p) => p.id }),
+        }))
+        .toList();
+      assert.deepEqual(
+        grouped.map((r) => r.titles),
+        ['orm tips|sql 100%', 'orm_v2|hello'],
+      );
+      const users = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({
+          titles: u.posts.joining((p) => p.title, { separator: '、', orderBy: (p) => p.id.desc() }),
+          grouped: u.posts.groupJoin().joining((p) => p.title, { orderBy: (p) => p.id }),
+        }))
+        .toList();
+      assert.deepEqual(users, [
+        { titles: 'sql 100%、orm tips', grouped: 'orm tips,sql 100%' },
+        { titles: 'hello、orm_v2', grouped: 'orm_v2,hello' },
+        { titles: null, grouped: null },
+      ]);
+    });
+
+    it('window value functions: firstValue / lastValue / nthValue', async () => {
+      const { db } = await seeded();
+      const rows = await db
+        .queryable(Post)
+        .orderBy((p) => p.id)
+        .select((p) => ({
+          first: win.firstValue(p.title, (w) => w.partitionBy(p.userId).orderBy(p.id)),
+          last: win.lastValue(p.title, (w) =>
+            w.partitionBy(p.userId).orderBy(p.id).rows('unboundedPreceding', 'unboundedFollowing'),
+          ),
+          second: win.nthValue(p.title, 2, (w) =>
+            w.partitionBy(p.userId).orderBy(p.id).rows('unboundedPreceding', 'unboundedFollowing'),
+          ),
+        }))
+        .toList();
+      assert.deepEqual(rows[0], { first: 'orm tips', last: 'sql 100%', second: 'sql 100%' });
+      assert.deepEqual(rows[3], { first: 'orm_v2', last: 'hello', second: 'hello' });
+    });
   });
 
   describe(`${name}: explicit joins`, () => {

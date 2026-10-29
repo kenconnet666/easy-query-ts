@@ -3,62 +3,62 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1190、写法不同 272、待做 713、不适用 74。
+合计：已对应 1538、写法不同 272、待做 365、不适用 74。
 
 ## 按能力
 
-| 能力                                                             | 用例数 | 状态     | TS 侧（实现与测试）                                                                                             |
-| ---------------------------------------------------------------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------- |
-| 建表与迁移（code-first）（`codeFirst`）                          | 17     | 待做     | 部分：createTables；syncTables 待做（16.5）                                                                     |
-| 列加密（`column.encryption`）                                    | 8      | 已对应   | encrypted（可分段搜索）、sqlConvert；guards.test.ts、sql-convert.test.ts                                        |
-| ClickHouse 方言（`dialect.clickhouse`）                          | 4      | 待做     | 待做（16.7.6）                                                                                                  |
-| 达梦方言（`dialect.dameng`）                                     | 51     | 待做     | 待做（16.7.4）                                                                                                  |
-| DuckDB 方言（`dialect.duckdb`）                                  | 16     | 待做     | 待做（16.7.3）                                                                                                  |
-| H2 方言（`dialect.h2`）                                          | 74     | 不适用   | 不适用：H2 运行在 JVM 里，Node 没有驱动                                                                         |
-| 人大金仓方言（`dialect.kingbase`）                               | 2      | 待做     | 待做（16.7.5）                                                                                                  |
-| SQL Server 方言（`dialect.mssql`）                               | 38     | 待做     | 待做（16.7.1）                                                                                                  |
-| SQL Server 2008 及以前（ROW_NUMBER 分页）（`dialect.mssql2008`） | 13     | 待做     | 待做（16.7.1）                                                                                                  |
-| 按 DTO 自动带出（selectAutoInclude）（`dto.autoInclude`）        | 35     | 写法不同 | defineView + select(View)；suite.ts views                                                                       |
-| 按对象筛选排序（whereObject / orderByObject）（`dto.object`）    | 101    | 写法不同 | table(parseTableRequest)；table.test.ts（filterBy 待做 16.3.4）                                                 |
-| CASE WHEN（`expr.case`）                                         | 27     | 已对应   | caseWhen；suite.ts functions and CASE                                                                           |
-| 按键填充（fillMany / fillOne）（`fill`）                         | 4      | 已对应   | fill.test.ts                                                                                                    |
-| 日期函数（`func.date`）                                          | 96     | 待做     | 部分：year / month / day / addDays / addMonths / diffDays / dateTrunc；其余待做（16.2.1）                       |
-| 通用函数（nullOrDefault、maxColumns …）（`func.general`）        | 53     | 待做     | 部分：orElse / nullIf；GREATEST / LEAST 待做（16.2.1）                                                          |
-| 字符串聚合（joining）（`func.joining`）                          | 29     | 待做     | 待做（16.2.1）                                                                                                  |
-| JSON 函数（`func.json`）                                         | 12     | 待做     | 待做（16.2.2）                                                                                                  |
-| 数学函数（`func.math`）                                          | 4      | 待做     | 部分：abs / floor / ceil / round / mod；其余待做（16.2.1）                                                      |
-| 字符串函数（`func.string`）                                      | 128    | 待做     | 部分：upper / lower / trim / length / concat / substring / replace / indexOf / left / right；其余待做（16.2.1） |
-| 拦截器（`interceptor`）                                          | 3      | 已对应   | interceptor-toggles.test.ts、write-events.test.ts                                                               |
-| 行锁（`lock`）                                                   | 27     | 已对应   | forUpdate / NoWait / SkipLocked、tx.lock；suite.ts、transaction-hooks.test.ts                                   |
-| 逻辑删除（`logicDelete`）                                        | 10     | 已对应   | softDelete、$onDelete、导航上单独关；suite.ts column rules、guards.test.ts                                      |
-| 一对多展开（flatElement / elements）（`nav.flat`）               | 56     | 待做     | 待做（16.2.4）                                                                                                  |
-| 隐式子查询改分组 join（`nav.groupJoin`）                         | 67     | 已对应   | groupJoin()；group-join.test.ts                                                                                 |
-| include 带出导航（`nav.include`）                                | 37     | 已对应   | include()、select 里的 toList；suite.ts                                                                         |
-| 隐式子查询（any / none / count / sum …）（`nav.subquery`）       | 142    | 已对应   | ManyRef；suite.ts、relation-filter.test.ts                                                                      |
-| 基本查询（条件、排序、选列、分页）（`query.basic`）              | 402    | 已对应   | query.ts；test/src/suite.ts queries、sqlite.sql.test.ts                                                         |
-| CTE（`query.cte`）                                               | 11     | 已对应   | db.with / withRecursive；suite.ts                                                                               |
-| 分组与 having（`query.group`）                                   | 78     | 已对应   | groupBy / having / rollup / cube；suite.ts                                                                      |
-| 显式 join（含 merge 写法）（`query.join`）                       | 88     | 已对应   | innerJoin / leftJoin / rightJoin / crossJoin，lambda 按顺序收到各表；suite.ts explicit joins                    |
-| 无实体的 Map 查询、toMap（`query.map`）                          | 11     | 待做     | 待做：按表名查询、结果是普通对象（16.2.5）                                                                      |
-| 分页结果（`query.page`）                                         | 22     | 已对应   | toPage、table()；suite.ts、table.test.ts                                                                        |
-| 复用查询（cloneQueryable）（`query.reuse`）                      | 2      | 写法不同 | 查询对象不可变，直接复用                                                                                        |
-| 流式读取（`query.stream`）                                       | 9      | 已对应   | stream()；suite.ts streaming                                                                                    |
-| union / union all（`query.union`）                               | 18     | 已对应   | union / unionAll；suite.ts                                                                                      |
-| 聚合根保存（savable）（`save.aggregate`）                        | 39     | 待做     | 部分：db.save 一层一对多；其余待做（16.4.1）                                                                    |
-| search 扩展（`search`）                                          | 45     | 待做     | 待对照（16.6.5）                                                                                                |
-| 分库分表（`sharding`）                                           | 48     | 待做     | 待做（16.6.2、16.6.3）                                                                                          |
-| 原生 SQL（`sql.native`）                                         | 50     | 已对应   | sql 标签、db.sql；suite.ts native SQL                                                                           |
-| 跨库链接（asTableLink）（`table.link`）                          | 13     | 待做     | 待做（16.2.5）                                                                                                  |
-| 换表名（asTable）（`table.rename`）                              | 53     | 写法不同 | db.mapTables；suite.ts table mapping                                                                            |
-| 换 schema（asSchema）（`table.schema`）                          | 19     | 写法不同 | db.inSchema；sqlite.tenant.test.ts                                                                              |
-| 追踪与差异更新（`tracking`）                                     | 62     | 写法不同 | update().changes(before, after)；changes.test.ts                                                                |
-| 树（toTreeList / asTreeCTE）（`tree`）                           | 25     | 已对应   | toTree、descendantsOf / ancestorsOf；tree.test.ts                                                               |
-| 乐观锁版本（`version`）                                          | 13     | 已对应   | version() / version({ initial, next })、withVersion；changes.test.ts                                            |
-| 窗口函数与分区（`window`）                                       | 38     | 待做     | 部分：win.rowNumber / rank / lag / lead …；firstValue / lastValue / nthValue 待做（16.2.1）                     |
-| 删除（`write.delete`）                                           | 26     | 已对应   | delete()、hard()、hardDelete 护栏；suite.ts、guards.test.ts                                                     |
-| 插入（`write.insert`）                                           | 48     | 已对应   | insert().values / fromQuery / returnId / returnEntity；suite.ts writes                                          |
-| 更新（`write.update`）                                           | 62     | 已对应   | update().set / entity / changes / withVersion；suite.ts、changes.test.ts                                        |
-| upsert（`write.upsert`）                                         | 13     | 已对应   | onConflict().merge / ignore；suite.ts upsert                                                                    |
+| 能力                                                             | 用例数 | 状态     | TS 侧（实现与测试）                                                                                                                                   |
+| ---------------------------------------------------------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 建表与迁移（code-first）（`codeFirst`）                          | 17     | 待做     | 部分：createTables；syncTables 待做（16.5）                                                                                                           |
+| 列加密（`column.encryption`）                                    | 8      | 已对应   | encrypted（可分段搜索）、sqlConvert；guards.test.ts、sql-convert.test.ts                                                                              |
+| ClickHouse 方言（`dialect.clickhouse`）                          | 4      | 待做     | 待做（16.7.6）                                                                                                                                        |
+| 达梦方言（`dialect.dameng`）                                     | 51     | 待做     | 待做（16.7.4）                                                                                                                                        |
+| DuckDB 方言（`dialect.duckdb`）                                  | 16     | 待做     | 待做（16.7.3）                                                                                                                                        |
+| H2 方言（`dialect.h2`）                                          | 74     | 不适用   | 不适用：H2 运行在 JVM 里，Node 没有驱动                                                                                                               |
+| 人大金仓方言（`dialect.kingbase`）                               | 2      | 待做     | 待做（16.7.5）                                                                                                                                        |
+| SQL Server 方言（`dialect.mssql`）                               | 38     | 待做     | 待做（16.7.1）                                                                                                                                        |
+| SQL Server 2008 及以前（ROW_NUMBER 分页）（`dialect.mssql2008`） | 13     | 待做     | 待做（16.7.1）                                                                                                                                        |
+| 按 DTO 自动带出（selectAutoInclude）（`dto.autoInclude`）        | 35     | 写法不同 | defineView + select(View)；suite.ts views                                                                                                             |
+| 按对象筛选排序（whereObject / orderByObject）（`dto.object`）    | 101    | 写法不同 | table(parseTableRequest)；table.test.ts（filterBy 待做 16.3.4）                                                                                       |
+| CASE WHEN（`expr.case`）                                         | 27     | 已对应   | caseWhen；suite.ts functions and CASE                                                                                                                 |
+| 按键填充（fillMany / fillOne）（`fill`）                         | 4      | 已对应   | fill.test.ts                                                                                                                                          |
+| 日期函数（`func.date`）                                          | 96     | 已对应   | format、add / addYears / addHours …（数量可以是列）、hour / minute / second、dayOfYear、dayOfWeek、isoDayOfWeek、diff、now；suite.ts function library |
+| 通用函数（nullOrDefault、maxColumns …）（`func.general`）        | 53     | 已对应   | orElse（nullOrDefault）、greatest / least（忽略 NULL）；suite.ts function library                                                                     |
+| 字符串聚合（joining）（`func.joining`）                          | 29     | 已对应   | g.joining / u.posts.joining / groupJoin().joining；suite.ts function library                                                                          |
+| JSON 函数（`func.json`）                                         | 12     | 待做     | 待做（16.2.2）                                                                                                                                        |
+| 数学函数（`func.math`）                                          | 4      | 已对应   | sign、power、sqrt、exp、ln、log10、log、三角函数、truncate；suite.ts function library                                                                 |
+| 字符串函数（`func.string`）                                      | 128    | 已对应   | ltrim / rtrim、padStart / padEnd、text 模板、compare、notStartsWith / notEndsWith（nullEmpty 用 orElse）；suite.ts function library                   |
+| 拦截器（`interceptor`）                                          | 3      | 已对应   | interceptor-toggles.test.ts、write-events.test.ts                                                                                                     |
+| 行锁（`lock`）                                                   | 27     | 已对应   | forUpdate / NoWait / SkipLocked、tx.lock；suite.ts、transaction-hooks.test.ts                                                                         |
+| 逻辑删除（`logicDelete`）                                        | 10     | 已对应   | softDelete、$onDelete、导航上单独关；suite.ts column rules、guards.test.ts                                                                            |
+| 一对多展开（flatElement / elements）（`nav.flat`）               | 56     | 待做     | 待做（16.2.4）                                                                                                                                        |
+| 隐式子查询改分组 join（`nav.groupJoin`）                         | 67     | 已对应   | groupJoin()；group-join.test.ts                                                                                                                       |
+| include 带出导航（`nav.include`）                                | 37     | 已对应   | include()、select 里的 toList；suite.ts                                                                                                               |
+| 隐式子查询（any / none / count / sum …）（`nav.subquery`）       | 142    | 已对应   | ManyRef；suite.ts、relation-filter.test.ts                                                                                                            |
+| 基本查询（条件、排序、选列、分页）（`query.basic`）              | 402    | 已对应   | query.ts；test/src/suite.ts queries、sqlite.sql.test.ts                                                                                               |
+| CTE（`query.cte`）                                               | 11     | 已对应   | db.with / withRecursive；suite.ts                                                                                                                     |
+| 分组与 having（`query.group`）                                   | 78     | 已对应   | groupBy / having / rollup / cube；suite.ts                                                                                                            |
+| 显式 join（含 merge 写法）（`query.join`）                       | 88     | 已对应   | innerJoin / leftJoin / rightJoin / crossJoin，lambda 按顺序收到各表；suite.ts explicit joins                                                          |
+| 无实体的 Map 查询、toMap（`query.map`）                          | 11     | 待做     | 待做：按表名查询、结果是普通对象（16.2.5）                                                                                                            |
+| 分页结果（`query.page`）                                         | 22     | 已对应   | toPage、table()；suite.ts、table.test.ts                                                                                                              |
+| 复用查询（cloneQueryable）（`query.reuse`）                      | 2      | 写法不同 | 查询对象不可变，直接复用                                                                                                                              |
+| 流式读取（`query.stream`）                                       | 9      | 已对应   | stream()；suite.ts streaming                                                                                                                          |
+| union / union all（`query.union`）                               | 18     | 已对应   | union / unionAll；suite.ts                                                                                                                            |
+| 聚合根保存（savable）（`save.aggregate`）                        | 39     | 待做     | 部分：db.save 一层一对多；其余待做（16.4.1）                                                                                                          |
+| search 扩展（`search`）                                          | 45     | 待做     | 待对照（16.6.5）                                                                                                                                      |
+| 分库分表（`sharding`）                                           | 48     | 待做     | 待做（16.6.2、16.6.3）                                                                                                                                |
+| 原生 SQL（`sql.native`）                                         | 50     | 已对应   | sql 标签、db.sql；suite.ts native SQL                                                                                                                 |
+| 跨库链接（asTableLink）（`table.link`）                          | 13     | 待做     | 待做（16.2.5）                                                                                                                                        |
+| 换表名（asTable）（`table.rename`）                              | 53     | 写法不同 | db.mapTables；suite.ts table mapping                                                                                                                  |
+| 换 schema（asSchema）（`table.schema`）                          | 19     | 写法不同 | db.inSchema；sqlite.tenant.test.ts                                                                                                                    |
+| 追踪与差异更新（`tracking`）                                     | 62     | 写法不同 | update().changes(before, after)；changes.test.ts                                                                                                      |
+| 树（toTreeList / asTreeCTE）（`tree`）                           | 25     | 已对应   | toTree、descendantsOf / ancestorsOf；tree.test.ts                                                                                                     |
+| 乐观锁版本（`version`）                                          | 13     | 已对应   | version() / version({ initial, next })、withVersion；changes.test.ts                                                                                  |
+| 窗口函数与分区（`window`）                                       | 38     | 已对应   | win.* 含 firstValue / lastValue / nthValue；suite.ts function library、windows                                                                        |
+| 删除（`write.delete`）                                           | 26     | 已对应   | delete()、hard()、hardDelete 护栏；suite.ts、guards.test.ts                                                                                           |
+| 插入（`write.insert`）                                           | 48     | 已对应   | insert().values / fromQuery / returnId / returnEntity；suite.ts writes                                                                                |
+| 更新（`write.update`）                                           | 62     | 已对应   | update().set / entity / changes / withVersion；suite.ts、changes.test.ts                                                                              |
+| upsert（`write.upsert`）                                         | 13     | 已对应   | onConflict().merge / ignore；suite.ts upsert                                                                                                          |
 
 ## 逐条
 
@@ -517,7 +517,7 @@
 | RelationTest.java#provinceTest4  | `SELECT `code`,`name`FROM`t_province`` |
 | RelationTest.java#provinceVoTest |                                        |
 
-### 日期函数（`func.date`，待做）
+### 日期函数（`func.date`，已对应）
 
 | 用例                                                    | 断言的 SQL（摘要）                                                                             |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -618,7 +618,7 @@
 | QueryTest9.java#testDsl5                                | `SELECT `id`,`stars`,`title`,`create_time`FROM`t_topic`WHERE`create_time`<=`create_ti…`        |
 | QueryTest9.java#testQuery5                              | `SELECT t.`id`AS`id`,COUNT(*) AS `star`,MAX(t.`id`) AS `title`FROM`t_blog` t WHERE t.`d…`      |
 
-### 通用函数（nullOrDefault、maxColumns …）（`func.general`，待做）
+### 通用函数（nullOrDefault、maxColumns …）（`func.general`，已对应）
 
 | 用例                                          | 断言的 SQL（摘要）                                                                            |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -676,7 +676,7 @@
 | QueryTest5.java#joinTestx                     | `SELECT COUNT(t2.`id`) FROM (SELECT DISTINCT IFNULL(t1.`id`,?) AS `id`,SUM(t1.`score`) AS `…` |
 | QueryTest9.java#testQuery6                    | `SELECT t.`id`,COUNT(t.`id`) AS `star`,MAX(t.`id`) AS `title`FROM`t_blog` t WHERE t.`dele…`   |
 
-### 字符串聚合（joining）（`func.joining`，待做）
+### 字符串聚合（joining）（`func.joining`，已对应）
 
 | 用例                                            | 断言的 SQL（摘要）                                                                            |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -727,7 +727,7 @@
 | pgsql/JsonTest.java#testJsonField5  |                                                                                             |
 | pgsql/JsonTest.java#testJsonField6  |                                                                                             |
 
-### 数学函数（`func.math`，待做）
+### 数学函数（`func.math`，已对应）
 
 | 用例                         | 断言的 SQL（摘要）                                                                            |
 | ---------------------------- | --------------------------------------------------------------------------------------------- |
@@ -736,7 +736,7 @@
 | QueryTest4.java#testSQLFunc8 | `SELECT ABS(t.`create_time`) AS `title`FROM`t_topic` t WHERE t.`id` = ? ORDER BY t.`creat…`   |
 | QueryTest4.java#testSQLFunc9 | `SELECT ROUND(t.`stars`,1) AS `title`FROM`t_topic` t WHERE t.`id` = ? ORDER BY t.`create_…`   |
 
-### 字符串函数（`func.string`，待做）
+### 字符串函数（`func.string`，已对应）
 
 | 用例                                        | 断言的 SQL（摘要）                                                                            |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -2349,7 +2349,7 @@
 | VersionTest.java#test8   |                                                                                             |
 | VersionTest.java#test9   | `UPDATE `AXX`SET`username` = ?,`version`= ? WHERE`deleted`= ? AND`version`= ? AND`i…`       |
 
-### 窗口函数与分区（`window`，待做）
+### 窗口函数与分区（`window`，已对应）
 
 | 用例                                           | 断言的 SQL（摘要）                                                                            |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------- |

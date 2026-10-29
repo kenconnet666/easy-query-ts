@@ -15,7 +15,10 @@ import {
   type ConflictNode,
   type Driver,
   type ExecuteResult,
+  sqlString,
+  type DatePart,
   type FunctionRenderer,
+  type Node,
   type Session,
   type SqlWriter,
   type TransactionOptions,
@@ -67,6 +70,20 @@ export class MySqlDialect extends Dialect {
 
   /** MySQL 的 `<=>` 就是 null 安全的相等 */
   override readonly nullSafeEquals = '<=>';
+
+  /** DATE_FORMAT：%Y-%m-%d %H:%i:%s，文字里的 % 写两次 */
+  protected override formatDate(value: string, parts: readonly DatePart[]): string {
+    const tokens = { yyyy: '%Y', yy: '%y', MM: '%m', dd: '%d', HH: '%H', mm: '%i', ss: '%s' };
+    const format = parts
+      .map((p) => ('token' in p ? tokens[p.token] : p.text.replaceAll('%', '%%')))
+      .join('');
+    return `DATE_FORMAT(${value}, ${sqlString(format)})`;
+  }
+
+  /** GROUP_CONCAT([DISTINCT] e ORDER BY … SEPARATOR '…') */
+  protected override stringAgg(n: Extract<Node, { k: 'string_agg' }>, w: SqlWriter): string {
+    return `GROUP_CONCAT(${n.distinct ? 'DISTINCT ' : ''}${this.node(n.e, w)}${this.aggOrder(n.order, w)} SEPARATOR ${sqlString(n.separator)})`;
+  }
 
   /** MySQL 只有 WITH ROLLUP（没有 CUBE） */
   override groupByKeys(keys: string[], mode: 'rollup' | 'cube' | undefined): string {

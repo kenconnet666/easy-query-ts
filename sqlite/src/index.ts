@@ -14,12 +14,28 @@ import {
   type Adapter,
   type Driver,
   type ExecuteResult,
+  coalesceEach,
+  sqlString,
+  unquoteSql,
+  type DatePart,
   type FunctionRenderer,
+  type Node,
   type Session,
+  type SqlWriter,
   type TransactionOptions,
 } from '@zerodep-dev/easy-query-ts';
 
 /** SQLite 的日期时间是文字：用 strftime 取整，结果仍是 'YYYY-MM-DD HH:MM:SS' */
+/** LPAD / RPAD 的 SQLite 写法：比 length 长时截到 length，否则用 fill 补足（fill 重复 length 次再截取） */
+function pad([value, length, fill]: string[], start: boolean): string {
+  const filler = `SUBSTR(REPLACE(HEX(ZEROBLOB(${length})), '00', ${fill}), 1, ${length} - LENGTH(${value}))`;
+  const padded = start ? `${filler} || ${value}` : `${value} || ${filler}`;
+  return `(CASE WHEN LENGTH(${value}) >= ${length} THEN SUBSTR(${value}, 1, ${length}) ELSE ${padded} END)`;
+}
+
+/** diff 的单位折合多少秒 */
+const DIFF_SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
+
 function dateTrunc(x: string, unit: string): string {
   switch (unit) {
     case 'year':
@@ -111,12 +127,66 @@ export class SqliteDialect extends Dialect {
       diff_days: (a) =>
         `CAST(ROUND(julianday(date(${a[0]})) - julianday(date(${a[1]}))) AS INTEGER)`,
       date_trunc: (a) => dateTrunc(a[0]!, a[1]!.replace(/'/g, '')),
+      // 加时间单位：修饰符可以是表达式拼出来的（'3 hours'）；%f 保留毫秒
+      add_time: (a) =>
+        `strftime('%Y-%m-%d %H:%M:%f', ${a[0]}, (${a[1]}) || ' ${unquoteSql(a[2]!)}s')`,
+      hour: (a) => `CAST(strftime('%H', ${a[0]}) AS INTEGER)`,
+      minute: (a) => `CAST(strftime('%M', ${a[0]}) AS INTEGER)`,
+      second: (a) => `CAST(strftime('%S', ${a[0]}) AS INTEGER)`,
+      day_of_year: (a) => `CAST(strftime('%j', ${a[0]}) AS INTEGER)`,
+      day_of_week: (a) => `CAST(strftime('%w', ${a[0]}) AS INTEGER)`,
+      iso_day_of_week: (a) => `CAST(strftime('%u', ${a[0]}) AS INTEGER)`,
+      // 按秒算再整除（向零取整）：julianday 的差直接乘会有浮点误差
+      diff_time: (a) =>
+        `(CAST(ROUND((julianday(${a[0]}) - julianday(${a[1]})) * 86400) AS INTEGER) / ${DIFF_SECONDS[unquoteSql(a[2]!)]})`,
+      now: () => `strftime('%Y-%m-%d %H:%M:%f', 'now')`,
+      // 没有 LPAD / RPAD：比 length 长时截断，否则补足（参数可以重复，见 Dialect.node 的 fn）
+      pad_start: (a) => pad(a, true),
+      pad_end: (a) => pad(a, false),
+      // 多参数的 MAX / MIN 就是 GREATEST / LEAST
+      greatest: (a) => `MAX(${coalesceEach(a)})`,
+      least: (a) => `MIN(${coalesceEach(a)})`,
+      truncate: (a) => `(TRUNC((${a[0]}) * POWER(10, ${a[1]})) / POWER(10, ${a[1]}))`,
       cast_string: (a) => `CAST(${a[0]} AS TEXT)`,
       cast_double: (a) => `CAST(${a[0]} AS REAL)`,
       cast_decimal: (a) => `CAST(${a[0]} AS NUMERIC)`,
       cast_date: (a) => `date(${a[0]})`,
       cast_datetime: (a) => `datetime(${a[0]})`,
     };
+  }
+
+  /** strftime：%Y-%m-%d %H:%M:%S，文字里的 % 写两次；两位年份没有对应的格式符 */
+  protected override formatDate(value: string, parts: readonly DatePart[]): string {
+    const tokens: Record<string, string> = {
+      yyyy: '%Y',
+      MM: '%m',
+      dd: '%d',
+      HH: '%H',
+      mm: '%M',
+      ss: '%S',
+    };
+    const format = parts
+      .map((p) => {
+        if (!('token' in p)) return p.text.replaceAll('%', '%%');
+        const token = tokens[p.token];
+        if (!token)
+          throw new Error(`date format '${p.token}' is not supported by the sqlite dialect`);
+        return token;
+      })
+      .join('');
+    return `strftime(${sqlString(format)}, ${value})`;
+  }
+
+  /** GROUP_CONCAT(e, '分隔符' ORDER BY …)；DISTINCT 只能用默认的逗号分隔 */
+  protected override stringAgg(n: Extract<Node, { k: 'string_agg' }>, w: SqlWriter): string {
+    if (n.distinct) {
+      if (n.separator !== ',')
+        throw new Error(
+          "sqlite only supports joining({ distinct: true }) with the default ',' separator",
+        );
+      return `GROUP_CONCAT(DISTINCT ${this.node(n.e, w)}${this.aggOrder(n.order, w)})`;
+    }
+    return `GROUP_CONCAT(${this.node(n.e, w)}, ${sqlString(n.separator)}${this.aggOrder(n.order, w)})`;
   }
 
   /** SQLite 没有行锁，事务本身锁库 */

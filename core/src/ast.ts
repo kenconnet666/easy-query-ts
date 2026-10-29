@@ -46,7 +46,15 @@ export type Node =
       readonly frame: string | undefined;
     }
   /** 标量子查询 */
-  | { readonly k: 'sub'; readonly q: SelectNode };
+  | { readonly k: 'sub'; readonly q: SelectNode }
+  /** 字符串聚合（joining）：GROUP_CONCAT / STRING_AGG，分隔符是受信任的字面量 */
+  | {
+      readonly k: 'string_agg';
+      readonly e: Node;
+      readonly separator: string;
+      readonly order: readonly OrderNode[];
+      readonly distinct: boolean;
+    };
 
 export type BinaryOp = '=' | '<>' | '>' | '>=' | '<' | '<=' | '+' | '-' | '*' | '/';
 export type AggregateFn = 'count' | 'sum' | 'avg' | 'max' | 'min';
@@ -215,6 +223,10 @@ export function checkAliases(
       case 'exists':
       case 'sub':
         checkAliases(n.q, declared);
+        return;
+      case 'string_agg':
+        visit(n.e);
+        n.order.forEach((o) => visit(o.e));
         return;
     }
   };

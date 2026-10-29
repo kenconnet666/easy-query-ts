@@ -120,6 +120,22 @@ export const win = {
       spec,
       value.codec,
     ),
+  /** 窗口里第一行的值 */
+  firstValue: <V>(value: Expr<V>, spec?: Spec) =>
+    over<V>({ k: 'raw', parts: ['FIRST_VALUE(', ')'], args: [value.node] }, spec, value.codec),
+  /**
+   * 窗口里最后一行的值。注意有 orderBy 时默认的窗口只到当前行，要整个分区的最后一行写
+   * `w.orderBy(…).rows('unboundedPreceding', 'unboundedFollowing')`
+   */
+  lastValue: <V>(value: Expr<V>, spec?: Spec) =>
+    over<V>({ k: 'raw', parts: ['LAST_VALUE(', ')'], args: [value.node] }, spec, value.codec),
+  /** 窗口里第 n 行（1 起）的值；没有时为 null */
+  nthValue: <V>(value: Expr<V>, n: number, spec?: Spec) =>
+    over<NonNullable<V> | null>(
+      { k: 'raw', parts: ['NTH_VALUE(', `, ${positive(n, 'nthValue n')})`], args: [value.node] },
+      spec,
+      value.codec,
+    ),
   /** 往前第 offset 行的值；没有时为 null */
   lag: <V>(value: Expr<V>, spec?: Spec, offset = 1) =>
     over<NonNullable<V> | null>(

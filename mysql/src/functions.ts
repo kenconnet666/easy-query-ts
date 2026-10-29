@@ -9,6 +9,7 @@
 import {
   codecs,
   dialectFn,
+  unquoteSql,
   type Expr,
   type FunctionRenderer,
   type Pred,
@@ -95,6 +96,18 @@ export const mysqlFunctions: Record<string, FunctionRenderer> = {
   add_days: (a) => `DATE_ADD(${a[0]}, INTERVAL ${a[1]} DAY)`,
   add_months: (a) => `DATE_ADD(${a[0]}, INTERVAL ${a[1]} MONTH)`,
   diff_days: (a) => `DATEDIFF(${a[0]}, ${a[1]})`,
+  add_time: (a) => `DATE_ADD(${a[0]}, INTERVAL (${a[1]}) ${unquoteSql(a[2]!).toUpperCase()})`,
+  diff_time: (a) => `TIMESTAMPDIFF(${unquoteSql(a[2]!).toUpperCase()}, ${a[1]}, ${a[0]})`,
+  hour: (a) => `HOUR(${a[0]})`,
+  minute: (a) => `MINUTE(${a[0]})`,
+  second: (a) => `SECOND(${a[0]})`,
+  day_of_year: (a) => `DAYOFYEAR(${a[0]})`,
+  // DAYOFWEEK：星期日 1；WEEKDAY：星期一 0
+  day_of_week: (a) => `(DAYOFWEEK(${a[0]}) - 1)`,
+  iso_day_of_week: (a) => `(WEEKDAY(${a[0]}) + 1)`,
+  // 日期时间列按 UTC 存，取 UTC 的当前时刻
+  now: () => 'UTC_TIMESTAMP(3)',
+  truncate: (a) => `TRUNCATE(${a[0]}, ${a[1]})`,
   cast_string: (a) => `CAST(${a[0]} AS CHAR)`,
   cast_int: (a) => `CAST(${a[0]} AS SIGNED)`,
   cast_bigint: (a) => `CAST(${a[0]} AS SIGNED)`,

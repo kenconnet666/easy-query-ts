@@ -14,8 +14,10 @@ import {
   type Adapter,
   type Driver,
   type ExecuteResult,
+  type DatePart,
   type FunctionRenderer,
   type InsertNode,
+  type Node,
   type Session,
   type TransactionOptions,
 } from '@zerodep-dev/easy-query-ts';
@@ -71,6 +73,19 @@ export class HanaDialect extends Dialect {
       concat: (a) => `(${a.join(' || ')})`,
       ...hanaFunctions,
     };
+  }
+
+  /** HANA 的格式化函数叫 TO_VARCHAR，格式符同 TO_CHAR */
+  protected override formatDate(value: string, parts: readonly DatePart[]): string {
+    return super.formatDate(value, parts).replace(/^TO_CHAR\(/, 'TO_VARCHAR(');
+  }
+
+  /** HANA 的 STRING_AGG 不支持 DISTINCT */
+  protected override stringAgg(n: Extract<Node, { k: 'string_agg' }>, w: SqlWriter): string {
+    if (n.distinct)
+      throw new Error('joining({ distinct: true }) is not supported by the hana dialect');
+    // STRING_AGG 只收文字，数字等先转
+    return super.stringAgg({ ...n, e: { k: 'raw', parts: ['TO_VARCHAR(', ')'], args: [n.e] } }, w);
   }
 
   /**

@@ -14,6 +14,8 @@ import { SqlWriter, type Statement } from './dialect.ts';
 import {
   aggregate,
   aggregateCodec,
+  joiningExpr,
+  type JoiningOptions,
   codecs,
   condNode,
   or,
@@ -775,6 +777,13 @@ export interface Group<
   /** 不带条件是 COUNT(*)；带条件只数满足的行 */
   count(filter?: (...refs: Refs) => Cond): Expr<number>;
   countDistinct(value: (...refs: Refs) => Expr<unknown>): Expr<number>;
+  /**
+   * 组里的值拼成一串（对应 Java 版的 joining，GROUP_CONCAT / STRING_AGG）：`g.joining((p) => p.title, { separator: '、', orderBy: (p) => p.id })`
+   */
+  joining(
+    value: (...refs: Refs) => Expr<unknown>,
+    options?: JoiningOptions<Refs>,
+  ): Expr<string | null>;
   /** rollup / cube 里这一行是不是这个键的小计行：是为 1，否则 0（区分"小计行的 NULL"和"数据本身的 NULL"） */
   grouping(value: (...refs: Refs) => Expr<unknown>): Expr<number>;
   sum<V extends Numeric | null>(value: (...refs: Refs) => Expr<V>): Expr<NonNullable<V> | null>;
@@ -1121,6 +1130,13 @@ function groupHandle(refs: readonly AnyRef[], key: unknown): Group<any, any, unk
     },
     countDistinct: (value) =>
       aggregate<number>('count', value(...(refs as never[])), codecs.int, true),
+    joining: (value, options) =>
+      joiningExpr(
+        value(...(refs as never[])),
+        options?.separator,
+        options?.orderBy ? orderNodes(options.orderBy(...(refs as never[]))) : [],
+        options?.distinct,
+      ),
     grouping: (value) =>
       new Expr<number>(
         { k: 'fn', name: 'grouping', args: [value(...(refs as never[])).node] },

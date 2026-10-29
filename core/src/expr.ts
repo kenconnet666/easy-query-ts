@@ -175,6 +175,12 @@ export class Expr<T> {
   endsWith(this: Expr<string | null>, text: string): Pred {
     return this.likeNode('%', text, '', false);
   }
+  notStartsWith(this: Expr<string | null>, text: string): Pred {
+    return this.likeNode('', text, '%', true);
+  }
+  notEndsWith(this: Expr<string | null>, text: string): Pred {
+    return this.likeNode('%', text, '', true);
+  }
 
   asc(): Order {
     return new Order({ e: this.node, desc: false });
@@ -199,6 +205,41 @@ export class Expr<T> {
   }
   trim(this: Expr<string | null>): Expr<T> {
     return this.fn('trim') as Expr<T>;
+  }
+  /** 去掉开头的空白 */
+  ltrim(this: Expr<string | null>): Expr<T> {
+    return this.fn('ltrim') as Expr<T>;
+  }
+  /** 去掉末尾的空白 */
+  rtrim(this: Expr<string | null>): Expr<T> {
+    return this.fn('rtrim') as Expr<T>;
+  }
+
+  /** 左边补 fill 到 length 个字符（同 JS 的 padStart；比 length 长时截到 length，同 SQL 的 LPAD） */
+  padStart(this: Expr<string | null>, length: number, fill = ' '): Expr<T> {
+    return this.pad('pad_start', length, fill) as Expr<T>;
+  }
+
+  /** 右边补 fill 到 length 个字符（同 JS 的 padEnd） */
+  padEnd(this: Expr<string | null>, length: number, fill = ' '): Expr<T> {
+    return this.pad('pad_end', length, fill) as Expr<T>;
+  }
+
+  /** 与 other 比大小：小于为 -1，等于 0，大于 1（对应 Java 版的 compareTo）；任一为 NULL 时为 NULL */
+  compare(other: Operand<T>): Expr<Keep<T, number>> {
+    const r = this.operand(other);
+    return new Expr(
+      {
+        k: 'case',
+        when: [
+          [{ k: 'op', op: '<', l: this.node, r }, intLit(-1)],
+          [{ k: 'op', op: '>', l: this.node, r }, intLit(1)],
+          [{ k: 'op', op: '=', l: this.node, r }, intLit(0)],
+        ],
+        else: undefined,
+      },
+      codecs.int,
+    );
   }
   /** 字符数 */
   length(this: Expr<string | null>): Expr<Keep<T, number>> {
@@ -312,6 +353,73 @@ export class Expr<T> {
     return new Expr({ k: 'fn', name: 'mod', args: [this.node, this.operand(divisor)] }, this.codec);
   }
 
+  /** 截断到 digits 位小数（不四舍五入，默认取整） */
+  truncate(this: Expr<Numeric | null>, digits = 0): Expr<T> {
+    return new Expr(
+      {
+        k: 'fn',
+        name: 'truncate',
+        args: [this.node, intLit(nonNegativeInt(digits, 'truncate digits'))],
+      },
+      this.codec,
+    );
+  }
+
+  /** 符号：正数 1、负数 -1、零 0 */
+  sign(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return new Expr({ k: 'fn', name: 'sign', args: [this.node] }, codecs.int);
+  }
+
+  /** 幂：本值的 exponent 次方 */
+  power(
+    this: Expr<Numeric | null>,
+    exponent: number | Expr<Numeric | null>,
+  ): Expr<Keep<T, number>> {
+    return this.math('power', toNode(exponent, undefined));
+  }
+  /** 平方根 */
+  sqrt(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('sqrt');
+  }
+  /** e 的本值次方 */
+  exp(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('exp');
+  }
+  /** 自然对数 */
+  ln(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('ln');
+  }
+  /** 以 10 为底的对数 */
+  log10(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('log10');
+  }
+  /** 以 base 为底的对数 */
+  log(this: Expr<Numeric | null>, base: number): Expr<Keep<T, number>> {
+    return this.math('log', toNode(base, undefined));
+  }
+  sin(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('sin');
+  }
+  cos(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('cos');
+  }
+  tan(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('tan');
+  }
+  asin(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('asin');
+  }
+  acos(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('acos');
+  }
+  atan(this: Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('atan');
+  }
+  /** 坐标 (x, 本值) 的反正切，按象限取角（本值是 y） */
+  atan2(this: Expr<Numeric | null>, x: number | Expr<Numeric | null>): Expr<Keep<T, number>> {
+    return this.math('atan2', toNode(x, undefined));
+  }
+
   // ---- 日期函数 ----
 
   /** 加 n 天（n 可为负）。SQLite 的结果不带毫秒 */
@@ -327,6 +435,80 @@ export class Expr<T> {
     return new Expr(
       { k: 'fn', name: 'add_months', args: [this.node, intLit(safeInt(n, 'addMonths'))] },
       this.codec,
+    );
+  }
+
+  /** 加 n 个时间单位（n 可为负，也可以是一列：`o.createdAt.add(o.days, 'day')`） */
+  add(this: Expr<Temporal | null>, n: number | Expr<number | null>, unit: TimeUnit): Expr<T> {
+    if (!TIME_UNITS.includes(unit))
+      throw new RangeError(`add unit must be one of ${TIME_UNITS.join(', ')}, got '${unit}'`);
+    const amount = typeof n === 'number' ? intLit(safeInt(n, 'add amount')) : n.node;
+    return new Expr(
+      { k: 'fn', name: 'add_time', args: [this.node, amount, { k: 'lit', sql: `'${unit}'` }] },
+      this.codec,
+    );
+  }
+  addYears(this: Expr<Temporal | null>, n: number | Expr<number | null>): Expr<T> {
+    return this.add(n, 'year') as Expr<T>;
+  }
+  addHours(this: Expr<Temporal | null>, n: number | Expr<number | null>): Expr<T> {
+    return this.add(n, 'hour') as Expr<T>;
+  }
+  addMinutes(this: Expr<Temporal | null>, n: number | Expr<number | null>): Expr<T> {
+    return this.add(n, 'minute') as Expr<T>;
+  }
+  addSeconds(this: Expr<Temporal | null>, n: number | Expr<number | null>): Expr<T> {
+    return this.add(n, 'second') as Expr<T>;
+  }
+
+  hour(this: Expr<Temporal | null>): Expr<Keep<T, number>> {
+    return new Expr({ k: 'fn', name: 'hour', args: [this.node] }, codecs.int);
+  }
+  minute(this: Expr<Temporal | null>): Expr<Keep<T, number>> {
+    return new Expr({ k: 'fn', name: 'minute', args: [this.node] }, codecs.int);
+  }
+  /** 秒（整数，不含毫秒） */
+  second(this: Expr<Temporal | null>): Expr<Keep<T, number>> {
+    return new Expr({ k: 'fn', name: 'second', args: [this.node] }, codecs.int);
+  }
+  /** 一年中的第几天，1 起 */
+  dayOfYear(this: Expr<Temporal | null>): Expr<Keep<T, number>> {
+    return new Expr({ k: 'fn', name: 'day_of_year', args: [this.node] }, codecs.int);
+  }
+  /** 星期几：星期日 0、星期一 1 … 星期六 6（同 JS 的 Date.getDay） */
+  dayOfWeek(this: Expr<Temporal | null>): Expr<Keep<T, number>> {
+    return new Expr({ k: 'fn', name: 'day_of_week', args: [this.node] }, codecs.int);
+  }
+  /** ISO 的星期几：星期一 1 … 星期日 7（对应 Java 版的 dayOfWeekSunDayIsLastDay） */
+  isoDayOfWeek(this: Expr<Temporal | null>): Expr<Keep<T, number>> {
+    return new Expr({ k: 'fn', name: 'iso_day_of_week', args: [this.node] }, codecs.int);
+  }
+
+  /**
+   * 格式化成文字（对应 Java 版的 format），模式的写法同 Java：yyyy、yy、MM、dd、HH、mm、ss，其余字符原样输出：
+   * `createdAt.format('yyyy年MM月dd日 HH:mm')`。各库翻译成自己的格式（DATE_FORMAT、TO_CHAR、strftime）
+   */
+  format(this: Expr<Temporal | null>, pattern: string): Expr<Keep<T, string>> {
+    return new Expr(
+      { k: 'fn', name: 'date_format', args: [this.node, { k: 'lit', sql: sqlString(pattern) }] },
+      codecs.string,
+    );
+  }
+
+  /**
+   * 与 other 相差多少个时间单位（本值减 other，不满一个单位的部分舍去，对应 Java 版的 duration(...).toHours() 等）：
+   * `o.closedAt.diff(o.createdAt, 'hour')`。只看日期部分的整天数用 diffDays
+   */
+  diff(this: Expr<Temporal | null>, other: Operand<T>, unit: DiffUnit): Expr<Keep<T, number>> {
+    if (!DIFF_UNITS.includes(unit))
+      throw new RangeError(`diff unit must be one of ${DIFF_UNITS.join(', ')}, got '${unit}'`);
+    return new Expr(
+      {
+        k: 'fn',
+        name: 'diff_time',
+        args: [this.node, this.operand(other), { k: 'lit', sql: `'${unit}'` }],
+      },
+      codecs.int,
     );
   }
 
@@ -385,6 +567,27 @@ export class Expr<T> {
     return new Expr({ k: 'fn', name, args: [this.node] }, this.codec);
   }
 
+  /** 数学函数：结果是浮点数 */
+  private math(name: string, ...rest: Node[]): Expr<any> {
+    return new Expr({ k: 'fn', name, args: [this.node, ...rest] }, codecs.double);
+  }
+
+  private pad(name: string, length: number, fill: string): Expr<T> {
+    if (fill.length === 0) throw new RangeError('pad fill must not be empty');
+    return new Expr(
+      {
+        k: 'fn',
+        name,
+        args: [
+          this.node,
+          intLit(nonNegativeInt(length, 'pad length')),
+          toNode(fill, codecs.string),
+        ],
+      },
+      this.codec,
+    );
+  }
+
   /** LIKE before + text + after；加密列上搜索词先按同样的策略加密（策略不可分段搜索时报错，否则会拿明文去比密文、静默查不到） */
   private likeNode(before: string, text: string, after: string, not: boolean): Pred {
     const encryption = this.codec?.encryption;
@@ -416,6 +619,24 @@ const DATE_UNITS: readonly DateUnit[] = [
   'minute',
   'second',
 ];
+
+/** add 的时间单位 */
+export type TimeUnit = 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second';
+const TIME_UNITS: readonly TimeUnit[] = ['year', 'month', 'day', 'hour', 'minute', 'second'];
+
+/** diff 的时间单位（按经过的时长算，月、年长短不一，不在其中） */
+export type DiffUnit = 'day' | 'hour' | 'minute' | 'second';
+const DIFF_UNITS: readonly DiffUnit[] = ['day', 'hour', 'minute', 'second'];
+
+/** SQL 的字符串字面量：单引号括起来，里面的单引号写两次 */
+export function sqlString(text: string): string {
+  return `'${text.replaceAll("'", "''")}'`;
+}
+
+/** sqlString 的反操作：方言的函数表拿到的是渲染好的字面量 */
+export function unquoteSql(literal: string): string {
+  return literal.slice(1, -1).replaceAll("''", "'");
+}
 
 /** cast 的目标类型 → 转换后的 JS 类型 */
 export interface CastTypes {
@@ -488,6 +709,77 @@ export class CaseBuilder<T> {
 }
 
 /** 从 `when` 条件开始一个 CASE 表达式 */
+/** joining 的选项：分隔符（默认逗号）、拼接的顺序、去重 */
+export interface JoiningOptions<R extends readonly unknown[]> {
+  readonly separator?: string;
+  readonly orderBy?: (...refs: R) => OrderItem | readonly OrderItem[];
+  readonly distinct?: boolean;
+}
+
+/** 字符串聚合的表达式（GROUP_CONCAT / STRING_AGG）：没有行时为 NULL */
+export function joiningExpr(
+  value: Expr<unknown>,
+  separator: string | undefined,
+  order: readonly OrderNode[],
+  distinct: boolean | undefined,
+): Expr<string | null> {
+  return new Expr<string | null>(
+    {
+      k: 'string_agg',
+      e: value.node,
+      separator: separator ?? ',',
+      order,
+      distinct: distinct ?? false,
+    },
+    codecs.string,
+  );
+}
+
+/** 当前时刻（UTC），对应 Java 版的 now / utcNow：`where((t) => t.expiresAt.gt(now()))` */
+export function now(): Expr<Date> {
+  return new Expr<Date>({ k: 'fn', name: 'now', args: [] }, col.datetime().codec);
+}
+
+/**
+ * 几个值里最大的（对应 Java 版的 maxColumns）：忽略 NULL，全为 NULL 时才是 NULL（各库一致，PG 原生如此，其余库改写）
+ * `greatest(t.createdAt, t.updatedAt)`
+ */
+export function greatest<V>(
+  first: Expr<V>,
+  ...rest: (Expr<V> | Expr<V | null> | NonNullable<V>)[]
+): Expr<V> {
+  return extreme('greatest', first, rest);
+}
+
+/** 几个值里最小的（对应 Java 版的 minColumns），NULL 的处理同 greatest */
+export function least<V>(
+  first: Expr<V>,
+  ...rest: (Expr<V> | Expr<V | null> | NonNullable<V>)[]
+): Expr<V> {
+  return extreme('least', first, rest);
+}
+
+function extreme<V>(name: string, first: Expr<V>, rest: readonly unknown[]): Expr<V> {
+  return new Expr<V>(
+    { k: 'fn', name, args: [first.node, ...rest.map((v) => toNode(v, first.codec))] },
+    first.codec,
+  );
+}
+
+/**
+ * 字符串模板（对应 Java 版的 stringFormat）：插进来的表达式按列拼接，其余值作为参数：
+ * `text\`编号 \${b.code}，类型 \${b.type}\``。任一部分为 NULL 时结果的处理随各库的 CONCAT（MySQL 为 NULL，PG 当空串）
+ */
+export function text(strings: TemplateStringsArray, ...values: unknown[]): Expr<string> {
+  const parts: Node[] = [];
+  strings.forEach((s, i) => {
+    if (s) parts.push(toNode(s, codecs.string));
+    if (i < values.length) parts.push(toNode(values[i], codecs.string));
+  });
+  if (parts.length === 0) parts.push(toNode('', codecs.string));
+  return new Expr<string>({ k: 'fn', name: 'concat', args: parts }, codecs.string);
+}
+
 export function caseWhen<V>(condition: Pred, value: V | Expr<V>): CaseBuilder<V> {
   const [node, codec] = branchValue(value);
   return new CaseBuilder<V>([[condition.node, node]], codec);

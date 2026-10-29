@@ -33,17 +33,26 @@ export {
   CaseBuilder,
   codecs,
   dialectFn,
+  greatest,
+  least,
   Expr,
   isSubquery,
   not,
+  now,
   or,
   Order,
   SUBQUERY,
   sql,
+  sqlString,
+  text,
+  unquoteSql,
 } from './expr.ts';
 export type {
   Arith,
   CastTypes,
+  DiffUnit,
+  JoiningOptions,
+  TimeUnit,
   Cond,
   NumericExtensions,
   Numeric,
@@ -94,7 +103,8 @@ export type {
 } from './interceptor.ts';
 export type { DbOptions, KeyOf, ManyKeys, SaveInput, TreeWalk, WithCte } from './db.ts';
 export { Dialect, SqlWriter } from './dialect.ts';
-export type { FunctionRenderer, Statement } from './dialect.ts';
+export type { DatePart, DateToken, FunctionRenderer, Statement } from './dialect.ts';
+export { coalesceEach, dateFormatParts } from './dialect.ts';
 export type {
   Adapter,
   Driver,

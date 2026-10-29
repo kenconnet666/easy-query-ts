@@ -44,8 +44,21 @@ export class PostgresDialect extends Dialect {
       // PG 的两参数 ROUND 只接受 numeric，double 列要先转
       round: (a) => `ROUND(CAST(${a[0]} AS NUMERIC), ${a[1]})`,
       date_trunc: (a) => `DATE_TRUNC(${a[1]}, ${a[0]})`,
+      truncate: (a) => `TRUNC(CAST(${a[0]} AS NUMERIC), ${a[1]})`,
+      log: (a) => `LOG(CAST(${a[1]} AS NUMERIC), CAST(${a[0]} AS NUMERIC))`,
       cast_string: (a) => `CAST(${a[0]} AS TEXT)`,
+      // PG 的 GREATEST / LEAST 本来就忽略 NULL，参数原样
+      greatest: (a) => `GREATEST(${a.join(', ')})`,
+      least: (a) => `LEAST(${a.join(', ')})`,
     };
+  }
+
+  /** PG 的 STRING_AGG 只接受文字 */
+  protected override stringAgg(n: Extract<Node, { k: 'string_agg' }>, w: SqlWriter): string {
+    return super.stringAgg(
+      { ...n, e: { k: 'raw', parts: ['CAST(', ' AS TEXT)'], args: [n.e] } },
+      w,
+    );
   }
 
   override columnType(kind: string, o: ColumnOptions): string {

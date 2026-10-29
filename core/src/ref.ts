@@ -11,7 +11,9 @@ import {
   Expr,
   orderNodes,
   pred,
+  joiningExpr,
   type Cond,
+  type JoiningOptions,
   type Numeric,
   type OrderItem,
   type Pred,
@@ -521,6 +523,25 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
     return new ListOf(this.limit(1), shape, true);
   }
 
+  /** 子项的值拼成一串（对应 Java 版的 joining）：`u.posts.joining((p) => p.title, { separator: '、', orderBy: (p) => p.id })`；没有子项时为 null */
+  joining(
+    value: (r: Ref<S, K>) => Expr<unknown>,
+    options?: JoiningOptions<[Ref<S, K>]>,
+  ): Expr<string | null> {
+    const q = this.subquery(undefined, (r) => [
+      {
+        e: joiningExpr(
+          value(r as Ref<S, K>),
+          options?.separator,
+          options?.orderBy ? orderNodes(options.orderBy(r as Ref<S, K>)) : [],
+          options?.distinct,
+        ).node,
+        as: 'v',
+      },
+    ]);
+    return new Expr({ k: 'sub', q }, codecs.string);
+  }
+
   /**
    * 聚合改成分组 join（对应 Java 版的 subQueryToGroupJoin）：count / sum / avg / max / min 不再是每行一个关联子查询，
    * 而是把子表按关联列分组一次、再 LEFT JOIN 回来；列表页每行显示子项数、合计时行多了快得多。
@@ -635,6 +656,21 @@ export class GroupJoin<S extends AnySchema, K extends EntityKey<S>> {
   }
   min<V>(value: (r: Ref<S, K>) => Expr<V>): Expr<NonNullable<V> | null> {
     return this.aggregate('min', value);
+  }
+
+  /** 子项的值拼成一串，没有子项时为 null */
+  joining(
+    value: (r: Ref<S, K>) => Expr<unknown>,
+    options?: JoiningOptions<[Ref<S, K>]>,
+  ): Expr<string | null> {
+    const root = this.join().root as Ref<S, K>;
+    const e = joiningExpr(
+      value(root),
+      options?.separator,
+      options?.orderBy ? orderNodes(options.orderBy(root)) : [],
+      options?.distinct,
+    );
+    return new Expr(this.column(e.node), codecs.string);
   }
 
   private aggregate(

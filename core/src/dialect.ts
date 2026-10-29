@@ -8,15 +8,20 @@ import type {
   InsertNode,
   JoinKind,
   Node,
+  OrderNode,
   SelectNode,
   UpdateNode,
 } from './ast.ts';
+import { sqlString, unquoteSql } from './expr.ts';
 import { utcText, type ColumnOptions, type Entity } from './schema.ts';
 
 export interface Statement {
   readonly sql: string;
   readonly params: readonly unknown[];
 }
+
+/** 函数参数的记号：DeferredWriter 留下，Dialect.node 换成真正的占位符 */
+const PARAM_MARK = /(\d+)/g;
 
 /** 渲染一条语句时收集参数 */
 export class SqlWriter {
@@ -35,6 +40,24 @@ export class SqlWriter {
 }
 
 export type FunctionRenderer = (args: string[]) => string;
+
+/** 渲染函数参数用：参数先记下、返回记号，函数拼好文字后再按记号的顺序绑定 */
+class DeferredWriter extends SqlWriter {
+  readonly values: unknown[] = [];
+
+  override bind(_dialect: Dialect, value: unknown): string {
+    this.values.push(value);
+    return `${this.values.length - 1}`;
+  }
+}
+
+/** greatest / least 的参数列表：COALESCE(本值, 其余各值)，NULL 就不会让结果变成 NULL（参数可以重复，见 Dialect.node 的 fn） */
+export function coalesceEach(args: readonly string[]): string {
+  if (args.length < 2) return args.join(', ');
+  return args
+    .map((value, i) => `COALESCE(${[value, ...args.filter((_, j) => j !== i)].join(', ')})`)
+    .join(', ');
+}
 
 export abstract class Dialect {
   abstract readonly name: string;
@@ -71,6 +94,42 @@ export abstract class Dialect {
       add_months: (a) => `(${a[0]} + INTERVAL '${a[1]} month')`,
       diff_days: (a) => `(CAST(${a[0]} AS DATE) - CAST(${a[1]} AS DATE))`,
       grouping: (a) => `GROUPING(${a[0]})`,
+      // 几个值里的最大、最小，忽略 NULL：每个值先用其余的值兜底，结果不变、全为 NULL 才是 NULL。原生忽略 NULL 的库（PG）覆盖
+      greatest: (a) => `GREATEST(${coalesceEach(a)})`,
+      least: (a) => `LEAST(${coalesceEach(a)})`,
+      // 字符串
+      ltrim: (a) => `LTRIM(${a[0]})`,
+      rtrim: (a) => `RTRIM(${a[0]})`,
+      pad_start: (a) => `LPAD(${a[0]}, ${a[1]}, ${a[2]})`,
+      pad_end: (a) => `RPAD(${a[0]}, ${a[1]}, ${a[2]})`,
+      // 数学
+      truncate: (a) => `TRUNC(${a[0]}, ${a[1]})`,
+      sign: (a) => `SIGN(${a[0]})`,
+      power: (a) => `POWER(${a[0]}, ${a[1]})`,
+      sqrt: (a) => `SQRT(${a[0]})`,
+      exp: (a) => `EXP(${a[0]})`,
+      ln: (a) => `LN(${a[0]})`,
+      log10: (a) => `LOG10(${a[0]})`,
+      log: (a) => `LOG(${a[1]}, ${a[0]})`,
+      sin: (a) => `SIN(${a[0]})`,
+      cos: (a) => `COS(${a[0]})`,
+      tan: (a) => `TAN(${a[0]})`,
+      asin: (a) => `ASIN(${a[0]})`,
+      acos: (a) => `ACOS(${a[0]})`,
+      atan: (a) => `ATAN(${a[0]})`,
+      atan2: (a) => `ATAN2(${a[0]}, ${a[1]})`,
+      // 日期：数量可以是列；单位是受信任的字面量
+      add_time: (a) => `(${a[0]} + (${a[1]}) * INTERVAL '1 ${unquoteSql(a[2]!)}')`,
+      hour: (a) => `CAST(EXTRACT(HOUR FROM ${a[0]}) AS INTEGER)`,
+      minute: (a) => `CAST(EXTRACT(MINUTE FROM ${a[0]}) AS INTEGER)`,
+      second: (a) => `CAST(FLOOR(EXTRACT(SECOND FROM ${a[0]})) AS INTEGER)`,
+      day_of_year: (a) => `CAST(EXTRACT(DOY FROM ${a[0]}) AS INTEGER)`,
+      day_of_week: (a) => `CAST(EXTRACT(DOW FROM ${a[0]}) AS INTEGER)`,
+      iso_day_of_week: (a) => `CAST(EXTRACT(ISODOW FROM ${a[0]}) AS INTEGER)`,
+      date_format: (a) => this.formatDate(a[0]!, dateFormatParts(unquoteSql(a[1]!))),
+      diff_time: (a) =>
+        `CAST(TRUNC(EXTRACT(EPOCH FROM (CAST(${a[0]} AS TIMESTAMP) - CAST(${a[1]} AS TIMESTAMP))) / ${SECONDS[unquoteSql(a[2]!)]}) AS BIGINT)`,
+      now: () => 'CURRENT_TIMESTAMP',
       // 类型转换：基类用标准类型名，各库差异覆盖
       cast_string: (a) => `CAST(${a[0]} AS VARCHAR(4000))`,
       cast_int: (a) => `CAST(${a[0]} AS INTEGER)`,
@@ -80,6 +139,37 @@ export abstract class Dialect {
       cast_date: (a) => `CAST(${a[0]} AS DATE)`,
       cast_datetime: (a) => `CAST(${a[0]} AS TIMESTAMP)`,
     };
+  }
+
+  /** 日期格式化：基类按 TO_CHAR 的写法（PG、Oracle）；含字母、数字、汉字的文字用双引号括起来，免得被当成格式符 */
+  protected formatDate(value: string, parts: readonly DatePart[]): string {
+    const tokens: Record<DateToken, string> = {
+      yyyy: 'YYYY',
+      yy: 'YY',
+      MM: 'MM',
+      dd: 'DD',
+      HH: 'HH24',
+      mm: 'MI',
+      ss: 'SS',
+    };
+    const format = parts
+      .map((p) => {
+        if ('token' in p) return tokens[p.token];
+        return /^[\s\-/:.,]*$/.test(p.text) ? p.text : `"${p.text.replaceAll('"', '\\"')}"`;
+      })
+      .join('');
+    return `TO_CHAR(${value}, ${sqlString(format)})`;
+  }
+
+  /** 字符串聚合：基类是 STRING_AGG(e, 分隔符 ORDER BY …)（PG、HANA、SQL Server） */
+  protected stringAgg(n: Extract<Node, { k: 'string_agg' }>, w: SqlWriter): string {
+    return `STRING_AGG(${n.distinct ? 'DISTINCT ' : ''}${this.node(n.e, w)}, ${sqlString(n.separator)}${this.aggOrder(n.order, w)})`;
+  }
+
+  /** 聚合函数里的 ORDER BY 子句（没有时为空） */
+  protected aggOrder(order: readonly OrderNode[], w: SqlWriter): string {
+    if (order.length === 0) return '';
+    return ` ORDER BY ${order.map((o) => this.node(o.e, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
   }
 
   /**
@@ -387,7 +477,10 @@ export abstract class Dialect {
         const render = (this.cachedFunctions ??= this.functions())[n.name];
         if (!render)
           throw new Error(`function '${n.name}' is not supported by the ${this.name} dialect`);
-        return render(n.args.map((a) => this.node(a, w)));
+        // 参数先只记下、在文字里留记号；函数拼好整段（参数可能换序、重复）后按记号出现的顺序真正绑定，位置占位符（?）才对得上
+        const deferred = new DeferredWriter();
+        const sql = render(n.args.map((a) => this.node(a, deferred)));
+        return sql.replace(PARAM_MARK, (_, i: string) => w.bind(this, deferred.values[Number(i)]));
       }
       case 'agg': {
         const arg = n.arg ? this.node(n.arg, w) : '*';
@@ -414,6 +507,8 @@ export abstract class Dialect {
       }
       case 'sub':
         return `(${this.select(n.q, w)})`;
+      case 'string_agg':
+        return this.stringAgg(n, w);
     }
   }
 
@@ -431,6 +526,33 @@ export abstract class Dialect {
     const s = this.node(n, w);
     return n.k === 'op' || n.k === 'and' || n.k === 'or' || n.k === 'raw' ? `(${s})` : s;
   }
+}
+
+/** diff 的单位折合多少秒 */
+const SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
+
+/** 日期格式里认得的部分（写法同 Java 的 DateTimeFormatter） */
+export type DateToken = 'yyyy' | 'yy' | 'MM' | 'dd' | 'HH' | 'mm' | 'ss';
+export type DatePart = { readonly token: DateToken } | { readonly text: string };
+const DATE_TOKENS: readonly DateToken[] = ['yyyy', 'yy', 'MM', 'dd', 'HH', 'mm', 'ss'];
+
+/** 把 'yyyy-MM-dd HH:mm' 拆成格式符与原样输出的文字 */
+export function dateFormatParts(pattern: string): DatePart[] {
+  const parts: DatePart[] = [];
+  let i = 0;
+  while (i < pattern.length) {
+    const token = DATE_TOKENS.find((t) => pattern.startsWith(t, i));
+    if (token) {
+      parts.push({ token });
+      i += token.length;
+      continue;
+    }
+    const last = parts.at(-1);
+    if (last && 'text' in last) parts[parts.length - 1] = { text: last.text + pattern[i] };
+    else parts.push({ text: pattern[i]! });
+    i++;
+  }
+  return parts;
 }
 
 const JOIN_WORDS: Record<JoinKind, string> = {
