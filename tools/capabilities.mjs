@@ -313,7 +313,11 @@ export const capabilities = {
   },
   'dialect.dameng': { title: '达梦方言', status: 'todo', ts: '待做（16.7.4）' },
   'dialect.kingbase': { title: '人大金仓方言', status: 'todo', ts: '待做（16.7.5）' },
-  'dialect.duckdb': { title: 'DuckDB 方言', status: 'todo', ts: '待做（16.7.3）' },
+  'dialect.duckdb': {
+    title: 'DuckDB 方言',
+    status: 'done',
+    ts: 'easy-query-ts-duckdb：共用套件在内存库上全绿；序列自增、事务排队、BLOB / DECIMAL 读写；ts-duckdb.md',
+  },
   'dialect.clickhouse': { title: 'ClickHouse 方言', status: 'todo', ts: '待做（16.7.6）' },
   'dialect.h2': { title: 'H2 方言', status: 'na', ts: '不适用：H2 运行在 JVM 里，Node 没有驱动' },
 };

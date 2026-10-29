@@ -3,7 +3,7 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1756、写法不同 346、待做 73、不适用 74。
+合计：已对应 1772、写法不同 346、待做 57、不适用 74。
 
 ## 按能力
 
@@ -13,7 +13,7 @@
 | 列加密（`column.encryption`）                                    | 8      | 已对应   | encrypted（可分段搜索）、sqlConvert；easy-query-ts-crypto 的 aesEncryption / sm4Encryption（与 Java 版分段兼容）；crypto.test.ts、guards.test.ts、sql-convert.test.ts                               |
 | ClickHouse 方言（`dialect.clickhouse`）                          | 4      | 待做     | 待做（16.7.6）                                                                                                                                                                                      |
 | 达梦方言（`dialect.dameng`）                                     | 51     | 待做     | 待做（16.7.4）                                                                                                                                                                                      |
-| DuckDB 方言（`dialect.duckdb`）                                  | 16     | 待做     | 待做（16.7.3）                                                                                                                                                                                      |
+| DuckDB 方言（`dialect.duckdb`）                                  | 16     | 已对应   | easy-query-ts-duckdb：共用套件在内存库上全绿；序列自增、事务排队、BLOB / DECIMAL 读写；ts-duckdb.md                                                                                                 |
 | H2 方言（`dialect.h2`）                                          | 74     | 不适用   | 不适用：H2 运行在 JVM 里，Node 没有驱动                                                                                                                                                             |
 | 人大金仓方言（`dialect.kingbase`）                               | 2      | 待做     | 待做（16.7.5）                                                                                                                                                                                      |
 | SQL Server 方言（`dialect.mssql`）                               | 38     | 已对应   | easy-query-ts-mssql：共用套件全绿（SQL Server 2022）、MsSql.* 专属函数、建表与读库结构；ts-sqlserver.md                                                                                             |
@@ -164,7 +164,7 @@
 | dameng/UpdateJoinTest.java#testUpdateJoin1                                                 | `UPDATE \`                                    |
 | dameng/UpdateJoinTest.java#testUpdateJoin2                                                 | `UPDATE \`                                    |
 
-### DuckDB 方言（`dialect.duckdb`，待做）
+### DuckDB 方言（`dialect.duckdb`，已对应）
 
 | 用例                                             | 断言的 SQL（摘要） |
 | ------------------------------------------------ | ------------------ |

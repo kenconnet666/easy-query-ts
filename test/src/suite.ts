@@ -67,6 +67,8 @@ export interface LiveSuiteOptions {
   readonly readOnlyTransactions?: boolean;
   /** 保存点（嵌套事务）；DuckDB 没有 */
   readonly savepoints?: boolean;
+  /** 外键的 ON DELETE / ON UPDATE 动作；DuckDB 没有 */
+  readonly foreignKeyActions?: boolean;
   /** 以下能力默认都测；某个库不支持就传 false */
   readonly dateTrunc?: boolean;
   readonly rollup?: boolean;
@@ -1694,7 +1696,11 @@ export function liveSuite(
       { SyncA, SyncB },
       {
         SyncB: (r) => ({
-          a: r.one('SyncA', { from: 'aId', to: 'id' }, { foreignKey: { onDelete: 'cascade' } }),
+          a: r.one(
+            'SyncA',
+            { from: 'aId', to: 'id' },
+            { foreignKey: options.foreignKeyActions === false ? true : { onDelete: 'cascade' } },
+          ),
         }),
       },
     );
