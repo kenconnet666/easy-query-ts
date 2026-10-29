@@ -141,6 +141,7 @@ export class SqliteDialect extends Dialect {
       diff_time: (a) =>
         `(CAST(ROUND((julianday(${a[0]}) - julianday(${a[1]})) * 86400) AS INTEGER) / ${DIFF_SECONDS[unquoteSql(a[2]!)]})`,
       now: () => `strftime('%Y-%m-%d %H:%M:%f', 'now')`,
+      in_csv: (a) => `((',' || ${a[1]} || ',') LIKE ('%,' || ${a[0]} || ',%'))`,
       // JSON：-> 取元素（总是 JSON 文字），json_extract 取标量
       json_value: (a) => `(${a[0]} -> ${standardJsonPath(a[1]!)})`,
       json_text: (a) => `CAST(json_extract(${a[0]}, ${standardJsonPath(a[1]!)}) AS TEXT)`,

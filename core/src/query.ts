@@ -9,6 +9,7 @@ import {
   type Node,
   type OrderNode,
   type SelectNode,
+  type TableRef,
 } from './ast.ts';
 import { SqlWriter, type Statement } from './dialect.ts';
 import {
@@ -98,6 +99,8 @@ interface State {
   readonly groupMode: 'rollup' | 'cube' | undefined;
   /** 主表别名后面的片段（tableHint） */
   readonly hint?: string;
+  /** 排序全部反过来（深分页倒序取） */
+  readonly reverse?: boolean;
 }
 
 /**
@@ -382,13 +385,27 @@ abstract class Executable<Out> implements Subquery<Out> {
   /** page 从 1 开始 */
   async toPage(page: number, size: number): Promise<Page<Out>> {
     const total = await this.count();
-    const rows =
-      total === 0
-        ? []
-        : await this.offset((page - 1) * size)
-            .limit(size)
-            .toList();
-    return { rows, total, page, size };
+    return { rows: await this.pageRows(total, page, size), total, page, size };
+  }
+
+  /**
+   * 已知总数时取一页。偏移量过了 reversePageAfter、且超过总数一半时，按相反的排序取（偏移量变小、库里少跳过很多行），再翻回来
+   */
+  protected async pageRows(total: number, page: number, size: number): Promise<Out[]> {
+    const offset = (page - 1) * size;
+    if (total === 0 || offset >= total) return [];
+    const after = this.ctx.guards.reversePageAfter;
+    const ordered = this.state.orderBy.length > 0 || this.state.groupOrderBy.length > 0;
+    if (after !== undefined && ordered && offset > after && offset > total / 2) {
+      const count = Math.min(size, total - offset);
+      const rows = await this.with({
+        reverse: true,
+        offset: total - offset - count,
+        limit: count,
+      }).toList();
+      return rows.reverse();
+    }
+    return this.offset(offset).limit(size).toList();
   }
 
   toSQL(): Statement {
@@ -543,11 +560,12 @@ export class Queryable<
     }
     const { page, pageSize: size } = request;
     if (request.total === undefined) return query.toPage(page, size);
-    const rows = await query
-      .limit(size)
-      .offset((page - 1) * size)
-      .toList();
-    return { rows, total: request.total, page, size };
+    return {
+      rows: await query.pageRows(request.total, page, size),
+      total: request.total,
+      page,
+      size,
+    };
   }
 
   /**
@@ -593,9 +611,12 @@ export class Queryable<
   }
 
   /** 整行之外再带上导航：一对多是数组，多对一是对象（可空导航为 null） */
-  include<X extends Record<string, ListOf<unknown, boolean> | Fill<unknown, boolean> | AnyRef>>(
-    navigations: (...refs: Refs) => X,
-  ): Queryable<S, K, Out & Selected<X>, Refs> {
+  include<
+    X extends Record<
+      string,
+      ListOf<unknown, boolean> | Fill<unknown, boolean> | AnyRef | Expr<unknown>
+    >,
+  >(navigations: (...refs: Refs) => X): Queryable<S, K, Out & Selected<X>, Refs> {
     const previous = this.state.select;
     return new Queryable(this.ctx, {
       ...this.state,
@@ -1106,11 +1127,18 @@ function build(ctx: Context, state: State, bare = false): Built {
     shape.compile(shapeOf(state, refs));
   }
 
+  if (state.reverse) orderBy = orderBy.map((o) => ({ ...o, desc: !o.desc }));
+
   const entity = ctx.schema.entities[state.key]!;
-  const select: SelectNode = {
-    from: { ...scope.tableRef(entity, root[REF].alias), hint: state.hint },
-    joins: scope.joins,
+  const from = pushDown(
+    { ...scope.tableRef(entity, root[REF].alias), hint: state.hint },
     where,
+    scope.joins.length,
+  );
+  const select: SelectNode = {
+    from: from.table,
+    joins: scope.joins,
+    where: from.where,
     groupBy,
     having,
     orderBy,
@@ -1124,6 +1152,147 @@ function build(ctx: Context, state: State, bare = false): Built {
     ctes: scope.ctes.size > 0 ? [...scope.ctes.values()] : undefined,
   };
   return { select, shape };
+}
+
+/**
+ * 派生表条件穿透（对应 Java 版的 SMART_PREDICATE）：外层只对派生表（asTable、union 的结果）加的条件，
+ * 换成子查询里的表达式推进子查询的 WHERE，库里先过滤再出派生表。只在结果不变时推：子查询没有分组、去重、分页、union，
+ * 条件用到的列在子查询里不是聚合、窗口；外层没有 join；条件里没有子查询
+ */
+function pushDown(
+  table: TableRef,
+  where: readonly Node[],
+  joins: number,
+): { table: TableRef; where: Node[] } {
+  const sub = table.sub;
+  const simple =
+    sub &&
+    joins === 0 &&
+    sub.groupBy.length === 0 &&
+    sub.having.length === 0 &&
+    !sub.distinct &&
+    sub.limit === undefined &&
+    sub.offset === undefined &&
+    !sub.unions?.length &&
+    // 有窗口函数时先过滤会改变编号、累计值，一条都不能推
+    sub.columns.every((c) => pushable(c.e));
+  if (!simple) return { table, where: [...where] };
+  const columns = new Map(sub.columns.map((c) => [c.as, c.e]));
+  const kept: Node[] = [];
+  const pushed: Node[] = [];
+  // 顶层的 AND 拆开，一个个看能不能推
+  const conjuncts = where.flatMap(function flat(n: Node): Node[] {
+    return n.k === 'and' ? n.items.flatMap(flat) : [n];
+  });
+  for (const n of conjuncts) {
+    const mapped = mapColumns(n, table.alias, columns);
+    if (mapped) pushed.push(mapped);
+    else kept.push(n);
+  }
+  if (pushed.length === 0) return { table, where: kept };
+  return { table: { ...table, sub: { ...sub, where: [...sub.where, ...pushed] } }, where: kept };
+}
+
+/** 把条件里派生表的列换成子查询里的表达式；遇到推不下去的（聚合、窗口、子查询、别的表）返回 undefined */
+function mapColumns(n: Node, alias: string, columns: ReadonlyMap<string, Node>): Node | undefined {
+  const all = (items: readonly Node[]): Node[] | undefined => {
+    const out: Node[] = [];
+    for (const item of items) {
+      const m = mapColumns(item, alias, columns);
+      if (!m) return undefined;
+      out.push(m);
+    }
+    return out;
+  };
+  switch (n.k) {
+    case 'col': {
+      if (n.alias !== alias) return undefined;
+      const e = columns.get(n.name);
+      return e && pushable(e) ? e : undefined;
+    }
+    case 'param':
+    case 'lit':
+      return n;
+    case 'raw': {
+      const args = all(n.args);
+      return args && { ...n, args };
+    }
+    case 'op': {
+      const [l, r] = all([n.l, n.r]) ?? [];
+      return l && r && { ...n, l, r };
+    }
+    case 'and':
+    case 'or': {
+      const items = all(n.items);
+      return items && { ...n, items };
+    }
+    case 'not':
+    case 'null': {
+      const e = mapColumns(n.e, alias, columns);
+      return e && { ...n, e };
+    }
+    case 'in': {
+      const [e, ...list] = all([n.e, ...n.list]) ?? [];
+      return e && { ...n, e, list };
+    }
+    case 'eq_ns': {
+      const [l, r] = all([n.l, n.r]) ?? [];
+      return l && r && { ...n, l, r };
+    }
+    case 'between': {
+      const [e, lo, hi] = all([n.e, n.lo, n.hi]) ?? [];
+      return e && lo && hi && { ...n, e, lo, hi };
+    }
+    case 'like': {
+      const [e, pattern] = all([n.e, n.pattern]) ?? [];
+      return e && pattern && { ...n, e, pattern };
+    }
+    case 'fn': {
+      const args = all(n.args);
+      return args && { ...n, args };
+    }
+    case 'case': {
+      const flat = all(n.when.flat());
+      const otherwise = n.else ? mapColumns(n.else, alias, columns) : undefined;
+      if (!flat || (n.else && !otherwise)) return undefined;
+      const when = n.when.map((_, i) => [flat[i * 2]!, flat[i * 2 + 1]!] as const);
+      return { ...n, when, else: otherwise };
+    }
+    default:
+      // 聚合、窗口、子查询、字符串聚合：不推
+      return undefined;
+  }
+}
+
+/** 子查询里的表达式能不能放进 WHERE：不含聚合、窗口、字符串聚合 */
+function pushable(n: Node): boolean {
+  switch (n.k) {
+    case 'agg':
+    case 'over':
+    case 'string_agg':
+      return false;
+    case 'col':
+    case 'param':
+    case 'lit':
+      return true;
+    case 'raw':
+      return n.args.every(pushable);
+    case 'fn':
+      return n.args.every(pushable);
+    case 'op':
+    case 'eq_ns':
+      return pushable(n.l) && pushable(n.r);
+    case 'and':
+    case 'or':
+      return n.items.every(pushable);
+    case 'not':
+    case 'null':
+      return pushable(n.e);
+    case 'case':
+      return n.when.every(([w, t]) => pushable(w) && pushable(t)) && (!n.else || pushable(n.else));
+    default:
+      return false;
+  }
 }
 
 function conds(list: Cond[]): Node[] {
@@ -1363,8 +1532,8 @@ class ShapeCompiler {
     return (row) => {
       const array: unknown[] = [];
       const raw = row[as];
-      // 键为 NULL 的行填不到任何东西
-      if (raw !== null && raw !== undefined) {
+      // 键为 NULL 或空串的行填不到任何东西
+      if (present(raw)) {
         const key = fill.from.codec ? fill.from.codec.decode(raw) : raw;
         const id = slotId([key]);
         let slot = pending.slots.get(id);
@@ -1385,8 +1554,8 @@ class ShapeCompiler {
     return (row) => {
       const array: unknown[] = [];
       const keys = keyAs.map((as) => row[as]);
-      // 关联键里有 NULL 的父行不会有孩子
-      if (keys.every((key) => key !== null && key !== undefined)) {
+      // 关联键里有 NULL 或空串的父行不会有孩子，不去查
+      if (keys.every(present)) {
         const id = slotId(keys);
         let slot = pending.slots.get(id);
         if (!slot) pending.slots.set(id, (slot = { keys, arrays: [] }));
@@ -1395,6 +1564,12 @@ class ShapeCompiler {
       return array;
     };
   }
+}
+
+/** 关联键有值：不是 NULL，也不是空串、全空白（"没填"的外键常写成空串） */
+function present(key: unknown): boolean {
+  if (key === null || key === undefined) return false;
+  return typeof key !== 'string' || key.trim() !== '';
 }
 
 /** 关联键 → Map 的键：各列转成文字再用不会出现在数据里的分隔符拼起来 */

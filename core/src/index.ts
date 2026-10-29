@@ -16,8 +16,15 @@ export type {
   UpdateOf,
   ValueOf,
 } from './schema.ts';
-export { defineSchema } from './relations.ts';
-export type { RelationFilter } from './relations.ts';
+export { defineComputed, defineSchema } from './relations.ts';
+export type {
+  Computed,
+  Member,
+  RelationFilter,
+  RelationOn,
+  RelationOptions,
+  WithComputed,
+} from './relations.ts';
 export type {
   AnySchema,
   EntityKey,

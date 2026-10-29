@@ -163,23 +163,32 @@ export class Expr<T> {
   }
 
   /** 包含 text（两边加 %）；text 里的 % _ 按字面匹配 */
-  like(this: Expr<string | null>, text: string): Pred {
+  /** 包含 text；text 也可以是一列（如路径左匹配 `c.path.startsWith(d.path)`，列里的 % _ 不转义） */
+  like(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
     return this.likeNode('%', text, '%', false);
   }
-  notLike(this: Expr<string | null>, text: string): Pred {
+  notLike(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
     return this.likeNode('%', text, '%', true);
   }
-  startsWith(this: Expr<string | null>, text: string): Pred {
+  startsWith(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
     return this.likeNode('', text, '%', false);
   }
-  endsWith(this: Expr<string | null>, text: string): Pred {
+  endsWith(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
     return this.likeNode('%', text, '', false);
   }
-  notStartsWith(this: Expr<string | null>, text: string): Pred {
+  notStartsWith(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
     return this.likeNode('', text, '%', true);
   }
-  notEndsWith(this: Expr<string | null>, text: string): Pred {
+  notEndsWith(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
     return this.likeNode('%', text, '', true);
+  }
+
+  /**
+   * 本值在逗号分隔的列表里（MySQL 的 FIND_IN_SET）：`b.id.inCsv(u.bookIds)`，u.bookIds 存的是 '1,3,7'。
+   * 各库一致（MySQL 用 FIND_IN_SET，其余拼成 ',1,3,7,' LIKE '%,3,%'）
+   */
+  inCsv(list: Expr<string | null> | string): Pred {
+    return pred({ k: 'fn', name: 'in_csv', args: [this.node, toNode(list, codecs.string)] });
   }
 
   asc(): Order {
@@ -647,7 +656,26 @@ export class Expr<T> {
   }
 
   /** LIKE before + text + after；加密列上搜索词先按同样的策略加密（策略不可分段搜索时报错，否则会拿明文去比密文、静默查不到） */
-  private likeNode(before: string, text: string, after: string, not: boolean): Pred {
+  private likeNode(
+    before: string,
+    text: string | Expr<string | null>,
+    after: string,
+    not: boolean,
+  ): Pred {
+    if (text instanceof Expr) {
+      // 模式是一列：前后拼上 %，列里的通配符原样生效
+      const parts = [
+        before && toNode(before, codecs.string),
+        text.node,
+        after && toNode(after, codecs.string),
+      ];
+      return pred({
+        k: 'like',
+        e: this.node,
+        pattern: { k: 'fn', name: 'concat', args: parts.filter((p): p is Node => !!p) },
+        not,
+      });
+    }
     const encryption = this.codec?.encryption;
     if (encryption && !encryption.searchable)
       throw new Error(

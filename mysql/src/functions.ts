@@ -108,6 +108,7 @@ export const mysqlFunctions: Record<string, FunctionRenderer> = {
   iso_day_of_week: (a) => `(WEEKDAY(${a[0]}) + 1)`,
   // 日期时间列按 UTC 存，取 UTC 的当前时刻
   now: () => 'UTC_TIMESTAMP(3)',
+  in_csv: (a) => `(FIND_IN_SET(${a[0]}, ${a[1]}) > 0)`,
   truncate: (a) => `TRUNCATE(${a[0]}, ${a[1]})`,
   // JSON：取元素时转成文字，免得驱动把 JSON 类型先解析一遍（字符串 "200" 会被当成数字再解析）
   json_value: (a) => `CAST(JSON_EXTRACT(${a[0]}, ${standardJsonPath(a[1]!)}) AS CHAR)`,

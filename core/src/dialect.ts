@@ -130,6 +130,7 @@ export abstract class Dialect {
       diff_time: (a) =>
         `CAST(TRUNC(EXTRACT(EPOCH FROM (CAST(${a[0]} AS TIMESTAMP) - CAST(${a[1]} AS TIMESTAMP))) / ${SECONDS[unquoteSql(a[2]!)]}) AS BIGINT)`,
       now: () => 'CURRENT_TIMESTAMP',
+      in_csv: (a) => `(CONCAT(',', ${a[1]}, ',') LIKE CONCAT('%,', ${a[0]}, ',%'))`,
       // JSON：基类按 PG 的 jsonb 写法；路径是 JSON 数组的字面量（见 Expr.json）
       json_value: (a) => `CAST(CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)} AS TEXT)`,
       json_text: (a) => `(CAST(${a[0]} AS JSONB) #>> ${pgJsonPath(a[1]!)})`,

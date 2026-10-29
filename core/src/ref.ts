@@ -18,7 +18,16 @@ import {
   type OrderItem,
   type Pred,
 } from './expr.ts';
-import type { AnySchema, EntityKey, Many, One, Relation, RelationFilter } from './relations.ts';
+import type {
+  AnySchema,
+  Computed,
+  EntityKey,
+  Many,
+  Member,
+  One,
+  Relation,
+  RelationFilter,
+} from './relations.ts';
 import {
   Interceptors,
   refEntity,
@@ -54,14 +63,13 @@ export type Ref<
   K extends EntityKey<S>,
   N extends boolean = false,
 > = ColumnRefs<Ents<S>[K]['fields'], N> & {
-  readonly [R in keyof Rels<S, K>]: Rels<S, K>[R] extends One<
-    infer T extends EntityKey<S>,
-    infer TN
-  >
-    ? Ref<S, T, N extends true ? true : TN>
-    : Rels<S, K>[R] extends Many<infer T extends EntityKey<S>>
-      ? ManyRef<S, T>
-      : never;
+  readonly [R in keyof Rels<S, K>]: Rels<S, K>[R] extends Computed<infer V>
+    ? Expr<N extends true ? V | null : V>
+    : Rels<S, K>[R] extends One<infer T extends EntityKey<S>, infer TN>
+      ? Ref<S, T, N extends true ? true : TN>
+      : Rels<S, K>[R] extends Many<infer T extends EntityKey<S>>
+        ? ManyRef<S, T>
+        : never;
 } & { readonly [REF]: RefInfo<S, K, N> };
 
 export interface RefInfo<
@@ -177,17 +185,23 @@ export function makeRef(scope: Scope, key: string, alias: string, nullable: bool
     if (prop.includes('.')) setPath(ref, prop, value);
     else Object.defineProperty(ref, prop, { enumerable: true, value });
   }
-  const relations: Record<string, Relation> = scope.schema.relations[key] ?? {};
+  const relations: Record<string, Member> = scope.schema.relations[key] ?? {};
   for (const [prop, rel] of Object.entries(relations)) {
     let cached: unknown;
     Object.defineProperty(ref, prop, {
       get: () =>
         (cached ??=
-          rel.kind === 'one'
-            ? rel.path
-              ? walkPath(ref as AnyRef, rel.path)
-              : joinOne(scope, ref as AnyRef, prop, rel, nullable)
-            : new ManyRef(scope, ref as AnyRef, rel, { filters: rel.where ? [rel.where] : [] })),
+          rel.kind === 'computed'
+            ? // 计算属性：用这个表引用算出表达式（里面可以再用导航、别的计算属性）
+              rel.value(ref)
+            : rel.kind === 'one'
+              ? rel.path
+                ? walkPath(ref as AnyRef, rel.path)
+                : joinOne(scope, ref as AnyRef, prop, rel, nullable)
+              : new ManyRef(scope, ref as AnyRef, rel, {
+                  filters: rel.where ? [rel.where] : [],
+                  toggles: rel.interceptors ? [rel.interceptors] : [],
+                })),
     });
   }
   return ref as AnyRef;
@@ -221,20 +235,26 @@ function joinOne(
   const target = scope.schema.entities[rel.target]!;
   const alias = scope.nextAlias();
   const ref = makeRef(scope, rel.target, alias, parentNullable || rel.nullable);
-  // 复合外键：每对列一个等式，用 AND 连起来
-  const on = allOf(
-    rel.to.map((c, i): Node => ({
-      k: 'op',
-      op: '=',
-      l: { k: 'col', alias, name: target.columnNames[c]! },
-      r: columnNode(scope, info, rel.from[i]!),
-    })),
-  );
+  // 复合外键：每对列一个等式，用 AND 连起来；任意条件的关系（oneOn）用它的条件
+  const custom = rel.on ? condNode(rel.on(parent as never, ref as never)) : undefined;
+  if (rel.on && !custom) throw new Error(`relation ${info.key}.${prop} needs a condition`);
+  const on =
+    custom ??
+    allOf(
+      rel.to.map((c, i): Node => ({
+        k: 'op',
+        op: '=',
+        l: { k: 'col', alias, name: target.columnNames[c]! },
+        r: columnNode(scope, info, rel.from[i]!),
+      })),
+    );
   // 拦截器的条件与关系上固定的条件放进 ON：LEFT JOIN 不会因此把主表的行过滤掉
   const fixed = rel.where ? condNode(rel.where(ref as never)) : undefined;
-  const extra = fixed ? [...scope.filters(ref), fixed] : scope.filters(ref);
+  const filters = scope.filters(ref, rel.interceptors ? [rel.interceptors] : []);
+  const extra = fixed ? [...filters, fixed] : filters;
   scope.joins.push({
     ...scope.tableRef(target, alias),
+    kind: rel.required && !parentNullable ? 'inner' : 'left',
     on: extra.length === 0 ? on : { k: 'and', items: [on, ...extra] },
   });
   return ref;
@@ -259,6 +279,7 @@ export function linkColumns(scope: Scope, relation: Many, targetRoot: AnyRef): N
     prop: string,
   ): Node => ({ k: 'col', alias, name: entity.columnNames[prop]! });
   if (relation.hops) return bridgeColumns(scope, relation, targetRoot);
+  if (relation.on) return conditionColumns(scope, relation, targetRoot);
   const through = relation.through;
   if (!through) return relation.to.map((c) => col(info.alias, target, c));
   const middle = scope.schema.entities[through.entity]!;
@@ -381,6 +402,23 @@ function bridgeColumns(scope: Scope, relation: Many, targetRoot: AnyRef): Node[]
     ),
   });
   return parentKeys.map((_, i): Node => ({ k: 'col', alias, name: `p${i}` }));
+}
+
+/**
+ * 任意条件的关系（r.manyOn）的"孩子一侧"：再连一份本表（INNER JOIN 本表 ON 条件），返回这份本表的主键列，
+ * 与父行的主键比较。any / count / toList / groupJoin 都经这里，所以都支持任意条件
+ */
+function conditionColumns(scope: Scope, relation: Many, targetRoot: AnyRef): Node[] {
+  const alias = scope.nextAlias();
+  const self = makeRef(scope, relation.source!, alias, false);
+  const on = condNode(relation.on!(self as never, targetRoot as never));
+  if (!on) throw new Error(`relation to ${relation.target} needs a condition`);
+  scope.joins.push({
+    ...scope.tableRef(scope.schema.entities[relation.source!]!, alias),
+    kind: 'inner',
+    on: allOf([on, ...scope.filters(self)]),
+  });
+  return relation.from.map((c) => columnNode(scope, self[REF], c));
 }
 
 export function columnNode(scope: Scope, info: RefInfo, prop: string): Node {

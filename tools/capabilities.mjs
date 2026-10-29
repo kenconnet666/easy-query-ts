@@ -129,7 +129,7 @@ export const capabilities = {
   'nav.relation': {
     title: '导航关系与隐式 join',
     status: 'done',
-    ts: 'relations.ts；relations.test.ts、suite.ts',
+    ts: 'r.one / many / manyToMany（复合键、无中间表按共同列）、r.manyOn / oneOn 任意条件（逗号分隔列 inCsv、路径左匹配）、required、关系上的拦截器开关；relations.test.ts、relation-on.test.ts、relation-options.test.ts',
   },
   'nav.subquery': {
     title: '隐式子查询（any / none / count / sum …）',

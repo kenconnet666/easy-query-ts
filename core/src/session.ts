@@ -83,6 +83,8 @@ export interface Guards {
   readonly hardDelete: 'allow' | 'forbid';
   /** 没写 limit 的 toList 最多读这么多行，多了报错（不悄悄截断）；undefined 不限 */
   readonly maxRows: number | undefined;
+  /** 分页的偏移量超过它、且超过总数一半时倒序取再翻回来（深分页）；undefined 不倒序 */
+  readonly reversePageAfter: number | undefined;
 }
 
 /** 事务结束后要做的事：一层一帧，保存点（嵌套事务）成功时并进外层，失败时丢掉它登记的提交后的事 */

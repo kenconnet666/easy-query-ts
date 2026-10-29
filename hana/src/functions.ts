@@ -67,6 +67,7 @@ export const hanaFunctions: Record<string, FunctionRenderer> = {
   day_of_week: (a) => `MOD(WEEKDAY(${a[0]}) + 1, 7)`,
   iso_day_of_week: (a) => `(WEEKDAY(${a[0]}) + 1)`,
   now: () => 'CURRENT_UTCTIMESTAMP',
+  in_csv: (a) => `((',' || ${a[1]} || ',') LIKE ('%,' || ${a[0]} || ',%'))`,
   truncate: (a) => `ROUND(${a[0]}, ${a[1]}, ROUND_DOWN)`,
   log10: (a) => `LOG(10, ${a[0]})`,
   // JSON：JSON_QUERY 取对象、数组，JSON_VALUE 取标量

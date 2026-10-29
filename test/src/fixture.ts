@@ -148,6 +148,8 @@ export const schema = defineSchema(
       }),
       // 有共同角色的人（含自己）
       peers: r.path('User', ['roles', 'users']),
+      // 任意条件的关系：本人的大额帖子
+      bigPosts: r.manyOn('Post', (u, p) => [p.userId.eq(u.id), p.amount.gt('100')]),
     }),
     Role: (r) => ({
       users: r.manyToMany('User', {
@@ -166,6 +168,8 @@ export const schema = defineSchema(
       user: r.one('User', { from: 'userId', to: 'id' }),
       comments: r.many('Comment', { from: 'id', to: 'postId' }),
       company: r.pathOne('Company', ['user', 'company']),
+      // 任意条件的多对一：作者（等同 user）
+      author: r.oneOn('User', (p, u) => u.id.eq(p.userId)),
     }),
     Comment: (r) => ({ post: r.one('Post', { from: 'postId', to: 'id' }) }),
   },

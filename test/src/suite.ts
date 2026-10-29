@@ -975,6 +975,32 @@ export function liveSuite(
       return env;
     };
 
+    it('relations on any condition: manyOn / oneOn (official navigate/dotcolumn, many2many2)', async () => {
+      const { db } = await seeded();
+      const rows = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({
+          name: u.name,
+          big: u.bigPosts.count(),
+          has: u.bigPosts.any(),
+          titles: u.bigPosts.toList((p) => p.title),
+          grouped: u.bigPosts.groupJoin().count(),
+        }))
+        .toList();
+      assert.deepEqual(rows, [
+        { name: 'alice', big: 1, has: true, titles: ['sql 100%'], grouped: 1 },
+        { name: 'bob', big: 0, has: false, titles: [], grouped: 0 },
+        { name: 'carol', big: 0, has: false, titles: [], grouped: 0 },
+      ]);
+      const authors = await db
+        .queryable(Post)
+        .orderBy((p) => p.id)
+        .select((p) => p.author.name)
+        .toList();
+      assert.deepEqual(authors, ['alice', 'alice', 'bob', 'bob']);
+    });
+
     it('path relations: a de-duplicated bridge over several navigations', async () => {
       const { db } = await withRoles();
       const users = await db

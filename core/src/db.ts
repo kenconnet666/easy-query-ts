@@ -99,6 +99,11 @@ export interface DbOptions<S extends AnySchema> {
    * 显式写了 limit、toPage、stream 不受限。默认不限
    */
   readonly maxRows?: number;
+  /**
+   * 深分页倒序取（对应 Java 版的 reverseOffsetThreshold）：toPage / table 的偏移量超过它、且超过总数一半时，
+   * 按相反的排序取（偏移量变小），再把这一页翻回来；查询要有 orderBy。默认不倒序
+   */
+  readonly reversePageAfter?: number;
 }
 
 export class Db<S extends AnySchema> {
@@ -321,7 +326,7 @@ export class Db<S extends AnySchema> {
     const children: Record<string, readonly Record<string, unknown>[]> = {};
     for (const name of cascade) {
       const rel = relations[name];
-      if (!rel || rel.kind !== 'many' || rel.through || rel.hops)
+      if (!rel || rel.kind !== 'many' || rel.through || rel.hops || rel.on)
         throw new Error(`save: '${name}' of ${entity.name} is not a plain one-to-many navigation`);
       children[name] = (parent[name] as readonly Record<string, unknown>[] | undefined) ?? [];
       delete parent[name];
@@ -737,7 +742,11 @@ export function createDb<S extends AnySchema>(options: DbOptions<S>): Db<S> {
     onExecute: options.onExecute,
     signal: undefined,
     hooks: undefined,
-    guards: { hardDelete: options.hardDelete ?? 'allow', maxRows: options.maxRows },
+    guards: {
+      hardDelete: options.hardDelete ?? 'allow',
+      maxRows: options.maxRows,
+      reversePageAfter: options.reversePageAfter,
+    },
     // 列修饰器驱动的内置规则在前，用户的拦截器在后
     interceptors: new Interceptors([...columnRules(), ...(options.interceptors ?? [])]),
   };
