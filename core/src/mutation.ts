@@ -18,6 +18,7 @@ import {
   type Fields,
   type Insert,
   type Row,
+  type UpdateOf,
   type ValueOf,
 } from './schema.ts';
 import {
@@ -471,6 +472,35 @@ export type SetValues<S extends AnySchema, K extends EntityKey<S>> = SetOf<
   EntityOf<S, K>['fields']
 >;
 
+/** 实体的版本列（属性名）；没有时 undefined */
+function versionColumn(entity: Entity): string | undefined {
+  return Object.keys(entity.columns).find((p) => entity.columns[p]!.options.version);
+}
+
+/** 版本列的下一个版本：有规则用规则，没有就按整数加 1 */
+function nextVersion(column: AnyColumn, current: unknown): unknown {
+  const next = column.options.version!.next;
+  if (next) return next(current);
+  return typeof current === 'bigint' ? current + 1n : Number(current) + 1;
+}
+
+/** entity(row)、changes 会写的列：主键、版本（由版本条件另写）、只插入的列不写 */
+function updatableColumn(entity: Entity, prop: string): boolean {
+  const options = entity.columns[prop]!.options;
+  return !entity.primaryKey.includes(prop) && !options.version && !options.insertOnly;
+}
+
+/** 两个值在这一列上是否相同：按列的编码比（日期比时刻、JSON 比内容、decimal.js 比文字、二进制逐字节） */
+function sameValue(column: AnyColumn, a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || a === undefined || b === null || b === undefined) return false;
+  const x = column.codec.encode(a);
+  const y = column.codec.encode(b);
+  if (x instanceof Uint8Array && y instanceof Uint8Array)
+    return x.length === y.length && x.every((byte, i) => byte === y[i]);
+  return x === y || String(x) === String(y);
+}
+
 /** 叠加了拦截器开关的执行上下文 */
 function withToggle(ctx: Context, toggle: InterceptorToggle): Context {
   return { ...ctx, interceptors: ctx.interceptors.configure(toggle) };
@@ -479,8 +509,10 @@ function withToggle(ctx: Context, toggle: InterceptorToggle): Context {
 interface WriteState {
   readonly where: readonly ((r: any) => Cond)[];
   readonly all: boolean;
-  /** entity(row) 带了版本条件：一行都没更新到说明被别人改过，要抛错 */
-  readonly versionGuard?: boolean;
+  /** 带版本条件（entity(row)、changes、withVersion）时的当前版本：条件是版本等于它，写入它的下一个；一行都没更新到说明被别人改过，要抛错 */
+  readonly version?: { readonly current: unknown };
+  /** changes(before, after) 比出来没有变化：execute 不发语句，返回 0 */
+  readonly unchanged?: boolean;
   /** expectRows：改到的行数必须是 count，否则抛 error(实际行数) */
   readonly expect?: { readonly count: number; readonly error: (affected: number) => Error };
 }
@@ -588,7 +620,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   }
 
   /**
-   * 按主键更新整行：set 除主键外的所有列（值为 undefined 的列跳过），where 主键相等。
+   * 按主键更新整行：set 除主键外的所有列（值为 undefined 的列跳过），where 主键相等；有版本列时带上版本条件。
    * ```ts
    * const user = await db.queryable(User).where(u => u.id.eq(1)).single()
    * await db.update(User).entity({ ...user, name: 'b' }).execute()
@@ -596,49 +628,103 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
    */
   entity(row: Row<EntityOf<S, K>>): Updatable<S, K> {
     const entity = this.ctx.schema.entities[this.key]!;
-    if (entity.primaryKey.length === 0)
-      throw new Error(`update(..).entity(..) needs a primary key on ${entity.table}`);
     const values = flattenRow(entity, row as Record<string, unknown>);
-    for (const key of entity.primaryKey) {
-      if (values[key] === undefined || values[key] === null)
-        throw new Error(`update(..).entity(..) needs the primary key '${key}' of ${entity.table}`);
-    }
-    const set: Record<string, unknown> = Object.fromEntries(
+    const set = Object.fromEntries(
+      Object.keys(entity.columns)
+        .filter((p) => values[p] !== undefined && updatableColumn(entity, p))
+        .map((p) => [p, values[p]]),
+    );
+    return this.byKey(entity, values, set, 'update(..).entity(..)');
+  }
+
+  /**
+   * 差异更新（对应 Java 版追踪模式下的差异更新，但不需要追踪上下文）：只 set 从 before 到 after 变了的列，
+   * 按 before 的主键（与版本）定位；比较按列的类型（日期比时刻、JSON 比内容、decimal 比文字），值对象逐项比。
+   * after 可以是改过的整行，也可以只是表单提交的几项；没有变化时 execute 不发语句、返回 0
+   * ```ts
+   * const before = await tx.queryable(User).findOrThrow(id);
+   * await tx.update(User).changes(before, { ...before, ...form }).execute();
+   * ```
+   */
+  changes(before: Row<EntityOf<S, K>>, after: UpdateOf<EntityOf<S, K>['fields']>): Updatable<S, K> {
+    const entity = this.ctx.schema.entities[this.key]!;
+    const old = flattenRow(entity, before as Record<string, unknown>);
+    const next = flattenRow(entity, after as Record<string, unknown>);
+    for (const key of entity.primaryKey)
+      if (next[key] !== undefined && !sameValue(entity.columns[key]!, old[key], next[key]))
+        throw new Error(`changes(): the primary key '${key}' of ${entity.table} cannot change`);
+    const set = Object.fromEntries(
       Object.keys(entity.columns)
         .filter(
           (p) =>
-            !entity.primaryKey.includes(p) &&
-            values[p] !== undefined &&
-            !entity.columns[p]!.options.insertOnly,
+            next[p] !== undefined &&
+            updatableColumn(entity, p) &&
+            !sameValue(entity.columns[p]!, old[p], next[p]),
         )
-        .map((p) => [p, values[p]]),
+        .map((p) => [p, next[p]]),
     );
-    // 乐观锁：版本列作为条件，并写入加 1 后的版本；没有更新到行说明已被别人改过（见 execute）
-    const version = Object.keys(entity.columns).find((p) => entity.columns[p]!.options.version);
-    if (version !== undefined) {
-      const current = values[version];
-      if (current === undefined || current === null)
-        throw new Error(`update(..).entity(..) needs the version '${version}' of ${entity.table}`);
-      set[version] = typeof current === 'bigint' ? current + 1n : Number(current) + 1;
-    }
-    const byKey = (r: any) => [
-      ...entity.primaryKey.map((k) => (r[k] as Expr<unknown>).eq(values[k] as never)),
-      ...(version !== undefined
-        ? [(r[version] as Expr<unknown>).eq(values[version] as never)]
-        : []),
-    ];
+    const updatable = this.byKey(entity, old, set, 'changes()');
+    if (Object.keys(set).length > 0) return updatable;
     return new Updatable(
       this.ctx,
       this.key as K,
-      { ...this.state, where: [...this.state.where, byKey], versionGuard: version !== undefined },
+      { ...updatable.state, unchanged: true },
+      updatable.values,
+    );
+  }
+
+  /**
+   * 表达式更新带上乐观锁（对应 Java 版的 withVersion）：条件加上"版本等于 current"，并写入下一个版本；没更新到行就抛错
+   * ```ts
+   * await db.update(Doc).set({ title }).where((d) => d.id.eq(id)).withVersion(form.version).execute()
+   * ```
+   */
+  withVersion(current: unknown): Updatable<S, K> {
+    const entity = this.ctx.schema.entities[this.key]!;
+    if (versionColumn(entity) === undefined)
+      throw new Error(`withVersion(): ${entity.table} has no version column`);
+    return new Updatable(
+      this.ctx,
+      this.key as K,
+      { ...this.state, version: { current } },
+      this.values,
+    );
+  }
+
+  /** 按主键（与版本）定位一行、set 这些值 */
+  private byKey(
+    entity: Entity,
+    row: Readonly<Record<string, unknown>>,
+    set: Record<string, unknown>,
+    what: string,
+  ): Updatable<S, K> {
+    if (entity.primaryKey.length === 0)
+      throw new Error(`${what} needs a primary key on ${entity.table}`);
+    for (const key of entity.primaryKey)
+      if (row[key] === undefined || row[key] === null)
+        throw new Error(`${what} needs the primary key '${key}' of ${entity.table}`);
+    const version = versionColumn(entity);
+    if (version !== undefined && (row[version] === undefined || row[version] === null))
+      throw new Error(`${what} needs the version '${version}' of ${entity.table}`);
+    const where = (r: any) =>
+      entity.primaryKey.map((k) => (refColumn(r, k) as Expr<unknown>).eq(row[k] as never));
+    return new Updatable(
+      this.ctx,
+      this.key as K,
+      {
+        ...this.state,
+        where: [...this.state.where, where],
+        ...(version !== undefined ? { version: { current: row[version] } } : {}),
+      },
       () => set,
     );
   }
 
-  /** 带乐观锁条件的更新没有更新到任何行：行已被删除或已被别人改过 */
+  /** 带乐观锁条件的更新没有更新到任何行：行已被删除或已被别人改过；changes 没有变化时不发语句 */
   override async execute(): Promise<number> {
+    if (this.state.unchanged) return 0;
     const affected = await super.execute();
-    if (affected === 0 && this.state.versionGuard) {
+    if (affected === 0 && this.state.version) {
       throw new Error(
         `optimistic lock failed: ${this.ctx.schema.entities[this.key]!.table} row was changed or deleted by someone else`,
       );
@@ -689,6 +775,8 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
 
   protected build(): { statement: Statement; detail: WriteDetail } {
     if (!this.values) throw new Error('update needs set(...)');
+    if (this.state.unchanged)
+      throw new Error('changes(): nothing changed, so there is no statement (execute() returns 0)');
     const { root, where } = this.scope();
     const entity = this.ctx.schema.entities[this.key]!;
     const given = flattenRow(entity, this.values(root));
@@ -696,7 +784,14 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       if (given[p] !== undefined && entity.columns[p]?.options.insertOnly)
         throw new Error(`column '${p}' of ${entity.table} is insert-only and cannot be updated`);
     }
+    const version = versionColumn(entity);
+    const guard = this.state.version;
+    // 带版本条件时写入下一个版本（调用方显式给了就用它的）
+    if (version !== undefined && guard && given[version] === undefined)
+      given[version] = nextVersion(entity.columns[version]!, guard.current);
     const values = this.ctx.interceptors.beforeUpdate(given, entity);
+    if (version !== undefined && guard)
+      where.push(condNode(refColumn(root, version).eq(guard.current as never))!);
     const set = Object.entries(values)
       .filter(([, v]) => v !== undefined)
       .map(([p, v]) => {
@@ -704,19 +799,21 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
         if (!column) throw new Error(`${entity.table} has no column '${p}'`);
         return { column: entity.columnNames[p]!, e: columnValue(column, v) };
       });
-    // 乐观锁列：没有显式写版本的更新（表达式更新、批量更新）也让版本加 1，别人手里的旧版本就会失效
-    for (const [p, column] of Object.entries(entity.columns)) {
-      if (column.options.version && values[p] === undefined) {
-        set.push({
-          column: entity.columnNames[p]!,
-          e: {
-            k: 'op',
-            op: '+',
-            l: { k: 'col', alias: root[REF].alias, name: entity.columnNames[p]! },
-            r: { k: 'lit', sql: '1' },
-          },
-        });
-      }
+    // 乐观锁列：没带版本条件的更新（表达式更新、批量更新）也换成下一个版本，别人手里的旧版本就会失效
+    if (version !== undefined && values[version] === undefined) {
+      const column = entity.columns[version]!;
+      const name = entity.columnNames[version]!;
+      set.push({
+        column: name,
+        e: column.options.version!.next
+          ? columnValue(column, nextVersion(column, undefined))
+          : {
+              k: 'op',
+              op: '+',
+              l: { k: 'col', alias: root[REF].alias, name },
+              r: { k: 'lit', sql: '1' },
+            },
+      });
     }
     if (set.length === 0) throw new Error(`update of ${entity.table} sets no columns`);
     const node = { from: { table: entity.table, alias: root[REF].alias }, set, where };

@@ -101,7 +101,7 @@ const valueOf = (v: unknown): unknown => (typeof v === 'function' ? (v as () => 
 
 /**
  * 由列修饰器驱动的内置拦截器，createDb 自动安装（用户的拦截器排在后面）：
- * - defaults：`$default` 在插入时补值、`$onUpdate` 在更新时补值、version 列插入为 0；
+ * - defaults：`$default` 在插入时补值、`$onUpdate` 在更新时补值、version 列插入初始版本；
  * - softDelete：逻辑删除列的读过滤、插入默认值、delete 改写成 update。可以用 `noInterceptor('softDelete')` 关掉。
  */
 export function columnRules(): Interceptor[] {
@@ -110,8 +110,8 @@ export function columnRules(): Interceptor[] {
     beforeInsert: (row, entity) => {
       for (const { prop, value } of columnsWith(entity, 'defaultFn'))
         if (row[prop] === undefined) row[prop] = value();
-      for (const { prop } of columnsWith(entity, 'version'))
-        if (row[prop] === undefined) row[prop] = 0;
+      for (const { prop, value } of columnsWith(entity, 'version'))
+        if (row[prop] === undefined) row[prop] = value.initial;
     },
     beforeUpdate: (set, entity) => {
       for (const { prop, value } of columnsWith(entity, 'onUpdateFn'))

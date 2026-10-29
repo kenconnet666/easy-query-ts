@@ -58,8 +58,8 @@ export interface ColumnOptions {
   /** 更新时没给值就用它（如更新时间） */
   readonly onUpdateFn?: (() => unknown) | undefined;
   readonly softDelete?: SoftDelete | undefined;
-  /** 乐观锁版本列 */
-  readonly version?: boolean | undefined;
+  /** 乐观锁版本列的规则 */
+  readonly version?: VersionRule | undefined;
   /** 只在插入时写入，更新永远不碰（创建人、创建时间） */
   readonly insertOnly?: boolean | undefined;
   /** 读这一列时在 SQL 里的转换（见 Column.sqlConvert） */
@@ -76,6 +76,12 @@ export interface ColumnOptions {
   /** 库里的默认值，原样写进 DEFAULT 子句（受信任的 SQL，如 `'draft'`、`CURRENT_TIMESTAMP`） */
   readonly dbDefault?: string | undefined;
   readonly unique?: boolean | undefined;
+}
+
+/** 乐观锁版本列的规则：initial 是插入时的值；next 由当前版本算出下一个，没有时按整数加 1（表达式更新里在 SQL 里加 1） */
+export interface VersionRule {
+  readonly initial: unknown;
+  readonly next: ((current: unknown) => unknown) | undefined;
 }
 
 /** 字符串列的加解密策略：写入前 encrypt、读出后 decrypt。要用 eq 查询必须是确定性的（同一明文得到同一密文） */
@@ -152,11 +158,21 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
     return new Column(this.codec, { ...this.options, softDelete: chosen });
   }
 
-  /** 乐观锁版本列（整数）：插入为 0；`update(X).entity(row)` 带上版本条件并加 1，没更新到行就抛错；其它更新自动加 1 */
-  version(): Column<T, N, true> {
-    if (this.codec.kind !== 'int' && this.codec.kind !== 'bigint')
-      throw new Error(`version() needs an integer column, got '${this.codec.kind}'`);
-    return new Column(this.codec, { ...this.options, version: true });
+  /**
+   * 乐观锁版本列。`update(X).entity(row)`、`changes(before, after)`、`withVersion(v)` 带上版本条件并写入下一个版本，没更新到行就抛错；
+   * 其它更新也换成下一个版本，别人手里的旧版本随之失效。整数列不用给规则（插入为 0、每次加 1）；
+   * 别的类型给出规则，如 UUID：`col.string().version({ initial: '0', next: () => crypto.randomUUID() })`。
+   * next 收到当前版本；表达式更新没给 withVersion 时不知道当前版本，收到 undefined
+   */
+  version(rule?: { initial: T; next: (current: T | undefined) => T }): Column<T, N, true> {
+    if (!rule && this.codec.kind !== 'int' && this.codec.kind !== 'bigint')
+      throw new Error(
+        `version() on a '${this.codec.kind}' column needs { initial, next }; only integer columns have a default`,
+      );
+    const version: VersionRule = rule
+      ? { initial: rule.initial, next: rule.next as (current: unknown) => unknown }
+      : { initial: 0, next: undefined };
+    return new Column(this.codec, { ...this.options, version });
   }
 
   /** 只在插入时写入，更新永远不碰；在 set 里给它赋值会报错 */
