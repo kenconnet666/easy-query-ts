@@ -54,7 +54,7 @@ export type {
   Temporal,
   TemporalExtensions,
 } from './expr.ts';
-export { Fill, GroupJoin, ListOf, ManyRef } from './ref.ts';
+export { Fill, GroupJoin, ListOf, ManyRef, refColumn } from './ref.ts';
 export type { ColumnRefs, Ref, Selected } from './ref.ts';
 export { GroupedQueryable, NotFoundError, Queryable } from './query.ts';
 export type {
@@ -83,7 +83,14 @@ export type { Bound } from './window.ts';
 export { defineView } from './view.ts';
 export type { View, ViewOf } from './view.ts';
 export { tenant, touch } from './interceptor.ts';
-export type { Interceptor, WriteEvent } from './interceptor.ts';
+export type {
+  Interceptor,
+  InterceptorName,
+  InterceptorNames,
+  InterceptorToggle,
+  StatementKind,
+  WriteEvent,
+} from './interceptor.ts';
 export type { DbOptions, KeyOf, ManyKeys, SaveInput, TreeWalk, WithCte } from './db.ts';
 export { Dialect, SqlWriter } from './dialect.ts';
 export type { FunctionRenderer, Statement } from './dialect.ts';

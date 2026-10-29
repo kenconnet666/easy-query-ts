@@ -19,7 +19,12 @@ import {
   type Row,
   type ValueOf,
 } from './schema.ts';
-import { Interceptors, refEntity, type WriteEvent } from './interceptor.ts';
+import {
+  Interceptors,
+  type InterceptorName,
+  type InterceptorToggle,
+  type WriteEvent,
+} from './interceptor.ts';
 import { execute, query, type Context } from './session.ts';
 
 type EntityOf<S extends AnySchema, K extends EntityKey<S>> = S['entities'][K];
@@ -31,6 +36,21 @@ export class Insertable<S extends AnySchema, K extends EntityKey<S>> {
   constructor(ctx: Context, key: K) {
     this.ctx = ctx;
     this.key = key;
+  }
+
+  /** 这条语句不用这些拦截器（名字见 InterceptorNames） */
+  noInterceptor(...names: InterceptorName[]): Insertable<S, K> {
+    return this.interceptors({ skip: names });
+  }
+
+  /** 这条语句打开这些拦截器（含默认关着的） */
+  useInterceptor(...names: InterceptorName[]): Insertable<S, K> {
+    return this.interceptors({ use: names });
+  }
+
+  /** 这条语句的拦截器开关，见 InterceptorToggle */
+  interceptors(toggle: InterceptorToggle): Insertable<S, K> {
+    return new Insertable(withToggle(this.ctx, toggle), this.key);
   }
 
   /** 从一条查询插入（INSERT … SELECT），见 InsertSelect */
@@ -426,11 +446,14 @@ export type SetValues<S extends AnySchema, K extends EntityKey<S>> = SetOf<
   EntityOf<S, K>['fields']
 >;
 
+/** 叠加了拦截器开关的执行上下文 */
+function withToggle(ctx: Context, toggle: InterceptorToggle): Context {
+  return { ...ctx, interceptors: ctx.interceptors.configure(toggle) };
+}
+
 interface WriteState {
   readonly where: readonly ((r: any) => Cond)[];
   readonly all: boolean;
-  /** delete 绕过逻辑删除，物理删除 */
-  readonly hard?: boolean;
   /** entity(row) 带了版本条件：一行都没更新到说明被别人改过，要抛错 */
   readonly versionGuard?: boolean;
   /** expectRows：改到的行数必须是 count，否则抛 error(实际行数) */
@@ -450,9 +473,8 @@ abstract class Filtered {
 
   /** 新的构建现场：不允许 join（各库对 UPDATE/DELETE 带 JOIN 的写法不一致） */
   protected scope(): { scope: Scope; root: any; where: Node[] } {
-    const scope = new Scope(this.ctx.schema, { n: 0 }, false, (ref) =>
-      this.interceptors().filters(ref, refEntity(ref)),
-    );
+    const kind = this.verb === 'delete' ? 'delete' : 'update';
+    const scope = new Scope(this.ctx.schema, { n: 0 }, false, this.ctx.interceptors, kind);
     const root = scope.root(this.key);
     const where = this.state.where
       .map((f) => condNode(f(root)))
@@ -467,11 +489,6 @@ abstract class Filtered {
   }
 
   protected abstract readonly verb: string;
-
-  /** 这条写入语句生效的拦截器；delete(X).hard() 会关掉逻辑删除 */
-  protected interceptors(): Interceptors {
-    return this.ctx.interceptors;
-  }
 
   async execute(): Promise<number> {
     const affected = (await execute(this.ctx, this.toSQL())).affected;
@@ -623,6 +640,21 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     return new BatchUpdate(statements);
   }
 
+  /** 这条语句不用这些拦截器（名字见 InterceptorNames） */
+  noInterceptor(...names: InterceptorName[]): Updatable<S, K> {
+    return this.interceptors({ skip: names });
+  }
+
+  /** 这条语句打开这些拦截器（含默认关着的） */
+  useInterceptor(...names: InterceptorName[]): Updatable<S, K> {
+    return this.interceptors({ use: names });
+  }
+
+  /** 这条语句的拦截器开关，见 InterceptorToggle */
+  interceptors(toggle: InterceptorToggle): Updatable<S, K> {
+    return new Updatable(withToggle(this.ctx, toggle), this.key as K, this.state, this.values);
+  }
+
   all(): Updatable<S, K> {
     return new Updatable(this.ctx, this.key as K, { ...this.state, all: true }, this.values);
   }
@@ -707,11 +739,22 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
 
   /** 物理删除：绕过逻辑删除（读过滤与改写成 update 都不再生效），已被逻辑删除的行也会被删掉 */
   hard(): Deletable<S, K> {
-    return new Deletable(this.ctx, this.key as K, { ...this.state, hard: true });
+    return this.noInterceptor('softDelete');
   }
 
-  protected override interceptors(): Interceptors {
-    return this.state.hard ? this.ctx.interceptors.without(['softDelete']) : this.ctx.interceptors;
+  /** 这条语句不用这些拦截器（名字见 InterceptorNames） */
+  noInterceptor(...names: InterceptorName[]): Deletable<S, K> {
+    return this.interceptors({ skip: names });
+  }
+
+  /** 这条语句打开这些拦截器（含默认关着的） */
+  useInterceptor(...names: InterceptorName[]): Deletable<S, K> {
+    return this.interceptors({ use: names });
+  }
+
+  /** 这条语句的拦截器开关，见 InterceptorToggle */
+  interceptors(toggle: InterceptorToggle): Deletable<S, K> {
+    return new Deletable(withToggle(this.ctx, toggle), this.key as K, this.state);
   }
 
   toSQL(): Statement {
@@ -719,7 +762,7 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     const entity = this.ctx.schema.entities[this.key]!;
     const from = { table: entity.table, alias: root[REF].alias };
     // 逻辑删除：delete 改写成把标记列设为"已删除"的 update，条件不变（读过滤已经保证不会重复删）
-    const softSet = this.interceptors().deleteAsUpdate(entity);
+    const softSet = this.ctx.interceptors.deleteAsUpdate(entity);
     if (softSet) {
       const set = Object.entries(softSet).map(([p, v]) => ({
         column: entity.columnNames[p]!,
@@ -745,11 +788,7 @@ export class LockRow extends Filtered {
   protected readonly verb = 'lock';
 
   constructor(ctx: Context, key: string, where: (r: any) => Cond) {
-    super(ctx, key, { where: [where], all: false });
-  }
-
-  protected override interceptors(): Interceptors {
-    return Interceptors.none;
+    super({ ...ctx, interceptors: Interceptors.none }, key, { where: [where], all: false });
   }
 
   override async execute(): Promise<number> {

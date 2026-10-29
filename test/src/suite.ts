@@ -36,6 +36,16 @@ import {
   type TestEnv,
 } from './fixture.ts';
 
+// 用例里自己写的拦截器：名字要登记，noInterceptor 才认得
+declare module '@zerodep-dev/easy-query-ts' {
+  interface InterceptorNames {
+    adults: true;
+    'default-age': true;
+    audit: true;
+    veto: true;
+  }
+}
+
 export interface LiveSuiteOptions {
   /** 库里建了 t_ext 表，可以跑 decimal.js / bigint / @internationalized/date 的往返用例 */
   readonly extensionTypes?: boolean;
@@ -1254,7 +1264,7 @@ export function liveSuite(
     it('notifies afterWrite interceptors after every write', async () => {
       const env = await seeded();
       const events: string[] = [];
-      const audit = {
+      const audit: Interceptor = {
         name: 'audit',
         afterWrite: (e: { kind: string; entity: { table: string }; affected: number }) => {
           events.push(`${e.kind}:${e.entity.table}:${e.affected}`);

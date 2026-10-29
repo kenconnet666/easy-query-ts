@@ -7,7 +7,12 @@
  * ```
  */
 import type { Statement } from './dialect.ts';
-import { columnRules, Interceptors, type Interceptor } from './interceptor.ts';
+import {
+  columnRules,
+  Interceptors,
+  type Interceptor,
+  type InterceptorToggle,
+} from './interceptor.ts';
 import { Deletable, Insertable, LockRow, Updatable } from './mutation.ts';
 import {
   cteEntity,
@@ -431,6 +436,19 @@ export class Db<S extends AnySchema> {
   }
 
   /**
+   * 这个 Db 上所有语句的拦截器开关（与语句上的 noInterceptor / useInterceptor 叠加，语句上的在后）：
+   * 后台任务、管理员接口整段关掉租户 `db.withInterceptors({ skip: ['tenant'] })`，某个接口打开数据范围 `{ use: ['dataScope'] }`
+   */
+  withInterceptors(toggle: InterceptorToggle): Db<S> {
+    return new Db(
+      { ...this.ctx, interceptors: this.ctx.interceptors.configure(toggle) },
+      this.adapter,
+      this.keys,
+      this.inTransaction,
+    );
+  }
+
+  /**
    * 一个绑定了取消信号的 Db：通过它发出的所有语句（含事务里的）遵守这个信号。
    * 信号已取消时新语句直接失败；执行中取消则不再等待结果，立刻以信号的 reason 失败。
    * 这只是"客户端不再等"，数据库里的语句不会被终止。超时：`db.withSignal(AbortSignal.timeout(5000))`。
@@ -513,8 +531,7 @@ export class Db<S extends AnySchema> {
     if (!this.ctx.dialect.rowLocks) {
       return (await new LockRow(this.ctx, name, where).execute()) > 0;
     }
-    const rows = await newQueryable(this.ctx, name)
-      .noInterceptor(...this.ctx.interceptors.names())
+    const rows = await newQueryable({ ...this.ctx, interceptors: Interceptors.none }, name)
       .where(where)
       .forUpdate()
       .toList();

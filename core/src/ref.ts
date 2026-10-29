@@ -18,6 +18,13 @@ import {
 } from './expr.ts';
 import type { AnySchema, EntityKey, Many, One, Relation, RelationFilter } from './relations.ts';
 import {
+  Interceptors,
+  refEntity,
+  type InterceptorName,
+  type InterceptorToggle,
+  type StatementKind,
+} from './interceptor.ts';
+import {
   setPath,
   type AnyColumn,
   type Embedded,
@@ -73,8 +80,10 @@ export class Scope {
   readonly schema: AnySchema;
   readonly joins: Join[] = [];
   readonly allowJoins: boolean;
-  /** 拦截器给每个表引用附加的条件（主表、JOIN、子查询都用） */
-  readonly filters: (ref: AnyRef) => Node[];
+  /** 这一层生效的拦截器（导航上单独开关时，子查询用的是另一份） */
+  readonly interceptors: Interceptors;
+  /** 所在语句的种类：拦截器的条件据此区分查询与更新、删除 */
+  readonly kind: StatementKind;
   /** 整条语句用到的 CTE（按依赖顺序），父子 Scope 共用同一张表：WITH 只能出现在最外层 */
   readonly ctes: Map<string, CteNode>;
   private readonly counter: { n: number };
@@ -83,14 +92,21 @@ export class Scope {
     schema: AnySchema,
     counter: { n: number } = { n: 0 },
     allowJoins = true,
-    filters: (ref: AnyRef) => Node[] = () => [],
+    interceptors: Interceptors = Interceptors.none,
+    kind: StatementKind = 'select',
     ctes: Map<string, CteNode> = new Map(),
   ) {
     this.schema = schema;
     this.counter = counter;
     this.allowJoins = allowJoins;
-    this.filters = filters;
+    this.interceptors = interceptors;
+    this.kind = kind;
     this.ctes = ctes;
+  }
+
+  /** 拦截器给这个表引用附加的条件（主表、JOIN、子查询都用）；toggles 是只对这张表的开关（join 的选项） */
+  filters(ref: AnyRef, toggles: readonly InterceptorToggle[] = []): Node[] {
+    return this.interceptors.configure(...toggles).filters(ref, refEntity(ref), this.kind);
   }
 
   /** 登记用到的 CTE；它自己依赖的 CTE 先登记，名字相同的只登记一次 */
@@ -117,14 +133,27 @@ export class Scope {
     return `t${this.counter.n++}`;
   }
 
-  /** 子查询用的现场：别名不与外层重复 */
-  child(): Scope {
-    return new Scope(this.schema, this.counter, true, this.filters, this.ctes);
+  /** 子查询用的现场：别名不与外层重复；toggles 是导航上单独的拦截器开关 */
+  child(toggles: readonly InterceptorToggle[] = []): Scope {
+    return new Scope(
+      this.schema,
+      this.counter,
+      true,
+      this.interceptors.configure(...toggles),
+      this.kind,
+      this.ctes,
+    );
   }
 
   /** 与本现场共用别名计数、但 CTE 单独统计：toList 的第二条查询是独立的语句，只该带它自己用到的 WITH */
-  detached(): Scope {
-    return new Scope(this.schema, this.counter, true, this.filters);
+  detached(toggles: readonly InterceptorToggle[] = []): Scope {
+    return new Scope(
+      this.schema,
+      this.counter,
+      true,
+      this.interceptors.configure(...toggles),
+      this.kind,
+    );
   }
 
   /** 实体的根引用 */
@@ -156,7 +185,7 @@ export function makeRef(scope: Scope, key: string, alias: string, nullable: bool
             ? rel.path
               ? walkPath(ref as AnyRef, rel.path)
               : joinOne(scope, ref as AnyRef, prop, rel, nullable)
-            : new ManyRef(scope, ref as AnyRef, rel, rel.where ? [rel.where] : [])),
+            : new ManyRef(scope, ref as AnyRef, rel, { filters: rel.where ? [rel.where] : [] })),
     });
   }
   return ref as AnyRef;
@@ -366,6 +395,14 @@ export function refColumn(ref: AnyRef, prop: string): Expr<unknown> {
     ) as Expr<unknown>;
 }
 
+/** ManyRef 上叠加的东西：条件、排序、每个父行取几条、拦截器开关 */
+interface ManyOptions {
+  readonly filters: readonly ((r: any) => Cond)[];
+  readonly orders: readonly ((r: any) => OrderItem | readonly OrderItem[])[];
+  readonly take: number | undefined;
+  readonly toggles: readonly InterceptorToggle[];
+}
+
 /**
  * 一对多导航。可以先 where / orderBy 再聚合；聚合与 any / none 是关联子查询，toList 只能用在 select 里（第二条查询按 IN 拉取后拼装）。
  */
@@ -376,56 +413,63 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
   readonly relation: Many;
   readonly filters: readonly ((r: any) => Cond)[];
   readonly orders: readonly ((r: any) => OrderItem | readonly OrderItem[])[];
-
   /** toList / first 时每个父行最多取几条（limit） */
   readonly take: number | undefined;
+  /** 只对这个导航的拦截器开关（子查询、toList 的第二条查询、分组 join 都用它） */
+  readonly toggles: readonly InterceptorToggle[];
   /** groupJoin() 的结果：同一个导航上的几个聚合共用一个分组 join */
   private grouped: GroupJoin<S, K> | undefined;
 
-  constructor(
-    scope: Scope,
-    parent: AnyRef,
-    relation: Many,
-    filters: readonly ((r: any) => Cond)[] = [],
-    orders: readonly ((r: any) => OrderItem | readonly OrderItem[])[] = [],
-    take?: number,
-  ) {
+  constructor(scope: Scope, parent: AnyRef, relation: Many, options: Partial<ManyOptions> = {}) {
     this.scope = scope;
     this.parent = parent;
     this.relation = relation;
-    this.filters = filters;
-    this.orders = orders;
-    this.take = take;
+    this.filters = options.filters ?? [];
+    this.orders = options.orders ?? [];
+    this.take = options.take;
+    this.toggles = options.toggles ?? [];
+  }
+
+  private copy(patch: Partial<ManyOptions>): ManyRef<S, K> {
+    const { filters, orders, take, toggles } = this;
+    return new ManyRef(this.scope, this.parent, this.relation, {
+      filters,
+      orders,
+      take,
+      toggles,
+      ...patch,
+    });
   }
 
   where(filter: (r: Ref<S, K>) => Cond): ManyRef<S, K> {
-    return new ManyRef(
-      this.scope,
-      this.parent,
-      this.relation,
-      [...this.filters, filter],
-      this.orders,
-      this.take,
-    );
+    return this.copy({ filters: [...this.filters, filter] });
   }
 
   /** 只影响 toList 的顺序 */
   orderBy(order: (r: Ref<S, K>) => OrderItem | readonly OrderItem[]): ManyRef<S, K> {
-    return new ManyRef(
-      this.scope,
-      this.parent,
-      this.relation,
-      this.filters,
-      [...this.orders, order],
-      this.take,
-    );
+    return this.copy({ orders: [...this.orders, order] });
   }
 
   /** toList 时每个父行最多 n 条（按 orderBy；用 ROW_NUMBER() OVER (PARTITION BY 关联列) 在库里截取） */
   limit(n: number): ManyRef<S, K> {
     if (!Number.isSafeInteger(n) || n <= 0)
       throw new RangeError(`limit must be a positive integer, got ${n}`);
-    return new ManyRef(this.scope, this.parent, this.relation, this.filters, this.orders, n);
+    return this.copy({ take: n });
+  }
+
+  /** 只在这个导航上关掉这些拦截器（对应 Java 版的 relationLogicDelete）：`u.roles.noInterceptor('softDelete').any()` */
+  noInterceptor(...names: InterceptorName[]): ManyRef<S, K> {
+    return this.interceptors({ skip: names });
+  }
+
+  /** 只在这个导航上打开这些拦截器（含默认关着的） */
+  useInterceptor(...names: InterceptorName[]): ManyRef<S, K> {
+    return this.interceptors({ use: names });
+  }
+
+  /** 只在这个导航上的拦截器开关，见 InterceptorToggle */
+  interceptors(toggle: InterceptorToggle): ManyRef<S, K> {
+    return this.copy({ toggles: [...this.toggles, toggle] });
   }
 
   /** 存在满足条件的行（EXISTS） */
@@ -507,7 +551,7 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
     filter: ((r: any) => Cond) | undefined,
     columns: (r: AnyRef) => { e: Node; as: string }[],
   ): SelectNode {
-    const scope = this.scope.child();
+    const scope = this.scope.child(this.toggles);
     const target = scope.schema.entities[this.relation.target]!;
     const root = scope.root(this.relation.target);
     const alias = root[REF].alias;
@@ -617,7 +661,7 @@ export class GroupJoin<S extends AnySchema, K extends EntityKey<S>> {
       throw new Error(
         'groupJoin() needs a JOIN, which update/delete do not support; use count() instead',
       );
-    const inner = scope.child();
+    const inner = scope.child(this.many.toggles);
     const root = inner.root(relation.target);
     const link = linkColumns(inner, relation, root);
     const where = [...inner.filters(root), ...this.many.rebuild(root).where];

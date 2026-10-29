@@ -49,7 +49,7 @@ import {
   type Entity,
   type Row,
 } from './schema.ts';
-import { refEntity } from './interceptor.ts';
+import type { InterceptorName, InterceptorToggle } from './interceptor.ts';
 import {
   conditionOf,
   parseColumnText,
@@ -69,6 +69,8 @@ interface JoinSpec {
   readonly key: string;
   readonly kind: JoinKind;
   readonly on: Fn<Cond> | undefined;
+  /** 只对这张表的拦截器开关（join 的第三个参数，如 `{ skip: ['softDelete'] }`） */
+  readonly toggles: readonly InterceptorToggle[];
 }
 
 interface State {
@@ -88,8 +90,6 @@ interface State {
   readonly forUpdate: boolean;
   readonly lockWait: 'nowait' | 'skip' | undefined;
   readonly groupMode: 'rollup' | 'cube' | undefined;
-  /** noInterceptor 关掉的拦截器 */
-  readonly disabled: readonly string[];
 }
 
 /**
@@ -582,9 +582,25 @@ export class Queryable<
     return this.with({ forUpdate: true, lockWait: 'skip' });
   }
 
-  /** 这条查询不用这些拦截器（按 name，如 'tenant'） */
-  noInterceptor(...names: string[]): Queryable<S, K, Out, Refs> {
-    return this.with({ disabled: [...this.state.disabled, ...names] });
+  /** 这条查询不用这些拦截器（按名字，如 'tenant'；名字见 InterceptorNames） */
+  noInterceptor(...names: InterceptorName[]): Queryable<S, K, Out, Refs> {
+    return this.interceptors({ skip: names });
+  }
+
+  /** 这条查询打开这些拦截器（含默认关着的，如只在某些接口生效的数据范围） */
+  useInterceptor(...names: InterceptorName[]): Queryable<S, K, Out, Refs> {
+    return this.interceptors({ use: names });
+  }
+
+  /**
+   * 这条查询的拦截器开关（对应 Java 版的 noInterceptor() / useInterceptor()）：`{ skip: 'all' }` 全关（受保护的租户除外），
+   * `{ skip: 'all', use: ['tenant'] }` 只留租户。导航上单独开关用 `u.roles.noInterceptor(…)`，join 的表用 join 的第三个参数
+   */
+  interceptors(toggle: InterceptorToggle): Queryable<S, K, Out, Refs> {
+    return new Queryable(
+      { ...this.ctx, interceptors: this.ctx.interceptors.configure(toggle) },
+      this.state,
+    );
   }
 
   /**
@@ -597,26 +613,28 @@ export class Queryable<
   innerJoin<E extends S['entities'][EntityKey<S>]>(
     entity: E,
     on: (...refs: [...Refs, Ref<S, KeyOf<S, E>>]) => Cond,
+    toggle?: InterceptorToggle,
   ): Queryable<
     S,
     K,
     JoinedRows<S, K, Out, Refs, KeyOf<S, E>, false>,
     [...Refs, Ref<S, KeyOf<S, E>>]
   > {
-    return this.join('inner', entity, on);
+    return this.join('inner', entity, on, toggle);
   }
 
   /** 左连接另一张表（LEFT JOIN）：新表在 select 里的列都可空，没匹配到时整行为 null。其余同 innerJoin */
   leftJoin<E extends S['entities'][EntityKey<S>]>(
     entity: E,
     on: (...refs: [...Refs, Ref<S, KeyOf<S, E>>]) => Cond,
+    toggle?: InterceptorToggle,
   ): Queryable<
     S,
     K,
     JoinedRows<S, K, Out, Refs, KeyOf<S, E>, true>,
     [...Refs, Ref<S, KeyOf<S, E>, true>]
   > {
-    return this.join('left', entity, on);
+    return this.join('left', entity, on, toggle);
   }
 
   /**
@@ -626,28 +644,35 @@ export class Queryable<
   rightJoin<E extends S['entities'][EntityKey<S>]>(
     entity: E,
     on: (...refs: [...NullableRefs<S, Refs>, Ref<S, KeyOf<S, E>>]) => Cond,
+    toggle?: InterceptorToggle,
   ): Queryable<
     S,
     K,
     JoinedRows<S, K, Out, Refs, KeyOf<S, E>, false, true>,
     [...NullableRefs<S, Refs>, Ref<S, KeyOf<S, E>>]
   > {
-    return this.join('right', entity, on);
+    return this.join('right', entity, on, toggle);
   }
 
   /** 笛卡尔积（CROSS JOIN）：没有 ON，条件写在 where 里。其余同 innerJoin */
   crossJoin<E extends S['entities'][EntityKey<S>]>(
     entity: E,
+    toggle?: InterceptorToggle,
   ): Queryable<
     S,
     K,
     JoinedRows<S, K, Out, Refs, KeyOf<S, E>, false>,
     [...Refs, Ref<S, KeyOf<S, E>>]
   > {
-    return this.join('cross', entity, undefined);
+    return this.join('cross', entity, undefined, toggle);
   }
 
-  private join(kind: JoinKind, entity: Entity, on: Fn<Cond> | undefined): never {
+  private join(
+    kind: JoinKind,
+    entity: Entity,
+    on: Fn<Cond> | undefined,
+    toggle: InterceptorToggle | undefined,
+  ): never {
     if (this.state.select)
       throw new Error(
         `${kind}Join() must be called before select(): the selected shape is already fixed`,
@@ -659,7 +684,7 @@ export class Queryable<
       throw new Error(`entity for table '${entity.table}' is not part of the schema`);
     return new Queryable(this.ctx, {
       ...this.state,
-      joins: [...this.state.joins, { key, kind, on }],
+      joins: [...this.state.joins, { key, kind, on, toggles: toggle ? [toggle] : [] }],
     }) as never;
   }
 
@@ -933,7 +958,6 @@ export function newQueryable<S extends AnySchema, K extends EntityKey<S>>(
     forUpdate: false,
     lockWait: undefined,
     groupMode: undefined,
-    disabled: [],
   });
 }
 
@@ -956,10 +980,7 @@ export interface Built {
 
 /** 在新的构建现场里求值所有 lambda；bare 为 true 时不求值 select（count / any 用） */
 function build(ctx: Context, state: State, bare = false): Built {
-  const interceptors = ctx.interceptors.without(state.disabled);
-  const scope = new Scope(ctx.schema, { n: 0 }, true, (ref) =>
-    interceptors.filters(ref, refEntity(ref)),
-  );
+  const scope = new Scope(ctx.schema, { n: 0 }, true, ctx.interceptors, 'select');
   // right join 之前的表都可能没匹配到：主表的引用也可空
   const rightJoined = state.joins.some((j) => j.kind === 'right');
   const root = makeRef(scope, state.key, scope.nextAlias(), rightJoined);
@@ -1027,7 +1048,7 @@ function joinTables(
     refs.push(ref);
     if (!spec.on) {
       scope.joins.push({ ...scope.tableRef(target, alias), kind: spec.kind, on: undefined });
-      pending = [...pending, ...scope.filters(ref)];
+      pending = [...pending, ...scope.filters(ref, spec.toggles)];
       return;
     }
     // 先登记再求值 ON：ON 里用导航产生的隐式 join 会排在它后面，引用到的别名已经声明
@@ -1039,7 +1060,7 @@ function joinTables(
       }) - 1;
     const on = condNode(spec.on(...refs));
     if (!on) throw new Error(`${spec.kind}Join(${target.table}) needs an ON condition`);
-    const extra = scope.filters(ref);
+    const extra = scope.filters(ref, spec.toggles);
     if (spec.kind === 'right') {
       extra.push(...pending);
       pending = [];
@@ -1310,7 +1331,7 @@ async function fillLists(ctx: Context, lists: readonly PendingList[]): Promise<v
     const many = pending.list.many;
     // 与父查询共用别名计数：filters 里误用父查询的导航时别名对不上，checkAliases 能报出来
     // CTE 单独统计：第二条查询是独立的语句，只带它自己用到的 WITH
-    const scope = many.scope.detached();
+    const scope = many.scope.detached(many.toggles);
     const root = scope.root(many.relation.target);
     const { where, orderBy } = many.rebuild(root);
     where.push(...scope.filters(root));
