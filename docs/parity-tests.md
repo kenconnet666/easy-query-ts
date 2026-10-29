@@ -3,7 +3,7 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1823、写法不同 346、待做 6、不适用 74。
+合计：已对应 1823、写法不同 348、待做 4、不适用 74。
 
 ## 按能力
 
@@ -15,7 +15,7 @@
 | 达梦方言（`dialect.dameng`） | 51 | 已对应 | easy-query-ts-dameng：方言继承 Oracle 方言后覆盖差异（BIT、CLOB、IDENTITY_INSERT、多行 VALUES、DATEADD）；共用套件在 DM8 上全绿；ts-dameng.md |
 | DuckDB 方言（`dialect.duckdb`） | 16 | 已对应 | easy-query-ts-duckdb：共用套件在内存库上全绿；序列自增、事务排队、BLOB / DECIMAL 读写；ts-duckdb.md |
 | H2 方言（`dialect.h2`） | 74 | 不适用 | 不适用：H2 运行在 JVM 里，Node 没有驱动 |
-| 人大金仓方言（`dialect.kingbase`） | 2 | 待做 | 待做（16.7.5） |
+| 人大金仓方言（`dialect.kingbase`） | 2 | 写法不同 | kingbase(pool)：PG 模式的金仓与 PG 同一套写法（KingbaseDialect）；试用许可证过期，没有实库容器，EQTS_KINGBASE_URL 有实例时跑共用套件；openGauss 另有 opengauss(pool) 实测全绿；ts-pg-compatible.md |
 | SQL Server 方言（`dialect.mssql`） | 38 | 已对应 | easy-query-ts-mssql：共用套件全绿（SQL Server 2022）、MsSql.* 专属函数、建表与读库结构；ts-sqlserver.md |
 | SQL Server 2008 及以前（ROW_NUMBER 分页）（`dialect.mssql2008`） | 13 | 已对应 | mssql(pool, { version: 2008 })：ROW_NUMBER 分页等按版本渲染，没有旧写法的报出最低版本；mssql live / sql.test |
 | 按 DTO 自动带出（selectAutoInclude）（`dto.autoInclude`） | 35 | 写法不同 | defineView + select(View)；suite.ts views |
@@ -264,7 +264,7 @@
 | h2/v2/H2V2Test.java#testAllType |  |
 | h2/v2/H2V2Test.java#testAllType1 |  |
 
-### 人大金仓方言（`dialect.kingbase`，待做）
+### 人大金仓方言（`dialect.kingbase`，写法不同）
 
 | 用例 | 断言的 SQL（摘要） |
 | --- | --- |

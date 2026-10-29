@@ -316,7 +316,11 @@ export const capabilities = {
     status: 'done',
     ts: 'easy-query-ts-dameng：方言继承 Oracle 方言后覆盖差异（BIT、CLOB、IDENTITY_INSERT、多行 VALUES、DATEADD）；共用套件在 DM8 上全绿；ts-dameng.md',
   },
-  'dialect.kingbase': { title: '人大金仓方言', status: 'todo', ts: '待做（16.7.5）' },
+  'dialect.kingbase': {
+    title: '人大金仓方言',
+    status: 'different',
+    ts: 'kingbase(pool)：PG 模式的金仓与 PG 同一套写法（KingbaseDialect）；试用许可证过期，没有实库容器，EQTS_KINGBASE_URL 有实例时跑共用套件；openGauss 另有 opengauss(pool) 实测全绿；ts-pg-compatible.md',
+  },
   'dialect.duckdb': {
     title: 'DuckDB 方言',
     status: 'done',

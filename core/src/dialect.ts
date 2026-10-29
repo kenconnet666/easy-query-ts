@@ -190,7 +190,8 @@ export abstract class Dialect {
       json_number: (a) =>
         `CAST(CAST(${a[0]} AS JSONB) #>> ${pgJsonPath(a[1]!)} AS DOUBLE PRECISION)`,
       json_boolean: (a) => `CAST(CAST(${a[0]} AS JSONB) #>> ${pgJsonPath(a[1]!)} AS BOOLEAN)`,
-      json_has: (a) => `(CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)} IS NOT NULL)`,
+      // #> 括起来：openGauss 里 #> 的优先级低于 IS NOT NULL
+      json_has: (a) => `((CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)}) IS NOT NULL)`,
       json_length: (a) => `JSONB_ARRAY_LENGTH(CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)})`,
       // 类型转换：基类用标准类型名，各库差异覆盖
       cast_string: (a) => `CAST(${a[0]} AS VARCHAR(4000))`,
