@@ -171,6 +171,8 @@ export type { SqlTag } from './native.ts';
 export type * from './ast.ts';
 export { checkAliases } from './ast.ts';
 export { conditionOf, parseTableRequest, rangeOf } from './table.ts';
+export { parseSearchRequest } from './search.ts';
+export type { SearchOptions } from './search.ts';
 export type {
   ConditionOp,
   ConditionTree,

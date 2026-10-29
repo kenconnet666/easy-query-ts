@@ -296,7 +296,11 @@ export const capabilities = {
     status: 'done',
     ts: 'easy-query-ts-cache：kv / all、条件字段、拦截器按改之前的行失效、提交后再删、空值缓存、可换存储；cache.test.ts',
   },
-  search: { title: 'search 扩展', status: 'todo', ts: '待对照（16.6.5）' },
+  search: {
+    title: 'search 扩展',
+    status: 'done',
+    ts: 'parseSearchRequest：官方参数约定（-op、-1/-2、sort、current/pageSize、strict）解析成 TableRequest，交给 table()；search.test.ts',
+  },
   'dialect.mssql': { title: 'SQL Server 方言', status: 'todo', ts: '待做（16.7.1）' },
   'dialect.mssql2008': {
     title: 'SQL Server 2008 及以前（ROW_NUMBER 分页）',

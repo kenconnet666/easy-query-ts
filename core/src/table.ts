@@ -158,8 +158,11 @@ export type ConditionOp =
   | 'contains'
   | 'notContains'
   | 'startsWith'
+  | 'endsWith'
   | 'exists'
-  | 'empty';
+  | 'empty'
+  | 'isNull'
+  | 'notNull';
 
 /**
  * 条件树（组件库 ConditionBuilder、FilterBar 高级筛选的值，纯 JSON），与组件库的 Condition 同形：
@@ -304,6 +307,12 @@ export function conditionOf(tree: ConditionTree, shape: unknown, options: DayOpt
       return text.notLike(textOf(value, field));
     case 'startsWith':
       return text.startsWith(textOf(value, field));
+    case 'endsWith':
+      return text.endsWith(textOf(value, field));
+    case 'isNull':
+      return column.isNull();
+    case 'notNull':
+      return column.isNotNull();
     case 'exists':
       return isText(column) ? and(column.isNotNull(), text.ne('')) : column.isNotNull();
     case 'empty':
