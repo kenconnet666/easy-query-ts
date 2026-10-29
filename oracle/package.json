@@ -24,6 +24,11 @@
       "@vue-tsx-pro/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./dialect": {
+      "@vue-tsx-pro/source": "./src/dialect.ts",
+      "types": "./dist/dialect.d.ts",
+      "default": "./dist/dialect.js"
     }
   },
   "files": [
@@ -48,5 +53,10 @@
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
     "prepack": "tsc -b tsconfig.build.json"
+  },
+  "peerDependenciesMeta": {
+    "oracledb": {
+      "optional": true
+    }
   }
 }
