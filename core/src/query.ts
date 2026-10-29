@@ -54,10 +54,15 @@ import {
 } from './schema.ts';
 import type { InterceptorName, InterceptorToggle } from './interceptor.ts';
 import {
+  blankValue,
+  compareColumn,
+  conditionFields,
   conditionOf,
   parseColumnText,
+  parseSort,
   resultColumn,
   type DayOptions,
+  type FilterOp,
   type TableRequest,
 } from './table.ts';
 import { assembleTree, type TreeNode } from './tree.ts';
@@ -172,6 +177,32 @@ export interface Page<T> {
 
 /** 所有查询（普通的、分组的）共用的类型：Db.with、union 等接受它 */
 export type Query<Out> = Executable<Out>;
+
+/** table() 的选项：整天的时区、能筛选与能排序的列（白名单，键是结果里的名字） */
+export interface TableOptions<Out> extends DayOptions {
+  readonly filterable?: readonly (keyof Out & string)[];
+  readonly sortable?: readonly (keyof Out & string)[];
+}
+
+/** filterBy 的一条规则：比较方式，或 { op, column（一列或几列，几列时任一满足）, allowEmpty（空串也算填了） } */
+export type FilterRule<Refs extends readonly unknown[]> =
+  | FilterOp
+  | {
+      readonly op: FilterOp;
+      readonly column?: (...refs: Refs) => Expr<any> | readonly Expr<any>[];
+      readonly allowEmpty?: boolean;
+    };
+
+/** filterBy 的规则表：键是输入的键；与主表列同名时可以只写比较方式，否则要写 column */
+export type FilterRules<I, Refs extends readonly unknown[]> = {
+  readonly [P in keyof I]?: P extends keyof Refs[0]
+    ? FilterRule<Refs>
+    : {
+        readonly op: FilterOp;
+        readonly column: (...refs: Refs) => Expr<any> | readonly Expr<any>[];
+        readonly allowEmpty?: boolean;
+      };
+};
 
 /** 查不到要的行（firstOrThrow、findOrThrow）：接口层据此回 404 */
 export class NotFoundError extends Error {
@@ -515,7 +546,31 @@ export class Queryable<
    * 表头筛选、关键字筛选、条件树与排序只认结果里的列；请求的排序排在查询自己的排序前面；带了 total 时不再数行数。
    * options.timeZone：日期时间列上只写了日期的区间按哪个时区算整天
    */
-  async table(request: TableRequest, options: DayOptions = {}): Promise<Page<Out>> {
+  async table(request: TableRequest, options: TableOptions<Out> = {}): Promise<Page<Out>> {
+    // 白名单：请求里用到的列必须在 filterable / sortable 里（没写时结果里的列都行）
+    const check = (
+      keys: readonly string[],
+      allowed: readonly string[] | undefined,
+      what: string,
+    ) => {
+      const bad = allowed ? keys.filter((key) => !allowed.includes(key)) : [];
+      if (bad.length > 0)
+        throw new Error(`cannot ${what} by ${bad.join(', ')} (allowed: ${allowed!.join(', ')})`);
+    };
+    check(
+      [
+        ...Object.keys(request.filters),
+        ...Object.keys(request.searches),
+        ...(request.condition ? conditionFields(request.condition) : []),
+      ],
+      options.filterable,
+      'filter',
+    );
+    check(
+      request.sorts.map((s) => s.key),
+      options.sortable,
+      'sort',
+    );
     const select = this.state.select;
     const shapeOf = (refs: readonly unknown[]) => (select ? select(...refs) : refs[0]);
     const filters = Object.entries(request.filters);
@@ -608,6 +663,69 @@ export class Queryable<
       select: (...refs: Refs) => ({ k: key(...refs), v: shapeOf(state, refs) }),
     }).toList();
     return rows.map((row) => [row.k, row.v] as const);
+  }
+
+  /**
+   * 按一个输入对象筛选（对应 Java 版的 whereObject + @EasyWhereCondition）：rules 按输入的键写规则，没填的值（undefined、null、空串、空数组）跳过。
+   * 与实体列同名的键直接写比较方式；不同名、要比多列（任一满足）或经过导航时写 `{ op, column }`：
+   * ```ts
+   * db.queryable(Blog).filterBy(form, {
+   *   title: 'like',
+   *   star: 'eq',
+   *   publishTime: { op: 'between', column: (b) => b.publishTime },     // [起, 止]，任一端为空不限
+   *   keyword: { op: 'like', column: (b) => [b.title, b.content] },    // 任一列包含
+   *   author: { op: 'eq', column: (b) => b.user.name },                // 经过导航
+   * })
+   * ```
+   */
+  filterBy<I extends object>(input: I, rules: FilterRules<I, Refs>): Queryable<S, K, Out, Refs> {
+    return this.with({
+      where: [
+        ...this.state.where,
+        (...refs) =>
+          (Object.entries(rules) as [string, FilterRule<Refs> | undefined][]).map(([key, rule]) => {
+            if (!rule) return undefined;
+            const spec = typeof rule === 'string' ? { op: rule } : rule;
+            const value = (input as Record<string, unknown>)[key];
+            if (blankValue(value, spec.allowEmpty)) return undefined;
+            const picked =
+              'column' in spec && spec.column
+                ? spec.column(...(refs as unknown as Refs))
+                : refColumn(refs[0] as AnyRef, key);
+            if (!picked) throw new Error(`filterBy: '${key}' is not a column; give { op, column }`);
+            const columns = Array.isArray(picked) ? picked : [picked];
+            return or(...columns.map((c: Expr<unknown>) => compareColumn(c, spec.op, value, key)));
+          }),
+      ],
+    });
+  }
+
+  /**
+   * 动态排序（对应 Java 版的 orderByObject / ObjectSort）：sort 是 '-amount,name' 或 [{ key, descending }]，
+   * 只认 columns 里登记的名字（白名单），其余报错。排在已有的 orderBy 前面
+   * ```ts
+   * db.queryable(Order).sortBy(query.sort, { amount: (o) => o.amount, customer: (o) => o.customer.name })
+   * ```
+   */
+  sortBy(
+    sort: string | readonly { readonly key: string; readonly descending: boolean }[] | undefined,
+    columns: Readonly<Record<string, (...refs: Refs) => Expr<unknown>>>,
+  ): Queryable<S, K, Out, Refs> {
+    const sorts = typeof sort === 'string' ? parseSort(sort) : (sort ?? []);
+    if (sorts.length === 0) return this;
+    for (const { key } of sorts)
+      if (!Object.hasOwn(columns, key))
+        throw new Error(`cannot sort by '${key}' (allowed: ${Object.keys(columns).join(', ')})`);
+    return this.with({
+      orderBy: [
+        (...refs) =>
+          sorts.map(({ key, descending }) => {
+            const e = columns[key]!(...(refs as unknown as Refs));
+            return descending ? e.desc() : e;
+          }),
+        ...this.state.orderBy,
+      ],
+    });
   }
 
   /** 整行之外再带上导航：一对多是数组，多对一是对象（可空导航为 null） */

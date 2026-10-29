@@ -85,8 +85,11 @@ export type {
   KeyInput,
   NullableKeys,
   Page,
+  FilterRule,
+  FilterRules,
   Query,
   SubqueryRef,
+  TableOptions,
 } from './query.ts';
 export {
   BatchUpdate,
@@ -137,5 +140,6 @@ export type {
   DayOptions,
   TableRequest,
   TableRequestInput,
+  FilterOp,
 } from './table.ts';
 export type { TreeNode } from './tree.ts';

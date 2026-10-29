@@ -130,7 +130,7 @@ export class Db<S extends AnySchema> {
    */
   queryable<E extends SchemaEntity<S>>(entity: E): Queryable<S, KeyOf<S, E>>;
   queryable<E extends Entity>(entity: E): Queryable<AdhocSchema<E>, E['name']>;
-  queryable(entity: Entity): Queryable<any, string> {
+  queryable(entity: Entity): Queryable<any, any, any, any> {
     const { ctx, key } = this.target(entity);
     return newQueryable(ctx, key);
   }

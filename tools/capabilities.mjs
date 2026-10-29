@@ -158,8 +158,8 @@ export const capabilities = {
   },
   'dto.object': {
     title: '按对象筛选排序（whereObject / orderByObject）',
-    status: 'different',
-    ts: 'table(parseTableRequest)；table.test.ts（filterBy 待做 16.3.4）',
+    status: 'done',
+    ts: 'filterBy(input, rules)（同名列直接写比较方式，{ op, column } 多列任一满足、经过导航，没填的跳过）、sortBy(sort, 白名单)、table(request, { filterable, sortable })；filter-by.test.ts、table.test.ts',
   },
   tree: {
     title: '树（toTreeList / asTreeCTE）',

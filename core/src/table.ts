@@ -66,16 +66,7 @@ export function parseTableRequest(input: TableRequestInput): TableRequest {
   const totalText = one('total');
   const total =
     totalText === undefined || totalText === '' ? undefined : nonNegativeInt(totalText, 'total');
-  const sorts = (one('sort') ?? '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => {
-      // 也认 `amount desc, name asc`
-      const [name = '', direction] = item.split(/\s+/);
-      if (name.startsWith('-')) return { key: name.slice(1), descending: true };
-      return { key: name, descending: direction?.toLowerCase() === 'desc' };
-    });
+  const sorts = parseSort(one('sort') ?? '');
 
   const filters: Record<string, string[]> = {};
   const searches: Record<string, string> = {};
@@ -179,6 +170,94 @@ export type ConditionTree =
   | { readonly all: readonly ConditionTree[] }
   | { readonly any: readonly ConditionTree[] }
   | { readonly not: ConditionTree };
+
+/** 条件树里用到的字段 */
+export function conditionFields(tree: ConditionTree): string[] {
+  if ('all' in tree) return tree.all.flatMap(conditionFields);
+  if ('any' in tree) return tree.any.flatMap(conditionFields);
+  if ('not' in tree) return conditionFields(tree.not);
+  return [tree.field];
+}
+
+/** 解析排序参数：'-amount,name' 或 'amount desc, name asc' */
+export function parseSort(text: string): { key: string; descending: boolean }[] {
+  return text
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [name = '', direction] = item.split(/\s+/);
+      if (name.startsWith('-')) return { key: name.slice(1), descending: true };
+      return { key: name, descending: direction?.toLowerCase() === 'desc' };
+    });
+}
+
+/** filterBy 的比较方式（对应 Java 版 @EasyWhereCondition 的 type） */
+export type FilterOp =
+  | 'eq'
+  | 'ne'
+  | 'gt'
+  | 'ge'
+  | 'lt'
+  | 'le'
+  | 'like'
+  | 'notLike'
+  | 'startsWith'
+  | 'endsWith'
+  | 'in'
+  | 'notIn'
+  | 'between';
+
+/** 一个值算不算"没填"：undefined、null、空串、全空白、空数组（allowEmpty 时空串照样算填了） */
+export function blankValue(value: unknown, allowEmpty = false): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'string') return !allowEmpty && value.trim() === '';
+  if (Array.isArray(value))
+    return value.length === 0 || value.every((v) => blankValue(v, allowEmpty));
+  return false;
+}
+
+/** 按 op 把一列与值比成条件（filterBy 用） */
+export function compareColumn(
+  column: Expr<unknown>,
+  op: FilterOp,
+  value: unknown,
+  key: string,
+): Cond {
+  const any = column as Expr<any>;
+  switch (op) {
+    case 'eq':
+      return any.eq(value);
+    case 'ne':
+      return any.ne(value);
+    case 'gt':
+      return any.gt(value);
+    case 'ge':
+      return any.ge(value);
+    case 'lt':
+      return any.lt(value);
+    case 'le':
+      return any.le(value);
+    case 'like':
+      return any.like(textOf(value, key));
+    case 'notLike':
+      return any.notLike(textOf(value, key));
+    case 'startsWith':
+      return any.startsWith(textOf(value, key));
+    case 'endsWith':
+      return any.endsWith(textOf(value, key));
+    case 'in':
+      return any.in(asArray(value, key) as never);
+    case 'notIn':
+      return any.notIn(asArray(value, key) as never);
+    case 'between': {
+      const [start, end] = asArray(value, key);
+      return rangeOf(column, key, start, end);
+    }
+    default:
+      throw new Error(`unknown filter op '${String(op)}' on '${key}'`);
+  }
+}
 
 /** 日期时间列上的整天：按哪个时区算一天的开始（默认 UTC） */
 export interface DayOptions {
