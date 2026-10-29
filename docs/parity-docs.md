@@ -5,21 +5,21 @@
 
 ## 入门与概念
 
-| 页面                                                          | TS 对应                                                                                            | 状态     |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------- |
-| quick-start、startup/step1–5、demo/*                          | 文档站 ORM 分区的快速开始；案例在 16.8.1 按官方的帖子、评论、类目模型重写一遍                      | ✗ 16.8.1 |
-| what-is-easy-query、feature、feature-map、catalog、v2-v3      | 概述性页面，对应文档站 ORM 首页                                                                    | ✗ 16.8.1 |
-| best-practices（实体设计）                                    | 实体、视图、关系的写法建议                                                                         | ✗ 16.8.1 |
-| context-mode（实体无接口模式、DbSet）                         | TS 本来就不要接口：`db.queryable(User)`                                                            | ≈        |
-| framework/concept、terminology、key-word（关键字加引号）      | 方言的 `quote`，所有标识符都加引号                                                                 | ✓        |
-| framework/annotation、annotation/readme                       | `entity()` 与列修饰器代替注解                                                                      | ≈        |
-| framework/mapping-db、mapping-rule                            | 属性名转下划线、`named()`；结果形状由 select 推出                                                  | ≈        |
-| framework/config-option、behavior、replace-configure          | `createDb` 的选项、拦截器、方言子类；逐项见 decisions/0003                                         | ≈        |
-| framework/logging、adv/jdbc-listener                          | `log`、`onExecute`                                                                                 | ✓        |
-| framework/graalvm、guide/*（Spring、Solon、Kotlin、多数据源） | JVM 与 Java 框架的接入，不适用；多数据源即多个 `createDb`                                          | —        |
-| framework/easy-trans                                          | Java 的字典翻译扩展；TS 用 `fillOne` / 视图                                                        | ≈        |
-| plugin/*                                                      | IDEA 插件；DTO、代理类生成不需要（类型由形状推出）；由表生成实体见 16.5.3；SQL 预览格式化见 16.8.1 | ✗ 16.5.3 |
-| practice/*（APT、对象设计、自定义异常）                       | APT 不需要；`NotFoundError` 等错误类型                                                             | ≈        |
+| 页面                                                          | TS 对应                                                                                                                     | 状态     |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------- |
+| quick-start、startup/step1–5、demo/*                          | 文档站 ORM 分区的快速开始；案例在 16.8.1 按官方的帖子、评论、类目模型重写一遍                                               | ✗ 16.8.1 |
+| what-is-easy-query、feature、feature-map、catalog、v2-v3      | 概述性页面，对应文档站 ORM 首页                                                                                             | ✗ 16.8.1 |
+| best-practices（实体设计）                                    | 实体、视图、关系的写法建议                                                                                                  | ✗ 16.8.1 |
+| context-mode（实体无接口模式、DbSet）                         | TS 本来就不要接口：`db.queryable(User)`                                                                                     | ≈        |
+| framework/concept、terminology、key-word（关键字加引号）      | 方言的 `quote`，所有标识符都加引号                                                                                          | ✓        |
+| framework/annotation、annotation/readme                       | `entity()` 与列修饰器代替注解                                                                                               | ≈        |
+| framework/mapping-db、mapping-rule                            | 属性名转下划线、`named()`；结果形状由 select 推出                                                                           | ≈        |
+| framework/config-option、behavior、replace-configure          | `createDb` 的选项、拦截器、方言子类；逐项见 decisions/0003                                                                  | ≈        |
+| framework/logging、adv/jdbc-listener                          | `log`、`onExecute`                                                                                                          | ✓        |
+| framework/graalvm、guide/*（Spring、Solon、Kotlin、多数据源） | JVM 与 Java 框架的接入，不适用；多数据源即多个 `createDb`                                                                   | —        |
+| framework/easy-trans                                          | Java 的字典翻译扩展；TS 用 `fillOne` / 视图                                                                                 | ≈        |
+| plugin/*                                                      | IDEA 插件；DTO、代理类生成不需要（类型由形状推出）；由表生成实体：`eqts pull`（easy-query-ts-cli）；SQL 预览格式化见 16.8.1 | ✓ 16.5.3 |
+| practice/*（APT、对象设计、自定义异常）                       | APT 不需要；`NotFoundError` 等错误类型                                                                                      | ≈        |
 
 ## 查询（ability、sub-query、native-sql、other）
 
@@ -106,11 +106,11 @@
 
 ## 建表、缓存、分库分表（code-first、cache、super）
 
-| 页面                                                                   | TS 对应                                      | 状态             |
-| ---------------------------------------------------------------------- | -------------------------------------------- | ---------------- |
-| code-first/quick-start、api                                            | `createTables`；同步表结构、注释、索引       | ✗ 16.5.1、16.5.2 |
-| code-first/custom、dynamic-table                                       | 自定义类型映射（`dbType`）、按换过的表名同步 | ✗ 16.5.1         |
-| cache/*                                                                | 二级缓存                                     | ✗ 16.6.1         |
-| super/sharding-table、time、mod、multi、sequence、dna、default-route-* | 分表与路由                                   | ✗ 16.6.2         |
-| super/sharding-datasource、sharding-all、sharding-all-time             | 分库                                         | ✗ 16.6.3         |
-| super/README（读写分离）                                               | 从库                                         | ✗ 16.6.4         |
+| 页面                                                                   | TS 对应                                                                   | 状态             |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------- |
+| code-first/quick-start、api                                            | `createTables`、`planSync` / `syncTables`、注释、索引、外键、`introspect` | ✓ 16.5.1、16.5.2 |
+| code-first/custom、dynamic-table                                       | 自定义类型映射（`dbType`）；换表用 `mapTables` 后同步                     | ✓ 16.5.1         |
+| cache/*                                                                | 二级缓存                                                                  | ✗ 16.6.1         |
+| super/sharding-table、time、mod、multi、sequence、dna、default-route-* | 分表与路由                                                                | ✗ 16.6.2         |
+| super/sharding-datasource、sharding-all、sharding-all-time             | 分库                                                                      | ✗ 16.6.3         |
+| super/README（读写分离）                                               | 从库                                                                      | ✗ 16.6.4         |

@@ -87,8 +87,16 @@ await db.syncTables(); // 算计划并执行（PG、SQLite 在一个事务里）
 
 \* HANA 一栏的**文本**有单测，没有实库验证（随 CI）；HANA 建列存表（`CREATE COLUMN TABLE`），也没有 `IF NOT EXISTS`，表已存在会报错。SQLite 没有严格类型，未知的种类默认 TEXT；其它库遇到没有数据库类型的种类（自定义 kind）要求给 `dbType`。
 
-## 与 T4 `pull` 的关系
+## 由表生成实体：`eqts pull`（对应官方 plugin/table2entity）
 
-方向相反、互补：`createTables` 是 schema → 库；T4（还没做）是现有库 → schema 文件。
+方向与 `createTables` / `syncTables` 相反：已有的库（例如从 Java 迁过来的表）不用手写实体。
+
+```bash
+eqts pull --adapter ./db-adapter.ts --out src/schema.ts --strip-prefix t_
+```
+
+`--adapter` 模块默认导出一个 Adapter（`export default mysql(createPool(url))`）。生成每张表一个 `entity(…)`（类型、可空、主键、自增、`.defaulted()`、列名不合规则时 `.named()`、注释、索引），
+外键变成两边的导航（`r.one` 带 `foreignKey`，被引用的一边 `r.many`）；认不得的类型用 `.dbType('…')` 原样保留并加注释，JSON 列要补上类型。
+程序里用 `entitySource(await db.introspect(), options)`（`@zerodep-dev/easy-query-ts-cli`）。生成的 schema 与库再 `planSync` 是空计划（实库测试验证）。
 
 SQLite、MySQL 8.4、PG 17 实测（建表 → 插入 → 读回每种列类型 → 唯一约束拒绝重复；注释、索引、外键、改名、加列、再比为空计划）；HANA 只有语句文本的单测。

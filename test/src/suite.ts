@@ -2,6 +2,8 @@
  * 各方言在实库上跑的同一套用例。open 每次给一个已建表的空库；方言包的测试调用 liveSuite 即可。
  */
 import assert from 'node:assert/strict';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { entitySource } from '@zerodep-dev/easy-query-ts-cli';
 import { describe, it } from 'vitest';
 import {
   and,
@@ -1723,6 +1725,24 @@ export function liveSuite(
         const again = await db.planSync();
         assert.deepEqual([again.statements, again.differences], [[], []]);
         assert.equal(await db.tableExists(SyncA), true);
+        // 反过来由表生成实体（eqts pull）：生成的 schema 与库再比也是空计划
+        const source = entitySource(await db.introspect(), { tables: ['t_sync_a', 't_sync_b'] });
+        assert.ok(source.includes("export const SyncB = entity('t_sync_b'"), source);
+        assert.ok(source.includes("a: r.one('SyncA', { from: 'aId', to: 'id' }"), source);
+        assert.ok(source.includes("syncBs: r.many('SyncB'"), source);
+        const dir = new URL('../.generated/', import.meta.url);
+        const file = new URL(`${name.replace(/\W+/g, '_')}.ts`, dir);
+        await mkdir(dir, { recursive: true });
+        await writeFile(file, source);
+        try {
+          const pulled = (await import(file.href)) as {
+            schema: typeof syncSchema;
+          };
+          const pulledDb = createDb({ schema: pulled.schema, adapter: env.adapter });
+          assert.deepEqual(await pulledDb.planSync(), { statements: [], differences: [] });
+        } finally {
+          await rm(file, { force: true });
+        }
       } finally {
         await db.dropTables(SyncB, SyncA);
       }
