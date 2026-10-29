@@ -89,6 +89,7 @@ export type {
   InterceptorNames,
   InterceptorToggle,
   StatementKind,
+  WriteDetail,
   WriteEvent,
 } from './interceptor.ts';
 export type { DbOptions, KeyOf, ManyKeys, SaveInput, TreeWalk, WithCte } from './db.ts';

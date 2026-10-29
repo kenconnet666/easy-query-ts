@@ -9,6 +9,7 @@ import { REF, refColumn, Scope, type Ref } from './ref.ts';
 import type { AnySchema, EntityKey } from './relations.ts';
 import {
   flattenRow,
+  nestRow,
   setPath,
   type AnyColumn,
   type Embedded,
@@ -23,7 +24,7 @@ import {
   Interceptors,
   type InterceptorName,
   type InterceptorToggle,
-  type WriteEvent,
+  type WriteDetail,
 } from './interceptor.ts';
 import { execute, query, type Context } from './session.ts';
 
@@ -75,20 +76,20 @@ export class Returning<R> {
   private readonly entity: Entity;
   private readonly statements: readonly Statement[];
   private readonly props: readonly string[];
-  private readonly kind: WriteEvent['kind'];
+  private readonly detail: WriteDetail;
 
   constructor(
     ctx: Context,
     entity: Entity,
     statements: readonly Statement[],
     props: readonly string[],
-    kind: WriteEvent['kind'],
+    detail: WriteDetail,
   ) {
     this.ctx = ctx;
     this.entity = entity;
     this.statements = statements;
     this.props = props;
-    this.kind = kind;
+    this.detail = detail;
   }
 
   toSQL(): Statement[] {
@@ -115,9 +116,10 @@ export class Returning<R> {
       }
     }
     await this.ctx.interceptors.afterWrite({
-      kind: this.kind,
+      ...this.detail,
       entity: this.entity,
       affected: out.length,
+      statements: this.statements,
     });
     return out;
   }
@@ -150,13 +152,6 @@ function columnValue(column: AnyColumn, value: unknown): Node {
   return write ? write(new Expr(node, column.codec)).node : node;
 }
 
-/**
- * INSERT … SELECT：把一条查询的结果直接插进表里，数据不经过应用。查询的 select 键就是目标列名，
- * 列的值类型必须和目标列一致，目标列里必填的都要有。**不经过插入拦截器**（租户、默认值、版本等要在 select 里自己给）。
- * ```ts
- * await db.insert(PostArchive).fromQuery(db.queryable(Post).where(p => p.createdAt.lt(cutoff)).select(p => ({ id: p.id, userId: p.userId, title: p.title, amount: p.amount }))).execute()
- * ```
- */
 /** 一批按主键更新的语句，见 Updatable.entities */
 export class BatchUpdate {
   private readonly updates: readonly { execute(): Promise<number>; toSQL(): Statement }[];
@@ -176,6 +171,13 @@ export class BatchUpdate {
   }
 }
 
+/**
+ * INSERT … SELECT：把一条查询的结果直接插进表里，数据不经过应用。查询的 select 键就是目标列名，
+ * 列的值类型必须和目标列一致，目标列里必填的都要有。**不经过插入拦截器**（租户、默认值、版本等要在 select 里自己给）。
+ * ```ts
+ * await db.insert(PostArchive).fromQuery(db.queryable(Post).where(p => p.createdAt.lt(cutoff)).select(p => ({ id: p.id, userId: p.userId, title: p.title, amount: p.amount }))).execute()
+ * ```
+ */
 export class InsertSelect {
   private readonly ctx: Context;
   private readonly entity: Entity;
@@ -222,8 +224,15 @@ export class InsertSelect {
 
   /** 返回插入的行数 */
   async execute(): Promise<number> {
-    const affected = (await execute(this.ctx, this.toSQL())).affected;
-    await this.ctx.interceptors.afterWrite({ kind: 'insert', entity: this.entity, affected });
+    const statement = this.toSQL();
+    const affected = (await execute(this.ctx, statement)).affected;
+    await this.ctx.interceptors.afterWrite({
+      kind: 'insert',
+      rows: [],
+      entity: this.entity,
+      affected,
+      statements: [statement],
+    });
     return affected;
   }
 }
@@ -314,15 +323,21 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
       this.entity,
       this.toSQL(),
       returningProps(this.entity, columns),
-      'insert',
+      this.detail(),
     );
   }
 
   /** 返回影响的行数 */
   async execute(): Promise<number> {
     let affected = 0;
-    for (const statement of this.toSQL()) affected += (await execute(this.ctx, statement)).affected;
-    await this.ctx.interceptors.afterWrite({ kind: 'insert', entity: this.entity, affected });
+    const statements = this.toSQL();
+    for (const statement of statements) affected += (await execute(this.ctx, statement)).affected;
+    await this.ctx.interceptors.afterWrite({
+      ...this.detail(),
+      entity: this.entity,
+      affected,
+      statements,
+    });
     return affected;
   }
 
@@ -340,7 +355,12 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
         throw new Error(`the ${this.ctx.dialect.name} driver did not report a generated key`);
       id = result.insertId;
     }
-    await this.ctx.interceptors.afterWrite({ kind: 'insert', entity: this.entity, affected: 1 });
+    await this.ctx.interceptors.afterWrite({
+      ...this.detail(),
+      entity: this.entity,
+      affected: 1,
+      statements,
+    });
     return id;
   }
 
@@ -390,6 +410,11 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     // int8 以文字返回：安全范围内给 number，超出给 bigint
     const n = Number(value);
     return Number.isSafeInteger(n) ? n : BigInt(value as string);
+  }
+
+  /** 写了什么：补好值的各行，值对象放回嵌套对象 */
+  private detail(): WriteDetail {
+    return { kind: 'insert', rows: this.filled().map(nestRow) };
   }
 
   private filled(): Record<string, unknown>[] {
@@ -491,18 +516,26 @@ abstract class Filtered {
   protected abstract readonly verb: string;
 
   async execute(): Promise<number> {
-    const affected = (await execute(this.ctx, this.toSQL())).affected;
+    // 只构建一次：$onUpdate、逻辑删除的时间这类值每次求值都不同，语句与事件要是同一份
+    const { statement, detail } = this.build();
+    const affected = (await execute(this.ctx, statement)).affected;
     const expect = this.state.expect;
     if (expect && affected !== expect.count) throw expect.error(affected);
     await this.ctx.interceptors.afterWrite({
-      kind: this.verb as WriteEvent['kind'],
+      ...detail,
       entity: this.ctx.schema.entities[this.key]!,
       affected,
+      statements: [statement],
     });
     return affected;
   }
 
-  abstract toSQL(): Statement;
+  toSQL(): Statement {
+    return this.build().statement;
+  }
+
+  /** 语句与写了什么 */
+  protected abstract build(): { statement: Statement; detail: WriteDetail };
 }
 
 export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filtered {
@@ -620,13 +653,8 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   ): Returning<Pick<Row<EntityOf<S, K>>, C>>;
   returning(...columns: string[]): Returning<unknown> {
     const entity = this.ctx.schema.entities[this.key]!;
-    return new Returning(
-      this.ctx,
-      entity,
-      [this.toSQL()],
-      returningProps(entity, columns),
-      'update',
-    );
+    const { statement, detail } = this.build();
+    return new Returning(this.ctx, entity, [statement], returningProps(entity, columns), detail);
   }
 
   /**
@@ -659,7 +687,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     return new Updatable(this.ctx, this.key as K, { ...this.state, all: true }, this.values);
   }
 
-  toSQL(): Statement {
+  protected build(): { statement: Statement; detail: WriteDetail } {
     if (!this.values) throw new Error('update needs set(...)');
     const { root, where } = this.scope();
     const entity = this.ctx.schema.entities[this.key]!;
@@ -694,7 +722,11 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     const node = { from: { table: entity.table, alias: root[REF].alias }, set, where };
     checkAliases(node);
     const w = new SqlWriter();
-    return { sql: this.ctx.dialect.update(node, w), params: w.params };
+    const written = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
+    return {
+      statement: { sql: this.ctx.dialect.update(node, w), params: w.params },
+      detail: { kind: 'update', set: nestRow(written) },
+    };
   }
 }
 
@@ -728,13 +760,8 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   ): Returning<Pick<Row<EntityOf<S, K>>, C>>;
   returning(...columns: string[]): Returning<unknown> {
     const entity = this.ctx.schema.entities[this.key]!;
-    return new Returning(
-      this.ctx,
-      entity,
-      [this.toSQL()],
-      returningProps(entity, columns),
-      'delete',
-    );
+    const { statement, detail } = this.build();
+    return new Returning(this.ctx, entity, [statement], returningProps(entity, columns), detail);
   }
 
   /** 物理删除：绕过逻辑删除（读过滤与改写成 update 都不再生效），已被逻辑删除的行也会被删掉 */
@@ -757,7 +784,7 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     return new Deletable(withToggle(this.ctx, toggle), this.key as K, this.state);
   }
 
-  toSQL(): Statement {
+  protected build(): { statement: Statement; detail: WriteDetail } {
     const { root, where } = this.scope();
     const entity = this.ctx.schema.entities[this.key]!;
     const from = { table: entity.table, alias: root[REF].alias };
@@ -771,12 +798,18 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       const update = { from, set, where };
       checkAliases(update);
       const w = new SqlWriter();
-      return { sql: this.ctx.dialect.update(update, w), params: w.params };
+      return {
+        statement: { sql: this.ctx.dialect.update(update, w), params: w.params },
+        detail: { kind: 'delete', soft: true },
+      };
     }
     const node = { from, where };
     checkAliases(node);
     const w = new SqlWriter();
-    return { sql: this.ctx.dialect.delete(node, w), params: w.params };
+    return {
+      statement: { sql: this.ctx.dialect.delete(node, w), params: w.params },
+      detail: { kind: 'delete', soft: false },
+    };
   }
 }
 
@@ -795,7 +828,7 @@ export class LockRow extends Filtered {
     return (await execute(this.ctx, this.toSQL())).affected;
   }
 
-  toSQL(): Statement {
+  protected build(): { statement: Statement; detail: WriteDetail } {
     const { root, where } = this.scope();
     const entity = this.ctx.schema.entities[this.key]!;
     const column = entity.columnNames[entity.primaryKey[0]!]!;
@@ -807,6 +840,9 @@ export class LockRow extends Filtered {
     };
     checkAliases(node);
     const w = new SqlWriter();
-    return { sql: this.ctx.dialect.update(node, w), params: w.params };
+    return {
+      statement: { sql: this.ctx.dialect.update(node, w), params: w.params },
+      detail: { kind: 'update', set: {} },
+    };
   }
 }

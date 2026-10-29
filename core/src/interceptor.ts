@@ -9,6 +9,7 @@
  * 条件会加到主表、多对一导航的 JOIN（ON 里）、一对多导航的子查询与 toList 的第二条查询上。
  */
 import type { Node } from './ast.ts';
+import type { Statement } from './dialect.ts';
 import { condNode, type Cond } from './expr.ts';
 import { refColumn, REF, type AnyRef } from './ref.ts';
 import type { ColumnOptions, Entity } from './schema.ts';
@@ -32,12 +33,26 @@ export type InterceptorName = keyof InterceptorNames | `touch:${string}`;
 /** 条件加在哪种语句上 */
 export type StatementKind = 'select' | 'update' | 'delete';
 
-/** afterWrite 收到的事件：哪个实体、什么操作、影响了多少行（逻辑删除的 delete 仍然是 'delete'） */
-export interface WriteEvent {
-  readonly kind: 'insert' | 'update' | 'delete';
+/**
+ * 一次写入写了什么，按 kind 区分（判别联合，`switch (event.kind)` 之后各自的字段有类型）：
+ * - insert：rows 是插入的各行（已补上默认值、租户、版本，值对象是嵌套的）；INSERT … SELECT 时为空，数据不经过应用
+ * - update：set 是写进去的值（已补上 $onUpdate、touch；表达式更新的值是 Expr）
+ * - delete：soft 为 true 时是逻辑删除（实际执行的是 update）
+ */
+export type WriteDetail =
+  | { readonly kind: 'insert'; readonly rows: readonly Readonly<Record<string, unknown>>[] }
+  | { readonly kind: 'update'; readonly set: Readonly<Record<string, unknown>> }
+  | { readonly kind: 'delete'; readonly soft: boolean };
+
+/**
+ * afterWrite 收到的事件：写了什么（WriteDetail）、哪个实体、影响了多少行、执行的语句（含参数，条件在里面）。
+ * 审计日志据此记录；要"改之前的值"时在 beforeUpdate 里自己按同样的条件查一次
+ */
+export type WriteEvent = WriteDetail & {
   readonly entity: Entity;
   readonly affected: number;
-}
+  readonly statements: readonly Statement[];
+};
 
 export interface Interceptor {
   /** 用于 noInterceptor(name) / useInterceptor(name) */

@@ -626,6 +626,13 @@ export function flattenRow(
   return out;
 }
 
+/** 按路径展开的一行（'address.city'）放回嵌套对象 */
+export function nestRow(row: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [path, value] of Object.entries(row)) setPath(out, path, value);
+  return out;
+}
+
 /** 读出用：把按路径展开的键（'address.city'）放回嵌套对象里 */
 export function setPath(target: Record<string, unknown>, path: string, value: unknown): void {
   const parts = path.split('.');
