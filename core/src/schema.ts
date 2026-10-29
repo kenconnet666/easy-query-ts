@@ -432,6 +432,35 @@ export type AnyColumn = Column<any, boolean, boolean>;
 export type Columns = Record<string, AnyColumn>;
 
 /**
+ * 值对象（对应 Java 版的 @ValueObject）：几列合成实体上的一个嵌套对象（地址、金额与币种）。
+ * 库里仍是普通的列，列名默认是"属性名_子属性名"（prefix 换掉"属性名_"；子列 named() 时用它给的全名）；
+ * 读出来是嵌套对象，查询里 `c.address.city` 是一列，写入时给嵌套对象，更新时可以只给其中几项。值对象里可以再嵌值对象
+ * ```ts
+ * const Company = entity('t_company', {
+ *   id: col.int().primaryKey(),
+ *   address: embed({ province: col.string(), city: col.string(), street: col.string().nullable() }),
+ * })
+ * ```
+ */
+export class Embedded<F extends Fields = Fields> {
+  readonly fields: F;
+  readonly prefix: string | undefined;
+
+  constructor(fields: F, prefix: string | undefined) {
+    this.fields = fields;
+    this.prefix = prefix;
+  }
+}
+
+/** 值对象，见 Embedded */
+export function embed<F extends Fields>(fields: F, options: { prefix?: string } = {}): Embedded<F> {
+  return new Embedded(fields, options.prefix);
+}
+
+/** 实体声明的列：普通的列，或值对象 */
+export type Fields = { readonly [key: string]: AnyColumn | Embedded<any> };
+
+/**
  * 派生实体的来源：不是真实的表，而是一条查询的结果。
  * subquery 渲染为 `FROM (子查询) 别名`；cte 渲染为最外层的 `WITH 名字 (列) AS (子查询)`，再 `FROM 名字`。
  */
@@ -445,14 +474,17 @@ export interface DerivedSource {
 }
 
 /** 一个实体：名字、表名、列 */
-export interface Entity<Name extends string = string, C extends Columns = Columns> {
+export interface Entity<Name extends string = string, F extends Fields = Fields> {
   readonly kind: 'entity';
   readonly name: Name;
   readonly table: string;
-  readonly columns: C;
-  /** 属性名 → 库里的列名 */
-  readonly columnNames: { readonly [K in keyof C]: string };
-  readonly primaryKey: readonly (keyof C & string)[];
+  /** 声明的列（值对象是嵌套的 embed）：行、插入、表引用的类型都由它推导 */
+  readonly fields: F;
+  /** 展开后的列：值对象的列按路径展开（'address.city'），读写、建表都看它；没有值对象时与 fields 相同 */
+  readonly columns: Columns;
+  /** 列的路径 → 库里的列名 */
+  readonly columnNames: Readonly<Record<string, string>>;
+  readonly primaryKey: readonly string[];
   /** 派生实体（子查询 / CTE）才有；普通的表没有 */
   readonly derived?: DerivedSource;
 }
@@ -468,42 +500,137 @@ function snake(name: string): string {
 }
 
 /** 定义实体；name 默认用表名 */
-export function entity<const Table extends string, C extends Columns>(
+export function entity<const Table extends string, F extends Fields>(
   table: Table,
-  columns: C,
-): Entity<Table, C>;
-export function entity<const Name extends string, C extends Columns>(
+  fields: F,
+): Entity<Table, F>;
+export function entity<const Name extends string, F extends Fields>(
   table: string,
-  columns: C,
+  fields: F,
   options: { name: Name },
-): Entity<Name, C>;
-export function entity(table: string, columns: Columns, options?: { name: string }): Entity {
+): Entity<Name, F>;
+export function entity(table: string, fields: Fields, options?: { name: string }): Entity {
+  const columns: Record<string, AnyColumn> = {};
   const columnNames: Record<string, string> = {};
   const primaryKey: string[] = [];
-  for (const [key, c] of Object.entries(columns)) {
-    columnNames[key] = c.options.name ?? snake(key);
-    if (c.options.primaryKey) primaryKey.push(key);
-  }
-  return { kind: 'entity', name: options?.name ?? table, table, columns, columnNames, primaryKey };
+  const walk = (group: Fields, path: string, namePrefix: string) => {
+    for (const [key, field] of Object.entries(group)) {
+      if (field instanceof Embedded) {
+        walk(field.fields, `${path}${key}.`, field.prefix ?? `${namePrefix}${snake(key)}_`);
+        continue;
+      }
+      columns[path + key] = field;
+      columnNames[path + key] = field.options.name ?? namePrefix + snake(key);
+      if (!field.options.primaryKey) continue;
+      if (path)
+        throw new Error(`${table}: a primary key column cannot be inside embed() (${path}${key})`);
+      primaryKey.push(key);
+    }
+  };
+  walk(fields, '', '');
+  return {
+    kind: 'entity',
+    name: options?.name ?? table,
+    table,
+    fields,
+    columns,
+    columnNames,
+    primaryKey,
+  };
 }
 
+/** 一列（或值对象）读出来的类型 */
 export type ValueOf<C> =
-  C extends Column<infer T, infer N, any> ? (N extends true ? T | null : T) : never;
+  C extends Embedded<infer F>
+    ? RowOf<F>
+    : C extends Column<infer T, infer N, any>
+      ? N extends true
+        ? T | null
+        : T
+      : never;
+
+/** 一组声明的列读出来的形状 */
+export type RowOf<F extends Fields> = { -readonly [K in keyof F]: ValueOf<F[K]> };
 
 /** 读出的整行 */
-export type Row<E extends Entity> = { [K in keyof E['columns']]: ValueOf<E['columns'][K]> };
+export type Row<E extends Entity> = RowOf<E['fields']>;
 
-type OptionalKeys<C extends Columns> = {
-  [K in keyof C]: C[K] extends Column<any, any, true> ? K : never;
-}[keyof C];
-type RequiredKeys<C extends Columns> = Exclude<keyof C, OptionalKeys<C>>;
+/** 插入时可省的键：自增、有默认值、可空的列，以及里面全都可省的值对象 */
+type OptionalKeys<F extends Fields> = {
+  [K in keyof F]: F[K] extends Column<any, any, true>
+    ? K
+    : F[K] extends Embedded<infer G>
+      ? [RequiredKeys<G>] extends [never]
+        ? K
+        : never
+      : never;
+}[keyof F];
+type RequiredKeys<F extends Fields> = Exclude<keyof F, OptionalKeys<F>>;
+type InsertValue<C> = C extends Embedded<infer G> ? InsertOf<G> : ValueOf<C>;
+
+/** 一组声明的列插入时的形状 */
+export type InsertOf<F extends Fields> = {
+  [K in RequiredKeys<F>]: InsertValue<F[K]>;
+} & {
+  [K in OptionalKeys<F>]?: InsertValue<F[K]>;
+};
 
 /** 插入时的形状：自增、有默认值、可空的列可省 */
-export type Insert<E extends Entity> = {
-  [K in RequiredKeys<E['columns']>]: ValueOf<E['columns'][K]>;
-} & {
-  [K in OptionalKeys<E['columns']>]?: ValueOf<E['columns'][K]>;
+export type Insert<E extends Entity> = InsertOf<E['fields']>;
+
+/** 一组声明的列是不是都可空（值对象整个给 null 时要求这样） */
+export type AllNullable<F extends Fields> = {
+  [K in keyof F]: F[K] extends Embedded<infer G>
+    ? AllNullable<G>
+    : F[K] extends Column<any, true, any>
+      ? true
+      : false;
+}[keyof F] extends true
+  ? true
+  : false;
+
+/** 一组声明的列更新时的形状：都可选，值对象也可以只给其中几项 */
+export type UpdateOf<F extends Fields> = {
+  [K in keyof F]?: F[K] extends Embedded<infer G> ? UpdateOf<G> : ValueOf<F[K]>;
 };
 
 /** 更新时的形状：都可选 */
-export type Update<E extends Entity> = { [K in keyof E['columns']]?: ValueOf<E['columns'][K]> };
+export type Update<E extends Entity> = UpdateOf<E['fields']>;
+
+/**
+ * 写入用：值对象的嵌套对象按路径展开成 'address.city' 这样的键，与 entity.columns 对上。
+ * 值对象给 null 时它的每一列都写 NULL；没给（undefined）的照旧跳过；其余键原样保留（由调用方报"没有这一列"）
+ */
+export function flattenRow(
+  entity: Entity,
+  row: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const walk = (fields: Fields, value: Readonly<Record<string, unknown>>, path: string) => {
+    for (const [key, item] of Object.entries(value)) {
+      const field = fields[key];
+      if (!(field instanceof Embedded)) {
+        out[path + key] = item;
+        continue;
+      }
+      if (item === undefined) continue;
+      if (item === null) {
+        for (const column of Object.keys(entity.columns))
+          if (column.startsWith(`${path}${key}.`)) out[column] = null;
+        continue;
+      }
+      walk(field.fields, item as Record<string, unknown>, `${path}${key}.`);
+    }
+  };
+  walk(entity.fields, row, '');
+  return out;
+}
+
+/** 读出用：把按路径展开的键（'address.city'）放回嵌套对象里 */
+export function setPath(target: Record<string, unknown>, path: string, value: unknown): void {
+  const parts = path.split('.');
+  let current = target;
+  for (const part of parts.slice(0, -1))
+    current = (current[part] ??= {}) as Record<string, unknown>;
+  current[parts.at(-1)!] = value;
+}

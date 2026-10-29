@@ -1,4 +1,4 @@
-export { col, entity, toDate, toDateText, utcText, Column } from './schema.ts';
+export { col, embed, Embedded, entity, toDate, toDateText, utcText, Column } from './schema.ts';
 export type {
   Codec,
   ColumnKind,
@@ -6,10 +6,14 @@ export type {
   DateText,
   DecimalText,
   Entity,
+  Fields,
   Insert,
+  InsertOf,
   Row,
+  RowOf,
   StandardSchema,
   Update,
+  UpdateOf,
   ValueOf,
 } from './schema.ts';
 export { defineSchema } from './relations.ts';
@@ -51,7 +55,7 @@ export type {
   TemporalExtensions,
 } from './expr.ts';
 export { Fill, GroupJoin, ListOf, ManyRef } from './ref.ts';
-export type { Ref, Selected } from './ref.ts';
+export type { ColumnRefs, Ref, Selected } from './ref.ts';
 export { GroupedQueryable, NotFoundError, Queryable } from './query.ts';
 export type {
   DerivedSchema,
@@ -72,7 +76,7 @@ export {
   Returning,
   Updatable,
 } from './mutation.ts';
-export type { SetValues } from './mutation.ts';
+export type { SetOf, SetValues } from './mutation.ts';
 export { createDb, Db, Transaction } from './db.ts';
 export { win, WindowSpec } from './window.ts';
 export type { Bound } from './window.ts';

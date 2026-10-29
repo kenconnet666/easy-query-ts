@@ -32,6 +32,7 @@ import {
   ListOf,
   makeRef,
   REF,
+  refColumn,
   Scope,
   type AnyRef,
   type Ref,
@@ -40,7 +41,14 @@ import {
 } from './ref.ts';
 import type { AnySchema, EntityKey, Schema } from './relations.ts';
 import type { KeyOf } from './db.ts';
-import { Column, type Codec, type DerivedEntity, type Entity, type Row } from './schema.ts';
+import {
+  Column,
+  setPath,
+  type Codec,
+  type DerivedEntity,
+  type Entity,
+  type Row,
+} from './schema.ts';
 import { refEntity } from './interceptor.ts';
 import {
   conditionOf,
@@ -811,6 +819,7 @@ function makeDerived(
     kind: 'entity',
     name,
     table: kind === 'cte' ? name : '',
+    fields: columns,
     columns,
     columnNames,
     primaryKey: [],
@@ -1193,15 +1202,19 @@ class ShapeCompiler {
     const props = Object.keys(entity.columns);
     const isRoot = ref === this.root;
     const readers = props.map((p) => {
-      const e = (ref as unknown as Record<string, Expr<unknown>>)[p]!;
+      const e = refColumn(ref, p);
       const read = this.expr(e);
-      if (isRoot) this.named.set(p, { alias: this.columns.at(-1)!.as, codec: e.codec });
+      // 值对象的列（'address.city'）没法当成派生表的一列
+      if (isRoot && p.includes('.')) this.flat = false;
+      else if (isRoot) this.named.set(p, { alias: this.columns.at(-1)!.as, codec: e.codec });
       return [p, read] as const;
     });
     const probe = entity.primaryKey.length > 0 ? entity.primaryKey : props;
     return (row) => {
-      const obj = Object.fromEntries(readers.map(([p, read]) => [p, read(row)]));
-      if (info.nullable && probe.every((p) => obj[p] === null)) return null;
+      const values = new Map(readers.map(([p, read]) => [p, read(row)]));
+      if (info.nullable && probe.every((p) => values.get(p) === null)) return null;
+      const obj: Record<string, unknown> = {};
+      for (const [p, value] of values) setPath(obj, p, value);
       return obj;
     };
   }

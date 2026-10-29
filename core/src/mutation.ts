@@ -7,7 +7,18 @@ import { condNode, Expr, toNode, type Cond } from './expr.ts';
 import { newQueryable, type Built, type Query } from './query.ts';
 import { REF, refColumn, Scope, type Ref } from './ref.ts';
 import type { AnySchema, EntityKey } from './relations.ts';
-import type { AnyColumn, Entity, Insert, Row, ValueOf } from './schema.ts';
+import {
+  flattenRow,
+  setPath,
+  type AnyColumn,
+  type Embedded,
+  type Entity,
+  type AllNullable,
+  type Fields,
+  type Insert,
+  type Row,
+  type ValueOf,
+} from './schema.ts';
 import { Interceptors, refEntity, type WriteEvent } from './interceptor.ts';
 import { execute, query, type Context } from './session.ts';
 
@@ -70,19 +81,17 @@ export class Returning<R> {
     const out: R[] = [];
     for (const statement of this.toSQL()) {
       for (const row of await query(this.ctx, statement)) {
-        out.push(
-          Object.fromEntries(
-            this.props.map((p) => {
-              const raw = row[this.entity.columnNames[p]!];
-              return [
-                p,
-                raw === null || raw === undefined
-                  ? null
-                  : this.entity.columns[p]!.codec.decode(raw),
-              ];
-            }),
-          ) as R,
-        );
+        // 值对象的列放回嵌套对象
+        const item: Record<string, unknown> = {};
+        out.push(item as R);
+        for (const p of this.props) {
+          const raw = row[this.entity.columnNames[p]!];
+          setPath(
+            item,
+            p,
+            raw === null || raw === undefined ? null : this.entity.columns[p]!.codec.decode(raw),
+          );
+        }
       }
     }
     await this.ctx.interceptors.afterWrite({
@@ -96,9 +105,16 @@ export class Returning<R> {
 
 /** returning 的列名：不写就是整行；写了就只取这些（类型检查只允许实体的列） */
 function returningProps(entity: Entity, columns: readonly string[]): string[] {
-  for (const c of columns)
-    if (!(c in entity.columns)) throw new Error(`${entity.table} has no column '${c}'`);
-  const props = columns.length > 0 ? [...columns] : Object.keys(entity.columns);
+  const all = Object.keys(entity.columns);
+  // 选了值对象时取它的每一列
+  const props =
+    columns.length > 0
+      ? columns.flatMap((c) => {
+          const found = all.filter((p) => p === c || p.startsWith(`${c}.`));
+          if (found.length === 0) throw new Error(`${entity.table} has no column '${c}'`);
+          return found;
+        })
+      : all;
   const converted = props.filter((p) => entity.columns[p]!.options.sqlRead);
   if (converted.length > 0)
     throw new Error(
@@ -214,7 +230,7 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     this.ctx = ctx;
     this.key = key;
     this.entity = ctx.schema.entities[key]!;
-    this.rows = rows;
+    this.rows = rows.map((row) => flattenRow(this.entity, row));
     this.conflict = conflict;
   }
 
@@ -398,11 +414,17 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
   }
 }
 
-/** set 里每列可以是值或表达式（`u.age.plus(1)`） */
-export type SetValues<S extends AnySchema, K extends EntityKey<S>> = {
-  [C in keyof EntityOf<S, K>['columns']]?:
-    ValueOf<EntityOf<S, K>['columns'][C]> | Expr<ValueOf<EntityOf<S, K>['columns'][C]>>;
+/** 一组声明的列在 set 里的形状：每列可以是值或表达式，值对象可以只给其中几项 */
+export type SetOf<F extends Fields> = {
+  [C in keyof F]?: F[C] extends Embedded<infer G>
+    ? SetOf<G> | (AllNullable<G> extends true ? null : never)
+    : ValueOf<F[C]> | Expr<ValueOf<F[C]>>;
 };
+
+/** set 里每列可以是值或表达式（`u.age.plus(1)`） */
+export type SetValues<S extends AnySchema, K extends EntityKey<S>> = SetOf<
+  EntityOf<S, K>['fields']
+>;
 
 interface WriteState {
   readonly where: readonly ((r: any) => Cond)[];
@@ -526,7 +548,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     const entity = this.ctx.schema.entities[this.key]!;
     if (entity.primaryKey.length === 0)
       throw new Error(`update(..).entity(..) needs a primary key on ${entity.table}`);
-    const values = row as Record<string, unknown>;
+    const values = flattenRow(entity, row as Record<string, unknown>);
     for (const key of entity.primaryKey) {
       if (values[key] === undefined || values[key] === null)
         throw new Error(`update(..).entity(..) needs the primary key '${key}' of ${entity.table}`);
@@ -609,7 +631,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     if (!this.values) throw new Error('update needs set(...)');
     const { root, where } = this.scope();
     const entity = this.ctx.schema.entities[this.key]!;
-    const given = this.values(root);
+    const given = flattenRow(entity, this.values(root));
     for (const p of Object.keys(given)) {
       if (given[p] !== undefined && entity.columns[p]?.options.insertOnly)
         throw new Error(`column '${p}' of ${entity.table} is insert-only and cannot be updated`);

@@ -21,7 +21,7 @@ import {
 import type { AnySchema, EntityKey, Many, Schema } from './relations.ts';
 import type { Expr } from './expr.ts';
 import type { Ref } from './ref.ts';
-import type { DerivedEntity, Entity, Row } from './schema.ts';
+import type { DerivedEntity, Entity, Row, UpdateOf } from './schema.ts';
 import { createSqlTag, type SqlTag } from './native.ts';
 import {
   execute,
@@ -55,12 +55,12 @@ export type ManyKeys<S extends AnySchema, K extends EntityKey<S>> = {
 }[keyof S['relations'][K]] &
   string;
 
-/** save 的入参：父行的列（都可选，没给的保持原值或用库里默认值）+ cascade 导航对应的子行数组 */
-export type SaveInput<S extends AnySchema, K extends EntityKey<S>, C extends string> = Partial<
-  Row<S['entities'][K]>
+/** save 的入参：父行的列（都可选，没给的保持原值或用库里默认值；值对象可以只给其中几项）+ cascade 导航对应的子行数组 */
+export type SaveInput<S extends AnySchema, K extends EntityKey<S>, C extends string> = UpdateOf<
+  S['entities'][K]['fields']
 > & {
   [R in C]?: S['relations'][K][R] extends Many<infer T>
-    ? readonly Partial<Row<S['entities'][T & EntityKey<S>]>>[]
+    ? readonly UpdateOf<S['entities'][T & EntityKey<S>]['fields']>[]
     : never;
 };
 

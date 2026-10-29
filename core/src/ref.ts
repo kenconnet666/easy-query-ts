@@ -17,20 +17,34 @@ import {
   type Pred,
 } from './expr.ts';
 import type { AnySchema, EntityKey, Many, One, Relation, RelationFilter } from './relations.ts';
-import type { AnyColumn, Entity, Row, ValueOf } from './schema.ts';
+import {
+  setPath,
+  type AnyColumn,
+  type Embedded,
+  type Entity,
+  type Fields,
+  type Row,
+  type ValueOf,
+} from './schema.ts';
 
 export const REF: unique symbol = Symbol('eqts.ref');
 
 type Ents<S extends AnySchema> = S['entities'];
-type Cols<S extends AnySchema, K extends EntityKey<S>> = Ents<S>[K]['columns'];
 type Rels<S extends AnySchema, K extends EntityKey<S>> = S['relations'][K];
 
+/** 表引用上的列：每列一个表达式，值对象是嵌套的对象（`c.address.city`）。N 为 true 时都带上 null */
+export type ColumnRefs<F extends Fields, N extends boolean = false> = {
+  readonly [C in keyof F]: F[C] extends Embedded<infer G>
+    ? ColumnRefs<G, N>
+    : Expr<N extends true ? ValueOf<F[C]> | null : ValueOf<F[C]>>;
+};
+
 /** 表引用的类型。N 为 true 表示经过了可空的导航，列都带上 null */
-export type Ref<S extends AnySchema, K extends EntityKey<S>, N extends boolean = false> = {
-  readonly [C in keyof Cols<S, K>]: Expr<
-    N extends true ? ValueOf<Cols<S, K>[C]> | null : ValueOf<Cols<S, K>[C]>
-  >;
-} & {
+export type Ref<
+  S extends AnySchema,
+  K extends EntityKey<S>,
+  N extends boolean = false,
+> = ColumnRefs<Ents<S>[K]['fields'], N> & {
   readonly [R in keyof Rels<S, K>]: Rels<S, K>[R] extends One<
     infer T extends EntityKey<S>,
     infer TN
@@ -127,10 +141,10 @@ export function makeRef(scope: Scope, key: string, alias: string, nullable: bool
     value: { schema: scope.schema, key, alias, nullable } satisfies RefInfo,
   });
   for (const [prop, column] of Object.entries(entity.columns)) {
-    Object.defineProperty(ref, prop, {
-      enumerable: true,
-      value: columnExpr({ k: 'col', alias, name: entity.columnNames[prop]! }, column),
-    });
+    const value = columnExpr({ k: 'col', alias, name: entity.columnNames[prop]! }, column);
+    // 值对象的列（'address.city'）放进嵌套对象：c.address.city
+    if (prop.includes('.')) setPath(ref, prop, value);
+    else Object.defineProperty(ref, prop, { enumerable: true, value });
   }
   const relations: Record<string, Relation> = scope.schema.relations[key] ?? {};
   for (const [prop, rel] of Object.entries(relations)) {
@@ -342,8 +356,14 @@ export function columnNode(scope: Scope, info: RefInfo, prop: string): Node {
   return { k: 'col', alias: info.alias, name: scope.schema.entities[info.key]!.columnNames[prop]! };
 }
 
+/** 表引用上的一列；prop 可以是值对象里的路径（'address.city'） */
 export function refColumn(ref: AnyRef, prop: string): Expr<unknown> {
-  return (ref as unknown as Record<string, Expr<unknown>>)[prop]!;
+  return prop
+    .split('.')
+    .reduce<unknown>(
+      (value, part) => (value as Record<string, unknown>)[part],
+      ref,
+    ) as Expr<unknown>;
 }
 
 /**

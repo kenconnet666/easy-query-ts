@@ -13,13 +13,12 @@
  * ```
  * 复合外键把 from / to 写成列的数组：`{ from: ['tenantId', 'userId'], to: ['tenantId', 'id'] }`，两边个数必须相同。
  */
-import type { Cond, Expr } from './expr.ts';
-import type { Column, Entity, ValueOf } from './schema.ts';
+import type { Cond } from './expr.ts';
+import type { ColumnRefs } from './ref.ts';
+import type { Column, Embedded, Entity } from './schema.ts';
 
 /** 关系上固定的条件（对应 Java 版导航的 extraFilter）：拿到目标表各列的表达式，返回条件；每次用到这个导航都带上 */
-export type RelationFilter<E extends Entity = Entity> = (target: {
-  readonly [K in keyof E['columns']]: Expr<ValueOf<E['columns'][K]>>;
-}) => Cond;
+export type RelationFilter<E extends Entity = Entity> = (target: ColumnRefs<E['fields']>) => Cond;
 
 /** 多对一 / 一对一：from 是本表的列，to 是目标表的列（按位置一一对应）。N 为 true 时目标可能不存在，导航出来的列都可空 */
 export interface One<T extends string = string, N extends boolean = boolean> {
@@ -62,12 +61,16 @@ export interface Many<T extends string = string> {
 
 export type Relation = One | Many;
 
-type ColumnKey<E extends Entity> = keyof E['columns'] & string;
+/** 能当关联列的列名（值对象不能整个当关联列） */
+type ColumnKey<E extends Entity> = {
+  [K in keyof E['fields']]: E['fields'][K] extends Embedded<any> ? never : K;
+}[keyof E['fields']] &
+  string;
 /** 一个列名，或复合外键的列名数组 */
 type OneOrMany<K extends string> = K | readonly K[];
 /** 任何一个 from 列可空，导航的目标就可能不存在 */
 type AnyNullable<E extends Entity, F extends string> = true extends {
-  [K in F]: E['columns'][K] extends Column<any, infer N, any> ? N : never;
+  [K in F]: E['fields'][K] extends Column<any, infer N, any> ? N : never;
 }[F]
   ? true
   : false;

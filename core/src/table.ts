@@ -118,7 +118,10 @@ function nonNegativeInt(text: string, name: string): number {
 
 /** 结果里一列的表达式；不是列（嵌套对象、一对多的数组）或没有这个名字时报错，说明能用哪些 */
 export function resultColumn(shape: unknown, key: string, use: string): Expr<unknown> {
-  const value = (shape as Record<string, unknown> | null)?.[key];
+  // 值对象里的列写成路径：'address.city'
+  const value = key
+    .split('.')
+    .reduce<unknown>((item, part) => (item as Record<string, unknown> | null)?.[part], shape);
   if (value instanceof Expr) return value;
   const columns = Object.entries((shape ?? {}) as Record<string, unknown>)
     .filter(([, item]) => item instanceof Expr)

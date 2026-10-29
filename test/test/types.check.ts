@@ -6,6 +6,7 @@ import {
   createDb,
   defineSchema,
   defineView,
+  embed,
   entity,
   sql,
   win,
@@ -251,6 +252,54 @@ async function joins() {
 }
 void joins;
 void fills;
+
+// 值对象：行、插入、表引用都是嵌套的；全都可空的值对象插入时可省、更新时可以给 null
+async function embeds() {
+  const Shop = entity('t_shop', {
+    id: col.int().primaryKey().generated(),
+    address: embed({ city: col.string(), street: col.string().nullable() }),
+    contact: embed({ phone: col.string().nullable() }),
+  });
+  const Visit = entity('t_visit', { id: col.int().primaryKey(), shopId: col.int() });
+  const shops = defineSchema(
+    { Shop, Visit },
+    {
+      Visit: (r) => ({
+        shop: r.one('Shop', { from: 'shopId', to: 'id' }),
+        // @ts-expect-error 值对象不能整个当关联列
+        wrong: r.one('Shop', { from: 'shopId', to: 'address' }),
+      }),
+    },
+  );
+  type ShopRow = Row<typeof Shop>;
+  expect<
+    Equal<
+      ShopRow,
+      {
+        id: number;
+        address: { city: string; street: string | null };
+        contact: { phone: string | null };
+      }
+    >
+  >();
+  const inserted: Insert<typeof Shop> = { address: { city: 'x' } };
+  void inserted;
+  // @ts-expect-error address 里有必填的列，插入时不能省
+  const missing: Insert<typeof Shop> = { contact: { phone: null } };
+  void missing;
+  const sdb = createDb({ schema: shops, adapter: {} as Adapter });
+  const cities = await sdb
+    .queryable(Visit)
+    .select((v) => ({ city: v.shop.address.city, address: v.shop.address }))
+    .toList();
+  expect<
+    Equal<typeof cities, { city: string; address: { city: string; street: string | null } }[]>
+  >();
+  sdb.update(Shop).set({ address: { city: 'x' }, contact: null });
+  // @ts-expect-error address 里有不可空的列，不能整个给 null
+  sdb.update(Shop).set({ address: null });
+}
+void embeds;
 
 // @ts-expect-error join 的 on 里新表没有这个列
 db.queryable(User).innerJoin(Post, (u, p) => p.nope.eq(u.id));
