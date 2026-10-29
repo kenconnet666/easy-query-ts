@@ -157,7 +157,7 @@ export function checkAliases(
   if (q.from.sub) checkAliases(q.from.sub);
   // 复合查询的每个成员都是独立的语句
   if ('unions' in q) q.unions?.forEach((u) => checkAliases(u.q));
-  const joins = 'joins' in q ? q.joins : [];
+  const joins = ('joins' in q ? q.joins : undefined) ?? [];
   for (const j of joins) {
     declared.add(j.alias);
     // 派生表的 join（分组 join、跨导航的桥）是独立的语句
