@@ -9,6 +9,7 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { format, resolveConfig } from 'prettier';
 import { capabilities, fileRules, rules } from './capabilities.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -119,7 +120,10 @@ for (const [key, list] of [...byKey].sort(([a], [b]) => a.localeCompare(b))) {
     lines.push(`| ${row.file}#${row.name} | ${row.sql ? `\`${cell(row.sql)}\`` : ''} |`);
   lines.push('');
 }
-writeFileSync(join(here, '../docs/parity-tests.md'), lines.join('\n'));
+// 按仓库的 Prettier 配置排好再写（CI 的 pnpm check 会检查）
+const output = join(here, '../docs/parity-tests.md');
+const options = { ...(await resolveConfig(output)), filepath: output };
+writeFileSync(output, await format(lines.join('\n'), options));
 console.log(
   `${rows.length} tests: done ${count('done')}, different ${count('different')}, todo ${count('todo')}, na ${count('na')}`,
 );
