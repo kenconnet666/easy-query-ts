@@ -287,7 +287,11 @@ export const capabilities = {
     ts: 'createTables / createTablesSql（注释、索引、外键）、planSync / syncTables（只增不删，renamedFrom 改名，差异只列出）、introspect、tableExists、dropTables；suite.ts code-first sync、各方言 sql.test',
   },
   sharding: { title: '分库分表', status: 'todo', ts: '待做（16.6.2、16.6.3）' },
-  cache: { title: '二级缓存', status: 'todo', ts: '待做（16.6.1）' },
+  cache: {
+    title: '二级缓存',
+    status: 'done',
+    ts: 'easy-query-ts-cache：kv / all、条件字段、拦截器按改之前的行失效、提交后再删、空值缓存、可换存储；cache.test.ts',
+  },
   search: { title: 'search 扩展', status: 'todo', ts: '待对照（16.6.5）' },
   'dialect.mssql': { title: 'SQL Server 方言', status: 'todo', ts: '待做（16.7.1）' },
   'dialect.mssql2008': {

@@ -110,7 +110,7 @@
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------- |
 | code-first/quick-start、api                                            | `createTables`、`planSync` / `syncTables`、注释、索引、外键、`introspect` | ✓ 16.5.1、16.5.2 |
 | code-first/custom、dynamic-table                                       | 自定义类型映射（`dbType`）；换表用 `mapTables` 后同步                     | ✓ 16.5.1         |
-| cache/*                                                                | 二级缓存                                                                  | ✗ 16.6.1         |
+| cache/*                                                                | `easy-query-ts-cache`：kv / all、拦截器失效、延迟双删                     | ✓ 16.6.1         |
 | super/sharding-table、time、mod、multi、sequence、dna、default-route-* | 分表与路由                                                                | ✗ 16.6.2         |
 | super/sharding-datasource、sharding-all、sharding-all-time             | 分库                                                                      | ✗ 16.6.3         |
 | super/README（读写分离）                                               | 从库                                                                      | ✗ 16.6.4         |

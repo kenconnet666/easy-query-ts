@@ -128,13 +128,16 @@ export class Returning<R> {
     for (const statement of this.toSQL())
       for (const row of await query(this.ctx, statement))
         out.push(decodeRow(this.entity, this.props, (p) => row[this.entity.columnNames[p]!]) as R);
-    await this.ctx.interceptors.afterWrite({
-      ...this.detail,
-      entity: this.entity,
-      affected: out.length,
-      statements: this.statements,
-      ...(before ? { before } : {}),
-    });
+    await this.ctx.interceptors.afterWrite(
+      {
+        ...this.detail,
+        entity: this.entity,
+        affected: out.length,
+        statements: this.statements,
+        ...(before ? { before } : {}),
+      },
+      this.ctx.hooks,
+    );
     return out;
   }
 }
@@ -417,13 +420,16 @@ export class InsertSelect {
   async execute(): Promise<number> {
     const statement = this.toSQL();
     const affected = (await execute(this.ctx, statement)).affected;
-    await this.ctx.interceptors.afterWrite({
-      kind: 'insert',
-      rows: [],
-      entity: this.entity,
-      affected,
-      statements: [statement],
-    });
+    await this.ctx.interceptors.afterWrite(
+      {
+        kind: 'insert',
+        rows: [],
+        entity: this.entity,
+        affected,
+        statements: [statement],
+      },
+      this.ctx.hooks,
+    );
     return affected;
   }
 }
@@ -523,12 +529,15 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     let affected = 0;
     const statements = this.toSQL();
     for (const statement of statements) affected += (await execute(this.ctx, statement)).affected;
-    await this.ctx.interceptors.afterWrite({
-      ...this.detail(),
-      entity: this.entity,
-      affected,
-      statements,
-    });
+    await this.ctx.interceptors.afterWrite(
+      {
+        ...this.detail(),
+        entity: this.entity,
+        affected,
+        statements,
+      },
+      this.ctx.hooks,
+    );
     return affected;
   }
 
@@ -546,12 +555,15 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
         throw new Error(`the ${this.ctx.dialect.name} driver did not report a generated key`);
       id = result.insertId;
     }
-    await this.ctx.interceptors.afterWrite({
-      ...this.detail(),
-      entity: this.entity,
-      affected: 1,
-      statements,
-    });
+    await this.ctx.interceptors.afterWrite(
+      {
+        ...this.detail(),
+        entity: this.entity,
+        affected: 1,
+        statements,
+      },
+      this.ctx.hooks,
+    );
     return id;
   }
 
@@ -774,13 +786,16 @@ abstract class Filtered {
       throw new Error(
         `optimistic lock failed: ${this.ctx.schema.entities[this.key]!.table} row was changed or deleted by someone else`,
       );
-    await this.ctx.interceptors.afterWrite({
-      ...detail,
-      entity: this.ctx.schema.entities[this.key]!,
-      affected,
-      statements: [statement],
-      ...(before ? { before } : {}),
-    });
+    await this.ctx.interceptors.afterWrite(
+      {
+        ...detail,
+        entity: this.ctx.schema.entities[this.key]!,
+        affected,
+        statements: [statement],
+        ...(before ? { before } : {}),
+      },
+      this.ctx.hooks,
+    );
     return affected;
   }
 
@@ -789,9 +804,9 @@ abstract class Filtered {
    * 不加行锁：同一事务里随后的 update / delete 会锁住这些行，两步之间被别人改了的情况留给乐观锁
    */
   protected async rowsBefore(): Promise<Record<string, unknown>[] | undefined> {
-    if (!this.ctx.interceptors.wantsBefore) return undefined;
-    const { scope, root, where } = this.scope();
     const entity = this.ctx.schema.entities[this.key]!;
+    if (!this.ctx.interceptors.wantsBefore(entity)) return undefined;
+    const { scope, root, where } = this.scope();
     const props = Object.keys(entity.columns);
     const node: SelectNode = {
       from: { table: entity.table, alias: root[REF].alias },

@@ -15,6 +15,7 @@
     "@zerodep-dev/easy-query-ts-date": "workspace:*",
     "@zerodep-dev/easy-query-ts-crypto": "workspace:*",
     "@zerodep-dev/easy-query-ts-cli": "workspace:*",
+    "@zerodep-dev/easy-query-ts-cache": "workspace:*",
     "vitest": "catalog:"
   },
   "devDependencies": {

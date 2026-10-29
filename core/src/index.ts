@@ -1,4 +1,15 @@
-export { col, embed, Embedded, entity, toDate, toDateText, utcText, Column } from './schema.ts';
+export {
+  col,
+  Column,
+  embed,
+  Embedded,
+  entity,
+  flattenRow,
+  nestRow,
+  toDate,
+  toDateText,
+  utcText,
+} from './schema.ts';
 export type {
   Codec,
   ColumnKind,

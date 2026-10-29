@@ -99,7 +99,9 @@ createDb({ schema, adapter, interceptors: [audit] });
 **钩子在同一个事务里**，抛错会让这次写入失败、事务回滚——可以当作"否决"用；做审计日志也在这里。写入语句上同样可以 `noInterceptor(name)`。
 
 审计要前后对比时，拦截器声明 `before: true`：update / delete（含逻辑删除、`returning`、批量）执行前，核心按这条语句同样的条件（含拦截器给 update / delete 加的租户、逻辑删除条件）先读一次整行，放进 `e.before`（已解码、值对象是嵌套对象）。
-多一条查询，所以只在有生效的拦截器声明时才读；官方没有对应的现成能力（要自己替换执行器）。
+多一条查询，所以只在有生效的拦截器声明时才读，`before` 也可以写成按实体判断的函数（`(entity) => cached.has(entity.table)`），只给认的实体读；官方没有对应的现成能力（要自己替换执行器）。
+
+`e.afterCommit(task)` 登记提交之后做的事（清缓存、发消息）：在事务里等提交（回滚就不做），不在事务里时在这条语句之后马上做。二级缓存的延迟双删就用它。
 
 ```ts
 const diff: Interceptor = {

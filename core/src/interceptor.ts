@@ -13,6 +13,7 @@ import type { Statement } from './dialect.ts';
 import { condNode, type Cond } from './expr.ts';
 import { refColumn, REF, type AnyRef } from './ref.ts';
 import type { ColumnOptions, Entity } from './schema.ts';
+import { runHooks, type TransactionHooks } from './session.ts';
 
 /**
  * 拦截器名字的登记处：noInterceptor / useInterceptor 只接受登记过的名字，写错在编译期就报出来。
@@ -48,11 +49,19 @@ export type WriteDetail =
  * afterWrite 收到的事件：写了什么（WriteDetail）、哪个实体、影响了多少行、执行的语句（含参数，条件在里面）。
  * 有拦截器声明了 `before: true` 时，update / delete 的事件还带上改之前的行（before）
  */
-export type WriteEvent = WriteDetail & {
+export type WriteEvent = WriteRecord & {
+  /**
+   * 登记一件提交之后做的事（清缓存、发消息）：在事务里时等事务提交（回滚就不做），不在事务里时在这条语句之后马上做
+   */
+  readonly afterCommit: (task: () => unknown) => void;
+};
+
+/** 写入的记录：WriteEvent 去掉 afterCommit（构建语句的地方给出这些，afterCommit 由 Interceptors.afterWrite 补上） */
+export type WriteRecord = WriteDetail & {
   readonly entity: Entity;
   readonly affected: number;
   readonly statements: readonly Statement[];
-  /** 改之前的整行（值对象是嵌套对象）：update / delete 且有拦截器声明 before 时才有 */
+  /** 改之前的整行（值对象是嵌套对象）：update / delete 且有拦截器对这个实体声明了 before 时才有 */
   readonly before?: readonly Readonly<Record<string, unknown>>[];
 };
 
@@ -72,10 +81,10 @@ export interface Interceptor {
   /** 写入语句成功执行之后（在同一个事务里）调用：审计日志、发事件、失效缓存。抛错会让这次写入失败（事务里则回滚） */
   afterWrite?(event: WriteEvent): void | Promise<void>;
   /**
-   * update / delete 的事件要不要带改之前的行（审计的前后对比）：true 时核心在执行前按同样的条件（含拦截器加的）先读一次整行，
-   * 放进 event.before。多一条查询，所以按拦截器声明
+   * update / delete 的事件要不要带改之前的行（审计的前后对比、按主键清缓存）：为真时核心在执行前按同样的条件（含拦截器加的）
+   * 先读一次整行，放进 event.before。多一条查询，所以按拦截器声明；写成函数时只对它认的实体读
    */
-  readonly before?: boolean;
+  readonly before?: boolean | ((entity: Entity) => boolean);
   /** 删除前询问：返回值表示"不要物理删除，改成把这些列更新成这些值"（逻辑删除）；返回 undefined 表示照常删除 */
   deleteAs?(entity: Entity): Record<string, unknown> | undefined;
 }
@@ -183,8 +192,6 @@ export class Interceptors {
   private readonly skipAll: boolean;
   /** 生效的那些，按登记顺序 */
   private readonly active: readonly Interceptor[];
-  /** 有生效的拦截器要 update / delete 之前的行 */
-  readonly wantsBefore: boolean;
 
   constructor(
     list: readonly Interceptor[],
@@ -202,7 +209,6 @@ export class Interceptors {
       if (skipAll && !i.protected) return false;
       return i.enabled !== false;
     });
-    this.wantsBefore = this.active.some((i) => i.before === true && i.afterWrite !== undefined);
   }
 
   /** 叠加开关，返回新的一份（按先后，后面的覆盖前面的） */
@@ -242,8 +248,26 @@ export class Interceptors {
     return nodes;
   }
 
-  async afterWrite(event: WriteEvent): Promise<void> {
+  /** 有生效的拦截器要这个实体 update / delete 之前的行 */
+  wantsBefore(entity: Entity): boolean {
+    return this.active.some(
+      (i) =>
+        i.afterWrite !== undefined &&
+        (typeof i.before === 'function' ? i.before(entity) : i.before === true),
+    );
+  }
+
+  /** 交给各拦截器的 afterWrite；hooks 是所在事务的钩子（不在事务里时 afterCommit 登记的事在最后马上做） */
+  async afterWrite(record: WriteRecord, hooks: TransactionHooks | undefined): Promise<void> {
+    if (this.active.every((i) => !i.afterWrite)) return;
+    const later: (() => unknown)[] = [];
+    const frames = hooks?.frames;
+    const event: WriteEvent = {
+      ...record,
+      afterCommit: (task) => (frames ? frames[frames.length - 1]!.commit : later).push(task),
+    };
     for (const interceptor of this.active) await interceptor.afterWrite?.(event);
+    await runHooks(later);
   }
 
   /** 这个实体的 delete 要不要改写成 update：返回要更新的列，undefined 表示物理删除 */
