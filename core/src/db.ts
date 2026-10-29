@@ -36,6 +36,7 @@ import {
   type Adapter,
   type Context,
   type ExecutionEvent,
+  type Replicas,
   type Session,
   type TransactionOptions,
   newTransactionHooks,
@@ -92,6 +93,11 @@ export interface DbOptions<S extends AnySchema> {
    * 按相反的排序取（偏移量变小），再把这一页翻回来；查询要有 orderBy。默认不倒序
    */
   readonly reversePageAfter?: number;
+  /**
+   * 读写分离（对应 Java 版的读写分离）：从库的 Adapter（同一种库）。事务外的查询按轮询走从库；写入（含 RETURNING、
+   * 写入前后的回查）、事务里的一切、introspect 走主库。刚写完马上要读到时用 `db.usePrimary()`
+   */
+  readonly replicas?: readonly Adapter[];
 }
 
 export class Db<S extends AnySchema> {
@@ -127,21 +133,21 @@ export class Db<S extends AnySchema> {
   insert<E extends Entity>(entity: E): Insertable<AdhocSchema<E>, E['name']>;
   insert(entity: Entity): Insertable<any, string> {
     const { ctx, key } = this.target(entity);
-    return new Insertable(ctx, key);
+    return new Insertable(primary(ctx), key);
   }
 
   update<E extends SchemaEntity<S>>(entity: E): Updatable<S, KeyOf<S, E>>;
   update<E extends Entity>(entity: E): Updatable<AdhocSchema<E>, E['name']>;
   update(entity: Entity): Updatable<any, string> {
     const { ctx, key } = this.target(entity);
-    return new Updatable(ctx, key);
+    return new Updatable(primary(ctx), key);
   }
 
   delete<E extends SchemaEntity<S>>(entity: E): Deletable<S, KeyOf<S, E>>;
   delete<E extends Entity>(entity: E): Deletable<AdhocSchema<E>, E['name']>;
   delete(entity: Entity): Deletable<any, string> {
     const { ctx, key } = this.target(entity);
-    return new Deletable(ctx, key);
+    return new Deletable(primary(ctx), key);
   }
 
   /** 实体在 schema 里就用它；不在就临时登记进这条语句的 schema（名字被占用时加序号） */
@@ -363,8 +369,9 @@ export class Db<S extends AnySchema> {
 
   /** 读库里（当前 schema）的表结构：列、主键、索引、外键（syncTables、由表生成实体用） */
   introspect(): Promise<DbTable[]> {
+    const ctx = primary(this.ctx);
     return this.ctx.dialect.introspect((sql, params = []) =>
-      query(this.ctx, { sql, params: [...params] }),
+      query(ctx, { sql, params: [...params] }),
     );
   }
 
@@ -406,6 +413,11 @@ export class Db<S extends AnySchema> {
         .filter((e) => findTable(tables, e.table))
         .map((e) => this.ctx.dialect.dropTable(e.table)),
     );
+  }
+
+  /** 之后的读也走主库（读写分离时，刚写完马上要读到自己写的数据） */
+  usePrimary(): Db<S> {
+    return new Db(primary(this.ctx), this.adapter, this.keys, this.inTransaction);
   }
 
   /** 没给实体时是 schema 里全部非派生的实体 */
@@ -727,6 +739,22 @@ export class Transaction<S extends AnySchema> extends Db<S> {
   }
 }
 
+/** 去掉从库：写入与要读到最新数据的地方用 */
+function primary(ctx: Context): Context {
+  return ctx.replicas ? { ...ctx, replicas: undefined } : ctx;
+}
+
+function replicaSet<S extends AnySchema>(options: DbOptions<S>): Replicas | undefined {
+  const replicas = options.replicas ?? [];
+  if (replicas.length === 0) return undefined;
+  for (const replica of replicas)
+    if (replica.dialect.name !== options.adapter.dialect.name)
+      throw new Error(
+        `a replica must use the same dialect as the primary (${options.adapter.dialect.name}), got ${replica.dialect.name}`,
+      );
+  return { sessions: replicas.map((r) => r.driver), next: 0 };
+}
+
 export function createDb<S extends AnySchema>(options: DbOptions<S>): Db<S> {
   const keys = new Map<Entity, string>();
   for (const [key, entity] of Object.entries(options.schema.entities)) keys.set(entity, key);
@@ -738,6 +766,7 @@ export function createDb<S extends AnySchema>(options: DbOptions<S>): Db<S> {
     onExecute: options.onExecute,
     signal: undefined,
     hooks: undefined,
+    replicas: replicaSet(options),
     guards: {
       hardDelete: options.hardDelete ?? 'allow',
       maxRows: options.maxRows,

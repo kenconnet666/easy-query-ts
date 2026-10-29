@@ -75,6 +75,21 @@ export interface Context {
   readonly hooks: TransactionHooks | undefined;
   /** 全局护栏（createDb 的 hardDelete、maxRows） */
   readonly guards: Guards;
+  /** 读写分离的从库：事务外的读按轮询分给它们；写入、事务里、usePrimary() 之后没有 */
+  readonly replicas: Replicas | undefined;
+}
+
+/** 从库与轮询的位置（同一个 Db 派生出来的都共用） */
+export interface Replicas {
+  readonly sessions: readonly Session[];
+  next: number;
+}
+
+/** 读用哪个连接：事务里（有 hooks）一律主库，否则轮询从库 */
+function readSession(ctx: Context): Session {
+  const replicas = ctx.replicas;
+  if (ctx.hooks || !replicas || replicas.sessions.length === 0) return ctx.session;
+  return replicas.sessions[replicas.next++ % replicas.sessions.length]!;
 }
 
 /** 全局护栏：防误删、防误拉整表 */
@@ -119,7 +134,7 @@ export function query(ctx: Context, statement: Statement): Promise<Record<string
     ctx,
     statement,
     'query',
-    () => ctx.session.query(statement.sql, statement.params),
+    () => readSession(ctx).query(statement.sql, statement.params),
     (rows) => rows.length,
   );
 }
@@ -200,10 +215,11 @@ export async function* streamRows(
   let failure: unknown;
   try {
     ctx.signal?.throwIfAborted();
-    const source = ctx.session.stream
-      ? ctx.session.stream(statement.sql, statement.params, batchSize)
+    const session = readSession(ctx);
+    const source = session.stream
+      ? session.stream(statement.sql, statement.params, batchSize)
       : chunks(
-          await abortable(ctx.signal, () => ctx.session.query(statement.sql, statement.params)),
+          await abortable(ctx.signal, () => session.query(statement.sql, statement.params)),
           batchSize,
         );
     for await (const batch of source) {

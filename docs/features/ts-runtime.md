@@ -79,6 +79,26 @@ await db.transaction(async (tx) => {
 
 `db.transaction(work, { readOnly: true })`：MySQL `START TRANSACTION READ ONLY`、PG `BEGIN … READ ONLY`、HANA `SET TRANSACTION READ ONLY`；SQLite 没有只读事务，用 `PRAGMA query_only` 让写入被拒绝，事务结束后还原。
 
+## 读写分离 `replicas`
+
+```ts
+const db = createDb({
+  schema,
+  adapter: mysql(primaryPool),
+  replicas: [mysql(replicaPool1), mysql(replicaPool2)],
+});
+await db.queryable(Order).toList(); // 事务外的读：按轮询走从库
+await db
+  .update(Order)
+  .set({ state: 'paid' })
+  .where((o) => o.id.eq(id))
+  .execute(); // 写入：主库
+await db.usePrimary().queryable(Order).findOrThrow(id); // 刚写完马上要读到：强制主库
+```
+
+写入（含 RETURNING、读改之前的行、`returnEntity` 的回查）、事务里的一切、`introspect` / `syncTables` 都走主库；从库要是同一种库。
+`db.sql` 的查询属于读，写语句带 RETURNING 时先 `usePrimary()`。从库延迟由库自己负责，库层不做"写后读"的自动粘连。
+
 ## 验证与限制
 
 SQLite、MySQL 8.0.18 / 8.4、PG 17 实测；HANA 随 CI（流式读取、保存点释放、只读事务的 HANA 写法按文档，未实库验证）。实测中发现并修了 MySQL 池级流式读取中途放弃会泄漏连接的问题。

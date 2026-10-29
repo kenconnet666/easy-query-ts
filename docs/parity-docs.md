@@ -113,4 +113,4 @@
 | cache/*                                                                | `easy-query-ts-cache`：kv / all、拦截器失效、延迟双删                     | ✓ 16.6.1         |
 | super/sharding-table、time、mod、multi、sequence、dna、default-route-* | 分表与路由                                                                | ✗ 16.6.2         |
 | super/sharding-datasource、sharding-all、sharding-all-time             | 分库                                                                      | ✗ 16.6.3         |
-| super/README（读写分离）                                               | 从库                                                                      | ✗ 16.6.4         |
+| super/README（读写分离）                                               | `createDb({ replicas })`、`usePrimary()`                                  | ✓ 16.6.4         |
