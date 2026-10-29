@@ -16,10 +16,12 @@ import {
   type TransactionOptions,
 } from '@zerodep-dev/easy-query-ts';
 import { MySqlDialect, type MySqlVersion } from './dialect.ts';
+import { DorisDialect, type DorisOptions } from './doris.ts';
 
 export { MySQL } from './functions.ts';
 export type { MatchMode } from './functions.ts';
 export { MySqlDialect, type MySqlVersion } from './dialect.ts';
+export { DorisDialect, type DorisOptions } from './doris.ts';
 
 const AS_TEXT = new Set([
   'DATE',
@@ -193,3 +195,15 @@ mysql.detect = async (pool: Pool): Promise<Adapter> => {
   const version = /mariadb/i.test(text) ? '8.0' : /^\d+(\.\d+)*/.exec(text)?.[0];
   return { dialect: new MySqlDialect({ version }), driver: new MySqlDriver(pool) };
 };
+
+/** Doris 的事务不能回滚：语句依次执行，不开事务 */
+class DorisDriver extends MySqlDriver {
+  override async transaction<T>(work: (session: Session) => Promise<T>): Promise<T> {
+    return work(this);
+  }
+}
+
+/** Apache Doris（MySQL 协议，驱动同样是 mysql2）；建表的副本数见 DorisOptions */
+export function doris(pool: Pool, options: DorisOptions = {}): Adapter {
+  return { dialect: new DorisDialect(options), driver: new DorisDriver(pool) };
+}

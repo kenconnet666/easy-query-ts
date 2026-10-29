@@ -6,6 +6,7 @@
   "exports": {
     "./fixture": "./src/fixture.ts",
     "./suite": "./src/suite.ts",
+    "./analytic": "./src/analytic.ts",
     "./sqlite-env": "./src/sqlite-env.ts"
   },
   "dependencies": {
