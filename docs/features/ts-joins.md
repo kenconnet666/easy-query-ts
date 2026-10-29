@@ -1,4 +1,4 @@
-# TS：显式 join（`innerJoin` / `leftJoin`）
+# TS：显式 join（`innerJoin` / `leftJoin` / `rightJoin` / `crossJoin`）与换 schema
 
 导航（`u.company.name`）只能沿着声明过的关系隐式 LEFT JOIN。显式 join 补上三件事：内连接、join 没声明过关系的表、把一对多**展平**成"父子对"。
 
@@ -23,10 +23,31 @@ const rows = await db
 
 ## 方言
 
-只用标准的 `INNER JOIN` / `LEFT JOIN`，各库写法一致：SQLite、MySQL 8.0.18 / 8.4、PG 17 实测通过；HANA 随 CI 验证。
+只用标准的 `INNER` / `LEFT` / `RIGHT` / `CROSS JOIN`，各库写法一致：SQLite、MySQL 8.0.18 / 8.4、PG 17 实测通过；HANA 随 CI 验证。
 
-## 限制（进了 BACKLOG）
+## 右连接与交叉连接
 
-- 没有 `rightJoin`：把表顺序对调写成 `leftJoin` 即可，右连接会让之前所有表的列都变成可空，类型要整串重算，等有具体用例再做。
+```ts
+// globex 没有员工也在结果里，用户一侧为 null；之后的 lambda 里 u 的列都是可空的
+db.queryable(User)
+  .rightJoin(Company, (u, c) => c.id.eq(u.companyId))
+  .select((u, c) => ({ user: u.name, company: c.name })); // { user: string | null; company: string }[]
+
+db.queryable(Company)
+  .crossJoin(Company)
+  .where((a, b) => a.id.lt(b.id)); // 笛卡尔积，条件写在 where
+```
+
+- `rightJoin` 之后此前各表的表引用变成可空（类型与没写 select 时的整行都跟着变）；它们的拦截器条件（租户、逻辑删除）放进这个 `ON`，只有右表的行才不会被过滤掉。
+- `crossJoin` 没有 `ON`，拦截器条件留在 `WHERE`。
+- SQLite 3.39 起支持 `RIGHT JOIN`（`node:sqlite` 自带的版本够新）。
+
+## 换 schema
+
+`db.inSchema('archive_2025')` 返回一个把所有表放到另一个 schema（MySQL 是库）下的 Db，`db.inSchema('hot', ['Post'])` 只换这几个实体；
+表名已带 schema 前缀的换掉前缀。对应 Java 版的 `asSchema`，底下就是 `mapTables`，导航、子查询都跟着换。
+
+## 限制
+
 - 导航本身的 inner 语义（`u.company` 强制内连接）没做；要内连接请显式 `innerJoin(Company, …)`。
 - 更新 / 删除里仍不允许 join（各库写法不一致），用一对多的 `any()`。

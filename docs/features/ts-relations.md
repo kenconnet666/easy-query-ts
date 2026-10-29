@@ -49,3 +49,54 @@ Note: r => ({ member: r.one('Member', { from: ['tenantId', 'memberId'], to: ['te
 ## 验证与限制
 
 SQLite、MySQL 8.0.18 / 8.4、PG 17 实测；HANA 随 CI 验证（只用标准 JOIN / EXISTS）。关系的 `from` / `to` 在运行时统一成数组，`Relation` 类型里是 `readonly string[]`。复合键个数不一致在类型层面检查不了，定义时报错。
+
+## 直达关系（对应 directMapping）
+
+沿着已经定义的导航走到目标，之后当一个普通导航用：
+
+```ts
+User: (r) => ({
+  roles: r.manyToMany('Role', { through: 'UserRole', throughFrom: 'userId', throughTo: 'roleId' }),
+  menus: r.path('Menu', ['roles', 'menus']),          // 经角色到菜单：用法同一对多
+  city: r.pathOne('City', ['company', 'city']),       // 全是多对一：等同于 u.company.city，目标可空
+}),
+```
+
+- `r.path` 把各段拼成一张去重（DISTINCT）的桥：`父键 → 目标键`，inner join 到目标表上。同一个菜单经两个角色到达也只算一次，`count`、`sum`、`toList` 都不重复。
+- 各段的拦截器条件、中间各段的固定条件在桥里；最后一段的固定条件作用在目标上。
+- `r.pathOne` 不建桥，就是一段段访问导航，与直接写 `u.company.city` 共用同样的 JOIN。
+- 导航名、终点、种类（经过一对多就必须用 `path`）在 `defineSchema` 时核对；直达关系不能再引用直达关系；`save` 不能 cascade 它。
+
+## 分组 join（对应 subQueryToGroupJoin）
+
+`u.posts.count()` 是每行一个关联子查询；列表页行多时改成 `u.posts.groupJoin().count()`：子表按关联列分组一次，再 `LEFT JOIN` 回来。
+
+```ts
+select((u) => ({
+  name: u.name,
+  posts: u.posts.groupJoin().count(),
+  total: u.posts.groupJoin().sum((p) => p.amount), // 与上一行共用同一个分组 join
+}));
+```
+
+同一个导航（含它的 `where`）上的几个聚合共用一个分组 join；没有子项时 `count` 是 0，其余是 null，与子查询的写法一致。
+分组 join 是独立的语句，导航的 `where` 里不能引用外层的表；`any` / `none` 仍是 `EXISTS`。
+
+## 按键填充（对应 fillMany / fillOne）
+
+不需要声明关系：按键从另一条查询填一个数组或一行，查询可以来自另一个 Db（另一个库）。
+
+```ts
+const logs = logDb
+  .queryable(Log)
+  .orderBy((l) => l.at)
+  .select((l) => ({ at: l.at, text: l.text }));
+db.queryable(Order).select((o) => ({
+  no: o.no,
+  logs: logs.fillMany((l) => l.orderNo, o.no), // { at; text }[]
+  owner: db.queryable(Staff).fillOne((s) => s.code, o.ownerCode), // Row<Staff> | null
+}));
+```
+
+主查询读完后按一批键（每批 500 个）各查一次；被填充的查询的 `where`、`orderBy`、`select`（含嵌套的 `toList`）照常生效，`include` 里也能用。
+不能带 `limit` / `offset`（那是对整批的，不是每行的），键为 NULL 的行填不到东西。

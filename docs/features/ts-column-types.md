@@ -96,3 +96,38 @@ const Account = entity('t_account', {
 ## date 列的类型
 
 `col.date()` 在 JS 里是 `DateText`（`` `${number}-${number}-${number}` ``，即 `'2026-01-02'` 这种形状的文字）：字面量可以直接写入和比较，**普通字符串列不能调用 `year() / month() / day() / addDays() / dateTrunc()`**，写成 `'not a date'` 也会编译不过。要对象形式用 `@zerodep-dev/easy-query-ts-date` 的 `calendarDate()`。
+
+## 值对象（对应 @ValueObject）
+
+```ts
+const Shop = entity('t_shop', {
+  id: col.int().primaryKey().generated(),
+  address: embed({
+    city: col.string(),
+    street: col.string().nullable(),
+    geo: embed({ lat: col.double(), lng: col.double() }, { prefix: 'geo_' }), // 可以再嵌
+  }),
+});
+// 库里的列：address_city、address_street、geo_lat、geo_lng
+await db.queryable(Shop).where((s) => s.address.city.eq('hz')).toList(); // 行里 address 是嵌套对象
+await db.update(Shop).set({ address: { city: 'nb' } }).where(...).execute(); // 只改这一项
+```
+
+- 列名默认是"属性名_子属性名"，`prefix` 换掉"属性名_"，子列 `named()` 时用它给的全名。
+- 实体上 `fields` 是声明的形状（类型推导看它），`columns` 是展开后的列（键是 `'address.city'`）。
+- 全都可空的值对象插入时可省、更新时可以整个给 `null`（每一列写 NULL）。
+- 列表请求里写路径：`sort=-address.city`、`filter.address.province=zj`。
+- 主键不能放进值对象；整行里带值对象时不能 `asTable()`（派生表只能是平的列）。
+
+## 列值在 SQL 里转换（对应 ColumnValueSQLConverter）
+
+```ts
+phone: col.string().sqlConvert({
+  read: (c) => sql<string>`AES_DECRYPT(${c}, ${key})`,
+  write: (v) => sql<string>`AES_ENCRYPT(${v}, ${key})`,
+}),
+```
+
+`read` 包住读这一列的每个地方（select、where、orderBy、导航条件），`write` 包住 insert、update 写进去的值；转换后的值仍按列的类型解码。
+与 `encrypted` 的区别：`encrypted` 在应用里加解密，库里只能等值比较；这里在库里转换，`like`、排序、函数都能用。
+RETURNING 只能拿到存的值：`returning()` 选到这种列时报错，`returnEntity()` 改为插入后按主键查回。
