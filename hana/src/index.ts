@@ -8,11 +8,15 @@
 import hdb, { type Client } from 'hdb';
 import { hanaFunctions } from './functions.ts';
 import {
+  assembleTables,
+  bareName,
   Dialect,
   SqlWriter,
   type ColumnOptions,
   type Adapter,
+  type DbTable,
   type Driver,
+  type QueryRunner,
   type ExecuteResult,
   type DatePart,
   type FunctionRenderer,
@@ -51,6 +55,55 @@ export class HanaDialect extends Dialect {
   /** HANA 建列存表用 CREATE COLUMN TABLE，也没有 IF NOT EXISTS（表已存在会报错） */
   override createTableStart(): string {
     return 'CREATE COLUMN TABLE';
+  }
+
+  /** CREATE INDEX、DROP TABLE 都没有 IF [NOT] EXISTS */
+  override readonly indexIfNotExists = false;
+  override readonly dropIfExists = false;
+
+  override renameTable(from: string, to: string): string {
+    return `RENAME TABLE ${this.table(from)} TO ${this.quote(bareName(to))}`;
+  }
+
+  override renameColumn(table: string, from: string, to: string): string {
+    return `RENAME COLUMN ${this.table(table)}.${this.quote(from)} TO ${this.quote(to)}`;
+  }
+
+  /** 加列的列定义要放在括号里 */
+  override addColumn(table: string, name: string, kind: string, o: ColumnOptions): string {
+    return `ALTER TABLE ${this.table(table)} ADD (${this.columnDefinition(name, kind, o)})`;
+  }
+
+  /** 读 SYS 系统视图（CURRENT_SCHEMA） */
+  override async introspect(run: QueryRunner): Promise<DbTable[]> {
+    const schema = 'SCHEMA_NAME = CURRENT_SCHEMA';
+    return assembleTables({
+      tables: await run(
+        `SELECT TABLE_NAME AS "table_name", COMMENTS AS "comment" FROM SYS.TABLES WHERE ${schema} ORDER BY TABLE_NAME`,
+      ),
+      columns: await run(
+        `SELECT c.TABLE_NAME AS "table_name", c.COLUMN_NAME AS "column_name",
+           CASE WHEN c.DATA_TYPE_NAME IN ('VARCHAR', 'NVARCHAR', 'VARBINARY') THEN c.DATA_TYPE_NAME || '(' || c.LENGTH || ')'
+                WHEN c.DATA_TYPE_NAME = 'DECIMAL' AND c.SCALE IS NOT NULL THEN 'DECIMAL(' || c.LENGTH || ', ' || c.SCALE || ')'
+                ELSE c.DATA_TYPE_NAME END AS "column_type",
+           c.IS_NULLABLE AS "is_nullable", c.DEFAULT_VALUE AS "column_default", c.COMMENTS AS "comment",
+           CASE WHEN c.GENERATION_TYPE IS NULL THEN 0 ELSE 1 END AS "is_generated",
+           CASE WHEN EXISTS (SELECT 1 FROM SYS.CONSTRAINTS k WHERE k.SCHEMA_NAME = c.SCHEMA_NAME AND k.TABLE_NAME = c.TABLE_NAME
+             AND k.COLUMN_NAME = c.COLUMN_NAME AND k.IS_PRIMARY_KEY = 'TRUE') THEN 1 ELSE 0 END AS "primary_key"
+         FROM SYS.TABLE_COLUMNS c WHERE c.${schema} ORDER BY c.TABLE_NAME, c.POSITION`,
+      ),
+      indexes: await run(
+        `SELECT i.TABLE_NAME AS "table_name", i.INDEX_NAME AS "index_name",
+           CASE WHEN i.CONSTRAINT IN ('UNIQUE', 'NOT NULL UNIQUE') THEN 1 ELSE 0 END AS "is_unique", i.COLUMN_NAME AS "column_name"
+         FROM SYS.INDEX_COLUMNS i WHERE i.${schema} AND (i.CONSTRAINT IS NULL OR i.CONSTRAINT <> 'PRIMARY KEY')
+         ORDER BY i.TABLE_NAME, i.INDEX_NAME, i.POSITION`,
+      ),
+      foreignKeys: await run(
+        `SELECT TABLE_NAME AS "table_name", CONSTRAINT_NAME AS "constraint_name", COLUMN_NAME AS "column_name",
+           REFERENCED_TABLE_NAME AS "referenced_table", REFERENCED_COLUMN_NAME AS "referenced_column"
+         FROM SYS.REFERENTIAL_CONSTRAINTS WHERE ${schema} ORDER BY TABLE_NAME, CONSTRAINT_NAME, POSITION`,
+      ),
+    });
   }
 
   /** HANA 跳过被锁行的写法是 IGNORE LOCKED */

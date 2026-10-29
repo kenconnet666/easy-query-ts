@@ -14,7 +14,8 @@ import type {
   UpdateNode,
 } from './ast.ts';
 import { sqlString, unquoteSql } from './expr.ts';
-import { utcText, type ColumnOptions, type Entity } from './schema.ts';
+import { bareName, type DbTable, type ForeignKeySpec, type QueryRunner } from './ddl.ts';
+import { utcText, type ColumnOptions, type Entity, type TableIndex } from './schema.ts';
 
 export interface Statement {
   readonly sql: string;
@@ -237,7 +238,7 @@ export abstract class Dialect {
     return ifNotExists ? 'CREATE TABLE IF NOT EXISTS' : 'CREATE TABLE';
   }
 
-  /** 一列的定义（含类型、自增、NOT NULL、DEFAULT）；SQLite 的自增主键写法特殊，会覆盖它 */
+  /** 一列的定义（含类型、自增、NOT NULL、DEFAULT，MySQL 还有 COMMENT）；SQLite 的自增主键写法特殊，会覆盖它 */
   columnDefinition(name: string, kind: string, o: ColumnOptions): string {
     return [
       this.quote(name),
@@ -245,13 +246,23 @@ export abstract class Dialect {
       o.generated ? this.identity() : undefined,
       o.nullable ? undefined : 'NOT NULL',
       o.dbDefault !== undefined ? `DEFAULT ${o.dbDefault}` : undefined,
+      o.comment !== undefined && this.commentStyle === 'inline'
+        ? `COMMENT ${sqlString(o.comment)}`
+        : undefined,
     ]
       .filter(Boolean)
       .join(' ');
   }
 
-  /** 按实体生成建表语句：列、主键、唯一约束。派生实体（子查询 / CTE）没有表，不能建 */
-  createTable(entity: Entity, ifNotExists = true): string {
+  /**
+   * 按实体生成建表语句：列、主键、唯一约束（foreignKeys 给出时也写进来，SQLite 只能这样加外键）。
+   * 表注释、索引、外键的其余语句见 commentStatements / createIndex / addForeignKey。派生实体（子查询 / CTE）没有表，不能建
+   */
+  createTable(
+    entity: Entity,
+    ifNotExists = true,
+    foreignKeys: readonly ForeignKeySpec[] = [],
+  ): string {
     if (entity.derived) throw new Error(`${entity.name} is a derived table and cannot be created`);
     const parts: string[] = [];
     for (const [prop, column] of Object.entries(entity.columns)) {
@@ -260,7 +271,97 @@ export abstract class Dialect {
       );
     }
     parts.push(...this.tableConstraints(entity));
-    return `${this.createTableStart(ifNotExists)} ${this.table(entity.table)} (${parts.join(', ')})`;
+    parts.push(...foreignKeys.map((fk) => this.foreignKeyClause(fk)));
+    return `${this.createTableStart(ifNotExists)} ${this.table(entity.table)} (${parts.join(', ')})${this.tableOptions(entity)}`;
+  }
+
+  /** 建表语句末尾的选项（MySQL 的表注释） */
+  protected tableOptions(_entity: Entity): string {
+    return '';
+  }
+
+  /** 注释怎么写：inline 写在建表语句里（MySQL），statement 用 COMMENT ON（PG、HANA），none 没有注释（SQLite） */
+  readonly commentStyle: 'inline' | 'statement' | 'none' = 'statement';
+
+  /** 表与列注释的 COMMENT ON 语句（commentStyle 为 statement 时） */
+  commentStatements(entity: Entity): string[] {
+    if (this.commentStyle !== 'statement') return [];
+    const table = this.table(entity.table);
+    const out =
+      entity.comment !== undefined
+        ? [`COMMENT ON TABLE ${table} IS ${sqlString(entity.comment)}`]
+        : [];
+    for (const [prop, column] of Object.entries(entity.columns))
+      if (column.options.comment !== undefined)
+        out.push(
+          `COMMENT ON COLUMN ${table}.${this.quote(entity.columnNames[prop]!)} IS ${sqlString(column.options.comment)}`,
+        );
+    return out;
+  }
+
+  /** 外键只能写在建表语句里（SQLite 不能 ALTER TABLE ADD CONSTRAINT） */
+  readonly inlineForeignKeys: boolean = false;
+
+  /** CREATE INDEX 认不认 IF NOT EXISTS（MySQL、HANA 不认） */
+  readonly indexIfNotExists: boolean = true;
+
+  createIndex(table: string, index: TableIndex, ifNotExists: boolean): string {
+    const guard = ifNotExists && this.indexIfNotExists ? 'IF NOT EXISTS ' : '';
+    return `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${guard}${this.quote(index.name)} ON ${this.table(table)} (${index.columns.map((c) => this.quote(c)).join(', ')})`;
+  }
+
+  /** 外键约束子句（建表语句里与 ALTER TABLE ADD 共用） */
+  protected foreignKeyClause(fk: ForeignKeySpec): string {
+    const list = (names: readonly string[]) => names.map((n) => this.quote(n)).join(', ');
+    let s = `CONSTRAINT ${this.quote(fk.name)} FOREIGN KEY (${list(fk.columns)}) REFERENCES ${this.table(fk.references)} (${list(fk.referencedColumns)})`;
+    if (fk.onDelete) s += ` ON DELETE ${fk.onDelete.toUpperCase()}`;
+    if (fk.onUpdate) s += ` ON UPDATE ${fk.onUpdate.toUpperCase()}`;
+    return s;
+  }
+
+  addForeignKey(fk: ForeignKeySpec): string {
+    return `ALTER TABLE ${this.table(fk.table)} ADD ${this.foreignKeyClause(fk)}`;
+  }
+
+  renameTable(from: string, to: string): string {
+    return `ALTER TABLE ${this.table(from)} RENAME TO ${this.quote(bareName(to))}`;
+  }
+
+  renameColumn(table: string, from: string, to: string): string {
+    return `ALTER TABLE ${this.table(table)} RENAME COLUMN ${this.quote(from)} TO ${this.quote(to)}`;
+  }
+
+  addColumn(table: string, name: string, kind: string, o: ColumnOptions): string {
+    return `ALTER TABLE ${this.table(table)} ADD COLUMN ${this.columnDefinition(name, kind, o)}`;
+  }
+
+  /** DROP TABLE 认不认 IF EXISTS（HANA 不认） */
+  readonly dropIfExists: boolean = true;
+
+  dropTable(table: string): string {
+    return `DROP TABLE ${this.dropIfExists ? 'IF EXISTS ' : ''}${this.table(table)}`;
+  }
+
+  /** DDL 能不能放进事务一起回滚（PG、SQLite 能；MySQL、HANA 的 DDL 会隐式提交） */
+  readonly transactionalDdl: boolean = false;
+
+  /** 声明的类型与库里读出的类型算不算同一个（大小写、空格、同义词不算差异） */
+  sameType(declared: string, actual: string): boolean {
+    return this.normalizeType(declared) === this.normalizeType(actual);
+  }
+
+  /** 类型的规范写法：小写、去空格、同义词换成同一个；各方言补自己的写法 */
+  protected normalizeType(type: string): string {
+    let t = type.toLowerCase().replace(/\s+/g, ' ').trim();
+    for (const [pattern, to] of TYPE_SYNONYMS) t = t.replace(pattern, to);
+    return t.replace(/\s+/g, '');
+  }
+
+  /** 读当前 schema 里的表结构（syncTables、tableExists、由表生成实体用）；各方言实现 */
+  introspect(_run: QueryRunner): Promise<DbTable[]> {
+    return Promise.reject(
+      new Error(`reading the table structure is not supported by the ${this.name} dialect`),
+    );
   }
 
   /** 主键与唯一约束 */
@@ -629,6 +730,19 @@ export function dateFormatParts(pattern: string): DatePart[] {
   }
   return parts;
 }
+
+/** 类型同义词（先长后短）：PG 的全称、各库的别名 */
+const TYPE_SYNONYMS: readonly [RegExp, string][] = [
+  [/\b(timestamp(?:\(\d+\))?) without time zone\b/g, '$1'],
+  [/\btimestamp(\(\d+\))? with time zone\b/g, 'timestamptz$1'],
+  [/\b(time(?:\(\d+\))?) without time zone\b/g, '$1'],
+  [/\bcharacter varying\b/g, 'varchar'],
+  [/\bdouble precision\b/g, 'double'],
+  [/\b(?:integer|int4)\b/g, 'int'],
+  [/\bint8\b/g, 'bigint'],
+  [/\bnumeric\b/g, 'decimal'],
+  [/\bbool\b/g, 'boolean'],
+];
 
 const JOIN_WORDS: Record<JoinKind, string> = {
   inner: 'INNER JOIN',

@@ -226,3 +226,27 @@ export async function seed(env: TestEnv): Promise<TestEnv> {
   env.statements.length = 0;
   return env;
 }
+
+/** 建表语句的文本测试用：注释、索引、外键（不在 schema 里，各方言的 sql.test 单独建 Db） */
+export const Shelf = entity(
+  't_shelf',
+  { id: col.bigint().primaryKey().generated(), name: col.string(50).comment("书架's 名") },
+  { comment: '书架' },
+);
+export const Book = entity(
+  't_book',
+  {
+    id: col.bigint().primaryKey().generated(),
+    shelfId: col.bigint(),
+    title: col.string(100),
+  },
+  { indexes: [{ columns: ['shelfId', 'title'], unique: true }] },
+);
+export const ddlSchema = defineSchema(
+  { Shelf, Book },
+  {
+    Book: (r) => ({
+      shelf: r.one('Shelf', { from: 'shelfId', to: 'id' }, { foreignKey: { onDelete: 'cascade' } }),
+    }),
+  },
+);

@@ -3,13 +3,13 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1643、写法不同 298、待做 234、不适用 74。
+合计：已对应 1660、写法不同 298、待做 217、不适用 74。
 
 ## 按能力
 
 | 能力                                                             | 用例数 | 状态     | TS 侧（实现与测试）                                                                                                                                                                                 |
 | ---------------------------------------------------------------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 建表与迁移（code-first）（`codeFirst`）                          | 17     | 待做     | 部分：createTables；syncTables 待做（16.5）                                                                                                                                                         |
+| 建表与迁移（code-first）（`codeFirst`）                          | 17     | 已对应   | createTables / createTablesSql（注释、索引、外键）、planSync / syncTables（只增不删，renamedFrom 改名，差异只列出）、introspect、tableExists、dropTables；suite.ts code-first sync、各方言 sql.test |
 | 列加密（`column.encryption`）                                    | 8      | 已对应   | encrypted（可分段搜索）、sqlConvert；easy-query-ts-crypto 的 aesEncryption / sm4Encryption（与 Java 版分段兼容）；crypto.test.ts、guards.test.ts、sql-convert.test.ts                               |
 | ClickHouse 方言（`dialect.clickhouse`）                          | 4      | 待做     | 待做（16.7.6）                                                                                                                                                                                      |
 | 达梦方言（`dialect.dameng`）                                     | 51     | 待做     | 待做（16.7.4）                                                                                                                                                                                      |
@@ -64,7 +64,7 @@
 
 ## 逐条
 
-### 建表与迁移（code-first）（`codeFirst`，待做）
+### 建表与迁移（code-first）（`codeFirst`，已对应）
 
 | 用例                                    | 断言的 SQL（摘要）                                                                            |
 | --------------------------------------- | --------------------------------------------------------------------------------------------- |

@@ -6,6 +6,8 @@ import { describe, it } from 'vitest';
 import {
   and,
   caseWhen,
+  col,
+  entity,
   greatest,
   least,
   now,
@@ -1660,6 +1662,113 @@ export function liveSuite(
         );
       } finally {
         await db.sql.execute`DROP TABLE ${db.sql.ident('t_gadget')}`;
+      }
+    });
+  });
+
+  describe(`${name}: code-first sync`, { skip: options.ddl === false }, () => {
+    // 两张表：B 经 aId 引用 A（外键、级联删除），各带注释与索引
+    const SyncA = entity(
+      't_sync_a',
+      { id: col.bigint().primaryKey().generated(), name: col.string(50).comment('名称') },
+      { comment: '同步测试' },
+    );
+    const SyncB = entity(
+      't_sync_b',
+      {
+        id: col.bigint().primaryKey().generated(),
+        aId: col.bigint().nullable(),
+        title: col.string(100),
+      },
+      { indexes: [{ columns: ['title'] }] },
+    );
+    const syncSchema = defineSchema(
+      { SyncA, SyncB },
+      {
+        SyncB: (r) => ({
+          a: r.one('SyncA', { from: 'aId', to: 'id' }, { foreignKey: { onDelete: 'cascade' } }),
+        }),
+      },
+    );
+
+    it('creates tables with comments, indexes and foreign keys, then finds nothing left to do', async () => {
+      const env = await seeded();
+      const db = createDb({ schema: syncSchema, adapter: env.adapter });
+      await db.dropTables(SyncB, SyncA);
+      try {
+        const plan = await db.syncTables();
+        assert.ok(plan.statements.length >= 2);
+        const tables = await db.introspect();
+        const a = tables.find((t) => t.name.toLowerCase() === 't_sync_a')!;
+        const b = tables.find((t) => t.name.toLowerCase() === 't_sync_b')!;
+        assert.deepEqual(
+          a.columns.map((c) => c.name.toLowerCase()),
+          ['id', 'name'],
+        );
+        assert.deepEqual(
+          a.primaryKey.map((c) => c.toLowerCase()),
+          ['id'],
+        );
+        assert.ok(b.indexes.some((i) => i.name === 't_sync_b_title_idx' && !i.unique));
+        assert.deepEqual(
+          b.foreignKeys.map((f) => [
+            f.columns.map((c) => c.toLowerCase()),
+            f.references.toLowerCase(),
+          ]),
+          [[['a_id'], 't_sync_a']],
+        );
+        // SQLite 没有注释
+        assert.equal(a.comment, name.startsWith('sqlite') ? null : '同步测试');
+        // 建好之后再比：类型写法、注释、索引、外键都对上，没有要做的事
+        const again = await db.planSync();
+        assert.deepEqual([again.statements, again.differences], [[], []]);
+        assert.equal(await db.tableExists(SyncA), true);
+      } finally {
+        await db.dropTables(SyncB, SyncA);
+      }
+      assert.equal(await db.tableExists(SyncA), false);
+    });
+
+    it('renames, adds and indexes columns of an existing table and lists what it will not change', async () => {
+      const env = await seeded();
+      const v1 = createDb({ schema: defineSchema({ SyncA }), adapter: env.adapter });
+      await v1.dropTables(SyncA);
+      await v1.createTables();
+      try {
+        await v1.insert(SyncA).values({ name: 'kept' }).execute();
+        // 改了列名（renamedFrom）、加了可空列和索引
+        const SyncA2 = entity(
+          't_sync_a',
+          {
+            id: col.bigint().primaryKey().generated(),
+            title: col.string(50).comment('名称').renamedFrom('name'),
+            note: col.string(20).nullable(),
+          },
+          { comment: '同步测试', indexes: [{ columns: ['note'] }] },
+        );
+        const v2 = createDb({ schema: defineSchema({ SyncA2 }), adapter: env.adapter });
+        const plan = await v2.syncTables();
+        assert.equal(plan.statements.length, 3);
+        assert.deepEqual(plan.differences, []);
+        assert.equal((await v2.queryable(SyncA2).single()).title, 'kept');
+        assert.deepEqual(await v2.planSync(), { statements: [], differences: [] });
+        // 类型变了、列删了：不自动改，只列出来
+        const SyncA3 = entity('t_sync_a', {
+          id: col.bigint().primaryKey().generated(),
+          title: col.int(),
+        });
+        const v3 = createDb({ schema: defineSchema({ SyncA3 }), adapter: env.adapter });
+        const diff = await v3.planSync();
+        assert.deepEqual(diff.statements, []);
+        assert.ok(
+          diff.differences.some((d) => /t_sync_a\.title: type is/i.test(d)),
+          diff.differences.join('\n'),
+        );
+        assert.ok(
+          diff.differences.some((d) => /note: in the database but not in the entity/i.test(d)),
+        );
+      } finally {
+        await v1.dropTables(SyncA);
       }
     });
   });

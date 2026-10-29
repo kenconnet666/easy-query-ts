@@ -9,17 +9,21 @@
  */
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import {
+  assembleTables,
   Dialect,
   type ColumnOptions,
   type Adapter,
   type ConflictNode,
+  type DbTable,
   type DeleteNode,
   type Driver,
+  type Entity,
   type ExecuteResult,
   sqlString,
   type DatePart,
   type FunctionRenderer,
   type Node,
+  type QueryRunner,
   type Session,
   SqlWriter,
   type TransactionOptions,
@@ -86,6 +90,51 @@ export class MySqlDialect extends Dialect {
 
   override identity(): string {
     return 'AUTO_INCREMENT';
+  }
+
+  /** 列注释写在列定义里，表注释写在建表语句末尾 */
+  override readonly commentStyle = 'inline';
+  /** MySQL 的 CREATE INDEX 没有 IF NOT EXISTS */
+  override readonly indexIfNotExists = false;
+
+  protected override tableOptions(entity: Entity): string {
+    return entity.comment !== undefined ? ` COMMENT=${sqlString(entity.comment)}` : '';
+  }
+
+  /** 整数的显示宽度（int(11)）不算类型差异；BOOLEAN 在库里是 tinyint(1) */
+  protected override normalizeType(type: string): string {
+    const t = super.normalizeType(type);
+    if (t === 'tinyint(1)') return 'boolean';
+    return t.replace(/^(tinyint|smallint|mediumint|int|bigint)\(\d+\)/, '$1');
+  }
+
+  /** 读 information_schema（当前库） */
+  override async introspect(run: QueryRunner): Promise<DbTable[]> {
+    const schema = 'TABLE_SCHEMA = DATABASE()';
+    return assembleTables({
+      tables: await run(
+        `SELECT TABLE_NAME AS table_name, TABLE_COMMENT AS comment FROM information_schema.TABLES
+         WHERE ${schema} AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME`,
+      ),
+      columns: await run(
+        `SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name, COLUMN_TYPE AS column_type,
+           IS_NULLABLE AS is_nullable, COLUMN_DEFAULT AS column_default, COLUMN_COMMENT AS comment,
+           EXTRA LIKE '%auto_increment%' AS is_generated, COLUMN_KEY = 'PRI' AS primary_key
+         FROM information_schema.COLUMNS WHERE ${schema} ORDER BY TABLE_NAME, ORDINAL_POSITION`,
+      ),
+      indexes: await run(
+        `SELECT TABLE_NAME AS table_name, INDEX_NAME AS index_name, NON_UNIQUE = 0 AS is_unique,
+           COLUMN_NAME AS column_name
+         FROM information_schema.STATISTICS WHERE ${schema} AND INDEX_NAME <> 'PRIMARY'
+         ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX`,
+      ),
+      foreignKeys: await run(
+        `SELECT TABLE_NAME AS table_name, CONSTRAINT_NAME AS constraint_name, COLUMN_NAME AS column_name,
+           REFERENCED_TABLE_NAME AS referenced_table, REFERENCED_COLUMN_NAME AS referenced_column
+         FROM information_schema.KEY_COLUMN_USAGE WHERE ${schema} AND REFERENCED_TABLE_NAME IS NOT NULL
+         ORDER BY TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION`,
+      ),
+    });
   }
 
   /** MySQL 的 `<=>` 就是 null 安全的相等 */

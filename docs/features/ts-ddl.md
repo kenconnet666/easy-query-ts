@@ -1,4 +1,4 @@
-# TS：代码优先建表
+# TS：代码优先建表与同步（code-first）
 
 ```ts
 const Gadget = entity('t_gadget', {
@@ -11,11 +11,60 @@ const Gadget = entity('t_gadget', {
 });
 
 const db = createDb({ schema: defineSchema({ Gadget }), adapter });
-await db.createTables(); // 按 schema 里所有（非派生的）实体建表，已存在的跳过
-db.createTableSql(Gadget); // 只看语句，不执行
+await db.createTables(); // 建库里还没有的表（连同注释、索引、外键），已有的表不动
+db.createTablesSql(); // 只看语句，不执行（对应官方 createTableCommand）
+db.createTableSql(Gadget); // 只看一张表的 CREATE TABLE
 ```
 
-适合测试、原型、小工具和"库里还没有表"的起步；**正式环境的结构变更仍然应该用你自己的迁移**。只建表、列、主键、唯一约束；外键、非唯一索引、注释要自己用 `db.sql` 或迁移。
+## 注释、索引、外键、改名
+
+```ts
+const Book = entity(
+  't_book',
+  {
+    id: col.bigint().primaryKey().generated(),
+    shelfId: col.bigint().comment('书架'),
+    title: col.string(100).renamedFrom('name'), // 原来叫 name：同步时改名而不是加列
+  },
+  {
+    comment: '图书',
+    indexes: [{ columns: ['shelfId', 'title'], unique: true }],
+    renamedFrom: 't_books',
+  },
+);
+defineSchema(
+  { Shelf, Book },
+  {
+    Book: (r) => ({
+      shelf: r.one('Shelf', { from: 'shelfId', to: 'id' }, { foreignKey: { onDelete: 'cascade' } }),
+    }),
+  },
+);
+```
+
+- 注释：MySQL 写在建表语句里（列 `COMMENT`、表 `COMMENT=`），PG / HANA 用 `COMMENT ON`，SQLite 没有注释。
+- 索引名默认 `表_列_idx` / `uidx`；索引列的名字在类型上限定为实体的列（值对象写展开后的路径）。
+- 外键声明在多对一导航上（对应官方 `@ForeignKey`），名字默认 `fk_表_列`：建完所有表再 `ALTER TABLE … ADD CONSTRAINT`；SQLite 只能写进建表语句。
+
+## 同步：`planSync` / `syncTables`（对应官方 syncTableCommand）
+
+```ts
+const plan = await db.planSync(); // 读库里的结构（introspect）与实体比较，不执行
+console.log(plan.statements.join(';
+')); // 要执行的语句：只增不删
+console.log(plan.differences); // 不会自动改的差异
+await db.syncTables(); // 算计划并执行（PG、SQLite 在一个事务里）
+```
+
+- 会做：建缺的表、加缺的列、按 `renamedFrom` 改表名与列名、建缺的索引与外键。
+- 只列出不做：类型、可空、注释不一致，库里多出来的列，SQLite 上已有表缺的外键。与官方一样永不删表删列；要删用 `db.dropTables(…)`。
+- 类型比较忽略大小写、空格与各库的同义写法（`character varying` / `varchar`、`int(11)` / `int`、`tinyint(1)` / `boolean`、`timestamp(3) without time zone` / `timestamp(3)` …），
+  所以刚建好的表再比一次是空计划（实库测试验证）。
+- 读库结构：`db.introspect()` 返回当前 schema 的表、列、主键、索引、外键（MySQL 读 information_schema，PG 读系统目录，SQLite 读 pragma，HANA 读 SYS 视图）；
+  `db.tableExists(Entity)`。
+- 官方先打印 SQL、算 hash、人确认后再 commit；这里 `planSync` 返回语句与差异，确认方式由调用方决定（打印、写成迁移文件、比对 hash）。
+
+适合测试、原型和中小项目的起步；结构复杂的正式环境仍建议把 `planSync` 的输出落成迁移文件审阅后再执行。
 
 ## 列元数据
 
@@ -42,4 +91,4 @@ db.createTableSql(Gadget); // 只看语句，不执行
 
 方向相反、互补：`createTables` 是 schema → 库；T4（还没做）是现有库 → schema 文件。
 
-SQLite、MySQL 8.0.18 / 8.4、PG 17 实测（建表 → 插入 → 读回每种列类型 → 唯一约束拒绝重复）。
+SQLite、MySQL 8.4、PG 17 实测（建表 → 插入 → 读回每种列类型 → 唯一约束拒绝重复；注释、索引、外键、改名、加列、再比为空计划）；HANA 只有语句文本的单测。

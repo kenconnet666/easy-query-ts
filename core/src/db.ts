@@ -29,8 +29,10 @@ import type { Ref } from './ref.ts';
 import type { DerivedEntity, Entity, Row } from './schema.ts';
 import { createSqlTag, type SqlTag } from './native.ts';
 import { AggregateSaver, type SaveInclude, type SaveValue } from './save.ts';
+import { createStatements, findTable, planSync, type DbTable, type SyncPlan } from './ddl.ts';
 import {
   execute,
+  query,
   type Adapter,
   type Context,
   type ExecutionEvent,
@@ -337,21 +339,90 @@ export class Db<S extends AnySchema> {
     return this.inTransaction ? run(this) : this.transaction(run);
   }
 
-  /** 按实体定义生成建表语句（列、主键、唯一约束），不执行。类型规则见各方言的 columnType */
+  /** 按实体定义生成建表语句（列、主键、唯一约束、MySQL 的注释），不执行。类型规则见各方言的 columnType */
   createTableSql(entity: Entity): string {
     return this.ctx.dialect.createTable(entity, true);
   }
 
   /**
-   * 按 schema 里所有（非派生的）实体建表，已存在的跳过（HANA 没有 IF NOT EXISTS，表已存在会报错）。
-   * 适合测试、原型、小工具；正式环境的结构变更仍然应该用你自己的迁移。
-   * 只建表、列、主键、唯一约束；外键、非唯一索引、注释这类要自己用 `db.sql` 或迁移。
+   * 建这些实体（默认 schema 里全部非派生的实体）要的全部语句，不执行：建表、注释、索引、外键（对应 Java 版的 createTableCommand）
    */
-  async createTables(): Promise<void> {
-    for (const entity of Object.values(this.ctx.schema.entities)) {
-      if (entity.derived) continue;
-      await execute(this.ctx, { sql: this.ctx.dialect.createTable(entity, true), params: [] });
-    }
+  createTablesSql(...entities: Entity[]): string[] {
+    return createStatements(this.ctx.dialect, this.ctx.schema, this.targets(entities), true);
+  }
+
+  /**
+   * 建库里还没有的表（连同注释、索引、外键），已有的表不动；默认是 schema 里全部非派生的实体。
+   * 适合测试、原型和"库里还没有表"的起步；已有的表要跟上实体的变化用 planSync / syncTables
+   */
+  async createTables(...entities: Entity[]): Promise<void> {
+    const tables = await this.introspect();
+    const missing = this.targets(entities).filter((e) => !findTable(tables, e.table));
+    await this.runDdl(createStatements(this.ctx.dialect, this.ctx.schema, missing, false));
+  }
+
+  /** 读库里（当前 schema）的表结构：列、主键、索引、外键（syncTables、由表生成实体用） */
+  introspect(): Promise<DbTable[]> {
+    return this.ctx.dialect.introspect((sql, params = []) =>
+      query(this.ctx, { sql, params: [...params] }),
+    );
+  }
+
+  async tableExists(entity: Entity): Promise<boolean> {
+    return findTable(await this.introspect(), entity.table) !== undefined;
+  }
+
+  /**
+   * 比较实体与库里的表，得出同步计划，不执行（对应 Java 版的 syncTableCommand 先看 SQL）：
+   * 要执行的语句只增不删——建缺的表、加缺的列、按 renamedFrom 改表名列名、建缺的索引与外键；
+   * 类型、可空、注释不一致和库里多出来的列放进 differences，由人决定怎么迁移
+   * ```ts
+   * const plan = await db.planSync()
+   * console.log(plan.statements.join(';
+'), plan.differences)
+   * ```
+   */
+  async planSync(...entities: Entity[]): Promise<SyncPlan> {
+    return planSync(
+      this.ctx.dialect,
+      this.ctx.schema,
+      this.targets(entities),
+      await this.introspect(),
+    );
+  }
+
+  /** 算出同步计划并执行它的语句（PG、SQLite 在一个事务里；MySQL、HANA 的 DDL 会隐式提交），返回计划 */
+  async syncTables(...entities: Entity[]): Promise<SyncPlan> {
+    const plan = await this.planSync(...entities);
+    await this.runDdl(plan.statements);
+    return plan;
+  }
+
+  /** 删掉这些实体的表（库里没有的跳过） */
+  async dropTables(...entities: Entity[]): Promise<void> {
+    const tables = await this.introspect();
+    await this.runDdl(
+      entities
+        .filter((e) => findTable(tables, e.table))
+        .map((e) => this.ctx.dialect.dropTable(e.table)),
+    );
+  }
+
+  /** 没给实体时是 schema 里全部非派生的实体 */
+  private targets(entities: readonly Entity[]): Entity[] {
+    return entities.length > 0
+      ? [...entities]
+      : Object.values(this.ctx.schema.entities).filter((e) => !e.derived);
+  }
+
+  /** 逐条执行 DDL；能放进事务的库在一个事务里执行 */
+  private async runDdl(statements: readonly string[]): Promise<void> {
+    if (statements.length === 0) return;
+    const run = async (db: Db<S>) => {
+      for (const sql of statements) await execute(db.ctx, { sql, params: [] });
+    };
+    if (this.ctx.dialect.transactionalDdl && !this.inTransaction) await this.transaction(run);
+    else await run(this);
   }
 
   /**

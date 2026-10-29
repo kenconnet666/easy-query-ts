@@ -40,6 +40,8 @@ export interface One<T extends string = string, N extends boolean = boolean> {
   readonly interceptors?: InterceptorToggle;
   /** oneOn / manyOn 的本表（条件要拿本表的列） */
   readonly source?: string;
+  /** 建表时在 from 列上加外键约束，引用目标的 to 列 */
+  readonly foreignKey?: ForeignKey;
 }
 
 /** 多对多经过的中间表：from 列引用本表，to 列引用目标表（都是中间表上的列） */
@@ -72,6 +74,16 @@ export interface Many<T extends string = string> {
   readonly interceptors?: InterceptorToggle;
   /** oneOn / manyOn 的本表（条件要拿本表的列） */
   readonly source?: string;
+}
+
+/** 外键约束的引用动作 */
+export type ReferentialAction = 'cascade' | 'set null' | 'restrict' | 'no action';
+
+/** 多对一导航上声明的外键（建表与 syncTables 用）：名字默认 fk_表_列 */
+export interface ForeignKey {
+  readonly name?: string;
+  readonly onDelete?: ReferentialAction;
+  readonly onUpdate?: ReferentialAction;
 }
 
 /** 定义关系时的选项：固定的条件、对目标表的拦截器开关 */
@@ -127,7 +139,12 @@ export interface RelationBuilder<E extends Record<string, Entity>, S extends key
   >(
     target: T,
     on: { from: OneOrMany<F>; to: OneOrMany<ColumnKey<E[T]>> },
-    options?: RelationOptions<E[T]> & { optional?: O; required?: Req },
+    options?: RelationOptions<E[T]> & {
+      optional?: O;
+      required?: Req;
+      /** 建表时加外键约束（对应 Java 版的 @ForeignKey）：`true` 或 `{ onDelete: 'cascade' }` */
+      foreignKey?: boolean | ForeignKey;
+    },
   ): One<T, Req extends true ? false : O extends true ? true : AnyNullable<E[S], F>>;
   /** 一对多；options.where 是固定的条件（例如只算有效的子项：`{ where: (p) => p.deleted.eq(false) }`） */
   many<T extends keyof E & string>(
@@ -395,6 +412,9 @@ function builderFor<E extends Record<string, Entity>>(
         to: list(on.to),
         nullable,
         ...(required ? { required } : {}),
+        ...(options?.foreignKey
+          ? { foreignKey: options.foreignKey === true ? {} : options.foreignKey }
+          : {}),
         ...where(options),
       } as never;
     },

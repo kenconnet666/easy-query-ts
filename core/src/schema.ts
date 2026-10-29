@@ -80,6 +80,10 @@ export interface ColumnOptions {
   /** 库里的默认值，原样写进 DEFAULT 子句（受信任的 SQL，如 `'draft'`、`CURRENT_TIMESTAMP`） */
   readonly dbDefault?: string | undefined;
   readonly unique?: boolean | undefined;
+  /** 列注释：MySQL 写进列定义的 COMMENT，PG / HANA 用 COMMENT ON COLUMN，SQLite 没有 */
+  readonly comment?: string | undefined;
+  /** 库里原来的列名：syncTables 发现新列名不在、旧列名在时改名而不是加列（对应 Java 版的 @Column(renameFrom)） */
+  readonly renamedFrom?: string | undefined;
 }
 
 /** 乐观锁版本列的规则：initial 是插入时的值；next 由当前版本算出下一个，没有时按整数加 1（表达式更新里在 SQL 里加 1） */
@@ -256,6 +260,16 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
   /** 库里的列名（默认是属性名转下划线） */
   named(name: string): Column<T, N, O> {
     return new Column(this.codec, { ...this.options, name });
+  }
+
+  /** 列注释（建表与 syncTables 写进库里） */
+  comment(text: string): Column<T, N, O> {
+    return new Column(this.codec, { ...this.options, comment: text });
+  }
+
+  /** 库里原来的列名：改了列名之后 syncTables 把旧列改名，而不是加一列新的 */
+  renamedFrom(oldName: string): Column<T, N, O> {
+    return new Column(this.codec, { ...this.options, renamedFrom: oldName });
   }
 }
 
@@ -527,6 +541,36 @@ export interface Entity<Name extends string = string, F extends Fields = Fields>
   readonly primaryKey: readonly string[];
   /** 派生实体（子查询 / CTE）才有；普通的表没有 */
   readonly derived?: DerivedSource;
+  /** 表注释（建表与 syncTables 用） */
+  readonly comment?: string;
+  /** 索引（建表与 syncTables 用），列已换成库里的列名 */
+  readonly indexes?: readonly TableIndex[];
+  /** 库里原来的表名：改了表名之后 syncTables 把旧表改名，而不是新建 */
+  readonly renamedFrom?: string;
+}
+
+/** 一个索引：名字、库里的列名（按顺序）、是否唯一 */
+export interface TableIndex {
+  readonly name: string;
+  readonly columns: readonly string[];
+  readonly unique: boolean;
+}
+
+/** 能当索引列的列（值对象不能整个当索引列，写它展开后的路径 'address.city'） */
+type IndexColumn<F extends Fields> =
+  | ({ [K in keyof F]: F[K] extends Embedded<any> ? never : K }[keyof F] & string)
+  | `${string}.${string}`;
+
+/** 定义实体时的选项：表注释、索引、原来的表名（都只在建表与 syncTables 时用） */
+export interface EntityOptions<F extends Fields = Fields> {
+  readonly comment?: string;
+  /** 索引：`[{ columns: ['tenantId', 'createdAt'] }, { columns: ['email'], unique: true }]`；名字默认 表_列_idx / uidx */
+  readonly indexes?: readonly {
+    readonly columns: readonly [IndexColumn<F>, ...IndexColumn<F>[]];
+    readonly unique?: boolean;
+    readonly name?: string;
+  }[];
+  readonly renamedFrom?: string;
 }
 
 /** 一条查询的结果行（Out，列名 → 类型）对应的派生实体的列：值可空的列对应可空列 */
@@ -539,17 +583,25 @@ function snake(name: string): string {
   return name.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase());
 }
 
-/** 定义实体；name 默认用表名 */
+/**
+ * 定义实体；name 默认用表名。options 里是建表与 syncTables 用的元数据：
+ * `entity('t_order', { … }, { comment: '订单', indexes: [{ columns: ['tenantId', 'createdAt'] }] })`
+ */
 export function entity<const Table extends string, F extends Fields>(
   table: Table,
   fields: F,
+  options?: EntityOptions<F>,
 ): Entity<Table, F>;
 export function entity<const Name extends string, F extends Fields>(
   table: string,
   fields: F,
-  options: { name: Name },
+  options: EntityOptions<F> & { name: Name },
 ): Entity<Name, F>;
-export function entity(table: string, fields: Fields, options?: { name: string }): Entity {
+export function entity(
+  table: string,
+  fields: Fields,
+  options?: EntityOptions & { name?: string },
+): Entity {
   const columns: Record<string, AnyColumn> = {};
   const columnNames: Record<string, string> = {};
   const primaryKey: string[] = [];
@@ -568,6 +620,21 @@ export function entity(table: string, fields: Fields, options?: { name: string }
     }
   };
   walk(fields, '', '');
+  // 默认的索引名：表名（去掉 schema 前缀）_列_idx / uidx
+  const bare = table.split('@')[0]!.split('.').pop()!;
+  const indexes = (options?.indexes ?? []).map((index): TableIndex => {
+    const names = index.columns.map((path) => {
+      const name = columnNames[path];
+      if (name === undefined) throw new Error(`${table}: index column '${path}' is not a column`);
+      return name;
+    });
+    const unique = index.unique === true;
+    return {
+      name: index.name ?? `${bare}_${names.join('_')}_${unique ? 'uidx' : 'idx'}`,
+      columns: names,
+      unique,
+    };
+  });
   return {
     kind: 'entity',
     name: options?.name ?? table,
@@ -576,6 +643,9 @@ export function entity(table: string, fields: Fields, options?: { name: string }
     columns,
     columnNames,
     primaryKey,
+    ...(options?.comment !== undefined ? { comment: options.comment } : {}),
+    ...(indexes.length > 0 ? { indexes } : {}),
+    ...(options?.renamedFrom !== undefined ? { renamedFrom: options.renamedFrom } : {}),
   };
 }
 

@@ -11,13 +11,16 @@ import pg from 'pg';
 import type { Pool, PoolClient, QueryConfig, QueryResult } from 'pg';
 import { pgFunctions } from './functions.ts';
 import {
+  assembleTables,
   Dialect,
   type ColumnOptions,
   type Adapter,
+  type DbTable,
   type Driver,
   type ExecuteResult,
   type FunctionRenderer,
   type Node,
+  type QueryRunner,
   type Session,
   type SqlWriter,
   type TransactionOptions,
@@ -77,6 +80,47 @@ export class PostgresDialect extends Dialect {
 
   override readonly nullSafeEquals = 'IS NOT DISTINCT FROM';
   override readonly supportsReturning = true;
+  override readonly transactionalDdl = true;
+
+  /** 读系统目录（current_schema() 里的普通表与分区表） */
+  override async introspect(run: QueryRunner): Promise<DbTable[]> {
+    const tables = `SELECT c.oid, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')`;
+    return assembleTables({
+      tables: await run(
+        `SELECT t.relname AS table_name, obj_description(t.oid, 'pg_class') AS comment
+         FROM (${tables}) t ORDER BY t.relname`,
+      ),
+      columns: await run(
+        `SELECT t.relname AS table_name, a.attname AS column_name,
+           format_type(a.atttypid, a.atttypmod) AS column_type, NOT a.attnotnull AS is_nullable,
+           pg_get_expr(d.adbin, d.adrelid) AS column_default, col_description(t.oid, a.attnum) AS comment,
+           a.attidentity <> '' OR coalesce(pg_get_expr(d.adbin, d.adrelid), '') LIKE 'nextval(%' AS is_generated,
+           EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = t.oid AND i.indisprimary AND a.attnum = ANY (i.indkey)) AS primary_key
+         FROM (${tables}) t JOIN pg_attribute a ON a.attrelid = t.oid
+         LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+         WHERE a.attnum > 0 AND NOT a.attisdropped ORDER BY t.relname, a.attnum`,
+      ),
+      indexes: await run(
+        `SELECT t.relname AS table_name, ic.relname AS index_name, i.indisunique AS is_unique, a.attname AS column_name
+         FROM (${tables}) t JOIN pg_index i ON i.indrelid = t.oid AND NOT i.indisprimary
+         JOIN pg_class ic ON ic.oid = i.indexrelid
+         CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ord)
+         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+         ORDER BY t.relname, ic.relname, k.ord`,
+      ),
+      foreignKeys: await run(
+        `SELECT t.relname AS table_name, c.conname AS constraint_name, a.attname AS column_name,
+           r.relname AS referenced_table, ra.attname AS referenced_column
+         FROM (${tables}) t JOIN pg_constraint c ON c.conrelid = t.oid AND c.contype = 'f'
+         JOIN pg_class r ON r.oid = c.confrelid
+         CROSS JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY k(attnum, refnum, ord)
+         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+         JOIN pg_attribute ra ON ra.attrelid = r.oid AND ra.attnum = k.refnum
+         ORDER BY t.relname, c.conname, k.ord`,
+      ),
+    });
+  }
 
   /** CASE 分支里的字符串 / 数字 / 布尔参数 PG 推断不出类型（"could not determine data type of parameter"），加显式转换 */
   protected override caseValue(n: Node, w: SqlWriter): string {

@@ -7,20 +7,34 @@ export type {
   DecimalText,
   Encryption,
   Entity,
+  EntityOptions,
   Fields,
   Insert,
   InsertOf,
   Row,
   RowOf,
   StandardSchema,
+  TableIndex,
   Update,
   UpdateOf,
   ValueOf,
 } from './schema.ts';
 export { defineComputed, defineSchema } from './relations.ts';
+export { assembleTables, bareName } from './ddl.ts';
+export type {
+  DbColumn,
+  DbForeignKey,
+  DbIndex,
+  DbTable,
+  ForeignKeySpec,
+  QueryRunner,
+  SyncPlan,
+} from './ddl.ts';
 export type {
   Computed,
+  ForeignKey,
   Member,
+  ReferentialAction,
   RelationFilter,
   RelationOn,
   RelationOptions,

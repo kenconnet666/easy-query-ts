@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { or, sql } from '@zerodep-dev/easy-query-ts';
-import { Comment, Gadget, Post, User } from '../src/fixture.ts';
+import { createDb, or, sql } from '@zerodep-dev/easy-query-ts';
+import { Comment, ddlSchema, Gadget, Post, User } from '../src/fixture.ts';
 import { memoryDb } from '../src/sqlite-env.ts';
 
 describe('sqlite: SQL text', async () => {
@@ -241,5 +241,17 @@ describe('sqlite: code-first DDL', async () => {
       db.queryable(Post).select((p) => ({ id: p.id })),
     );
     assert.throws(() => cte.createTableSql(cte.entity('recent')), /derived/);
+  });
+});
+
+describe('sqlite: create statements with comments, indexes and foreign keys', async () => {
+  const db = createDb({ schema: ddlSchema, adapter: (await memoryDb()).adapter });
+
+  it('renders every statement in order', () => {
+    assert.deepEqual(db.createTablesSql(), [
+      'CREATE TABLE IF NOT EXISTS "t_shelf" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "name" TEXT NOT NULL)',
+      'CREATE TABLE IF NOT EXISTS "t_book" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "shelf_id" INTEGER NOT NULL, "title" TEXT NOT NULL, CONSTRAINT "fk_t_book_shelf_id" FOREIGN KEY ("shelf_id") REFERENCES "t_shelf" ("id") ON DELETE CASCADE)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS "t_book_shelf_id_title_uidx" ON "t_book" ("shelf_id", "title")',
+    ]);
   });
 });

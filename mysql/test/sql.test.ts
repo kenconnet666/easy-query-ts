@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import type { Pool } from 'mysql2/promise';
 import { col, createDb, Dialect, entity, type Driver } from '@zerodep-dev/easy-query-ts';
-import { Gadget, schema, User } from '@zerodep-dev/easy-query-ts-test/fixture';
+import { ddlSchema, Gadget, schema, User } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { MySQL, mysql } from '../src/index.ts';
 
 describe('mysql: SQL text', () => {
@@ -97,5 +97,18 @@ describe('mysql: code-first DDL', () => {
       ),
       /`v` POINT NOT NULL/,
     );
+  });
+});
+
+describe('mysql: create statements with comments, indexes and foreign keys', async () => {
+  const db = createDb({ schema: ddlSchema, adapter: mysql({} as Pool) });
+
+  it('renders every statement in order', () => {
+    assert.deepEqual(db.createTablesSql(), [
+      "CREATE TABLE IF NOT EXISTS `t_shelf` (`id` BIGINT AUTO_INCREMENT NOT NULL, `name` VARCHAR(50) NOT NULL COMMENT '书架''s 名', PRIMARY KEY (`id`)) COMMENT='书架'",
+      'CREATE TABLE IF NOT EXISTS `t_book` (`id` BIGINT AUTO_INCREMENT NOT NULL, `shelf_id` BIGINT NOT NULL, `title` VARCHAR(100) NOT NULL, PRIMARY KEY (`id`))',
+      'CREATE UNIQUE INDEX `t_book_shelf_id_title_uidx` ON `t_book` (`shelf_id`, `title`)',
+      'ALTER TABLE `t_book` ADD CONSTRAINT `fk_t_book_shelf_id` FOREIGN KEY (`shelf_id`) REFERENCES `t_shelf` (`id`) ON DELETE CASCADE',
+    ]);
   });
 });

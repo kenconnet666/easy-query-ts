@@ -10,9 +10,11 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import {
   Dialect,
   type ColumnOptions,
+  type DbTable,
   type Entity,
   type Adapter,
   type Driver,
+  type QueryRunner,
   type ExecuteResult,
   coalesceEach,
   sqlString,
@@ -66,6 +68,74 @@ export class SqliteDialect extends Dialect {
   override readonly nullSafeEquals = 'IS';
   /** SQLite 3.35+（node:sqlite 自带的版本满足） */
   override readonly supportsReturning = true;
+  /** 没有注释；外键只能写在建表语句里；DDL 能放进事务 */
+  override readonly commentStyle = 'none';
+  override readonly inlineForeignKeys = true;
+  override readonly transactionalDdl = true;
+
+  /** 读 sqlite_master 与 pragma_table_info / index_list / foreign_key_list（外键没有名字，按列比较） */
+  override async introspect(run: QueryRunner): Promise<DbTable[]> {
+    const tables = await run(
+      `SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
+    );
+    const out: DbTable[] = [];
+    for (const t of tables) {
+      const name = String(t['name']);
+      const autoincrement = /\bAUTOINCREMENT\b/i.test(typeof t['sql'] === 'string' ? t['sql'] : '');
+      const columns = await run(
+        `SELECT name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_info(?) ORDER BY cid`,
+        [name],
+      );
+      const indexes = [];
+      for (const i of await run(
+        `SELECT name, "unique" AS is_unique FROM pragma_index_list(?) WHERE origin <> 'pk' ORDER BY name`,
+        [name],
+      )) {
+        const parts = await run(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`, [
+          i['name'],
+        ]);
+        indexes.push({
+          name: String(i['name']),
+          columns: parts.map((p) => String(p['name'])),
+          unique: Number(i['is_unique']) === 1,
+        });
+      }
+      const keys = await run(
+        `SELECT id, "table" AS referenced_table, "from" AS column_name, "to" AS referenced_column
+         FROM pragma_foreign_key_list(?) ORDER BY id, seq`,
+        [name],
+      );
+      const foreignKeys = [...new Set(keys.map((k) => Number(k['id'])))].map((id) => {
+        const list = keys.filter((k) => Number(k['id']) === id);
+        return {
+          name: `fk_${name}_${id}`,
+          columns: list.map((k) => String(k['column_name'])),
+          references: String(list[0]!['referenced_table']),
+          referencedColumns: list.map((k) => String(k['referenced_column'])),
+        };
+      });
+      out.push({
+        name,
+        comment: null,
+        columns: columns.map((c) => ({
+          name: String(c['name']),
+          type: String(c['type']),
+          // 主键列在 SQLite 里可以不写 NOT NULL，按声明它不会是 NULL
+          nullable: Number(c['not_null']) === 0 && Number(c['pk']) === 0,
+          default: c['dflt_value'] === null ? null : String(c['dflt_value'] as string | number),
+          comment: null,
+          generated: autoincrement && Number(c['pk']) === 1,
+        })),
+        primaryKey: columns
+          .filter((c) => Number(c['pk']) > 0)
+          .sort((a, b) => Number(a['pk']) - Number(b['pk']))
+          .map((c) => String(c['name'])),
+        indexes,
+        foreignKeys,
+      });
+    }
+    return out;
+  }
 
   /** SQLite 只有 INTEGER / REAL / TEXT / BLOB / NUMERIC 几种亲和性：日期时间都是 TEXT，布尔是 INTEGER */
   override columnType(kind: string, o: ColumnOptions): string {

@@ -283,8 +283,8 @@ export const capabilities = {
   },
   codeFirst: {
     title: '建表与迁移（code-first）',
-    status: 'todo',
-    ts: '部分：createTables；syncTables 待做（16.5）',
+    status: 'done',
+    ts: 'createTables / createTablesSql（注释、索引、外键）、planSync / syncTables（只增不删，renamedFrom 改名，差异只列出）、introspect、tableExists、dropTables；suite.ts code-first sync、各方言 sql.test',
   },
   sharding: { title: '分库分表', status: 'todo', ts: '待做（16.6.2、16.6.3）' },
   cache: { title: '二级缓存', status: 'todo', ts: '待做（16.6.1）' },
