@@ -513,6 +513,8 @@ interface WriteState {
   readonly version?: { readonly current: unknown };
   /** changes(before, after) 比出来没有变化：execute 不发语句，返回 0 */
   readonly unchanged?: boolean;
+  /** delete 显式写了 hard()：hardDelete: 'forbid' 时也执行物理删除 */
+  readonly hard?: boolean;
   /** expectRows：改到的行数必须是 count，否则抛 error(实际行数) */
   readonly expect?: { readonly count: number; readonly error: (affected: number) => Error };
 }
@@ -863,7 +865,10 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
 
   /** 物理删除：绕过逻辑删除（读过滤与改写成 update 都不再生效），已被逻辑删除的行也会被删掉 */
   hard(): Deletable<S, K> {
-    return this.noInterceptor('softDelete');
+    return new Deletable(withToggle(this.ctx, { skip: ['softDelete'] }), this.key as K, {
+      ...this.state,
+      hard: true,
+    });
   }
 
   /** 这条语句不用这些拦截器（名字见 InterceptorNames） */
@@ -900,6 +905,10 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
         detail: { kind: 'delete', soft: true },
       };
     }
+    if (this.ctx.guards.hardDelete === 'forbid' && !this.state.hard)
+      throw new Error(
+        `physical delete of ${entity.table} is forbidden (hardDelete: 'forbid'); give it a softDelete column or call .hard()`,
+      );
     const node = { from, where };
     checkAliases(node);
     const w = new SqlWriter();

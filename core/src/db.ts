@@ -84,6 +84,15 @@ export interface DbOptions<S extends AnySchema> {
   readonly onExecute?: (event: ExecutionEvent) => void;
   /** 谓词与写入拦截器，见 tenant()、touch() */
   readonly interceptors?: readonly Interceptor[];
+  /**
+   * 物理删除：'forbid' 时没有逻辑删除列的实体 delete 要显式写 `.hard()` 才执行，防止误删（对应 Java 版的 deleteThrow）。默认 'allow'
+   */
+  readonly hardDelete?: 'allow' | 'forbid';
+  /**
+   * 没写 limit 的 toList 最多读这么多行，多了报错而不是悄悄截断（对应 Java 版的 resultSizeLimit），防止误拉整表；
+   * 显式写了 limit、toPage、stream 不受限。默认不限
+   */
+  readonly maxRows?: number;
 }
 
 export class Db<S extends AnySchema> {
@@ -677,6 +686,7 @@ export function createDb<S extends AnySchema>(options: DbOptions<S>): Db<S> {
     onExecute: options.onExecute,
     signal: undefined,
     hooks: undefined,
+    guards: { hardDelete: options.hardDelete ?? 'allow', maxRows: options.maxRows },
     // 列修饰器驱动的内置规则在前，用户的拦截器在后
     interceptors: new Interceptors([...columnRules(), ...(options.interceptors ?? [])]),
   };

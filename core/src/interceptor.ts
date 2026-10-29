@@ -132,7 +132,11 @@ export function columnRules(): Interceptor[] {
     },
     deleteAs: (entity) => {
       const found = columnsWith(entity, 'softDelete')[0];
-      return found ? { [found.prop]: valueOf(found.value.deleted) } : undefined;
+      if (!found) return undefined;
+      const set: Record<string, unknown> = { [found.prop]: valueOf(found.value.deleted) };
+      // $onDelete 的列（删除人、删除时间）一并写入
+      for (const { prop, value } of columnsWith(entity, 'onDeleteFn')) set[prop] = value();
+      return set;
     },
   };
   return [defaults, softDelete];

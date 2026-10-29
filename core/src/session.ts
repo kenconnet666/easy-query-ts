@@ -73,6 +73,16 @@ export interface Context {
   readonly signal: AbortSignal | undefined;
   /** 事务结束后要做的事（Db.afterCommit / afterRollback）；不在事务里时没有 */
   readonly hooks: TransactionHooks | undefined;
+  /** 全局护栏（createDb 的 hardDelete、maxRows） */
+  readonly guards: Guards;
+}
+
+/** 全局护栏：防误删、防误拉整表 */
+export interface Guards {
+  /** 'forbid' 时没有逻辑删除的 delete 要显式写 .hard() 才执行（对应 Java 版的 deleteThrow） */
+  readonly hardDelete: 'allow' | 'forbid';
+  /** 没写 limit 的 toList 最多读这么多行，多了报错（不悄悄截断）；undefined 不限 */
+  readonly maxRows: number | undefined;
 }
 
 /** 事务结束后要做的事：一层一帧，保存点（嵌套事务）成功时并进外层，失败时丢掉它登记的提交后的事 */

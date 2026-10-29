@@ -283,8 +283,16 @@ abstract class Executable<Out> implements Subquery<Out> {
   }
 
   async toList(): Promise<Out[]> {
-    const built = build(this.ctx, this.state);
-    return (await run(this.ctx, built.select, built.shape)) as Out[];
+    // maxRows：没写 limit 时多读一行，读到了就说明超了
+    const max = this.ctx.guards.maxRows;
+    const capped = max !== undefined && this.state.limit === undefined;
+    const built = build(this.ctx, capped ? { ...this.state, limit: max + 1 } : this.state);
+    const rows = (await run(this.ctx, built.select, built.shape)) as Out[];
+    if (capped && rows.length > max)
+      throw new Error(
+        `the query returned more than ${max} rows (maxRows); page it with toPage() / limit(), or read it with stream()`,
+      );
+    return rows;
   }
 
   /** 第一行；没有时 undefined */

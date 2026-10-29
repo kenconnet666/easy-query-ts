@@ -19,6 +19,8 @@ export interface Codec<T> {
   readonly kind: ColumnKind;
   decode(raw: unknown): T;
   encode(value: T): unknown;
+  /** 透明加密的列带着它的加密策略：like 据此加密搜索词，或在策略不支持时报错 */
+  readonly encryption?: Encryption | undefined;
 }
 
 /**
@@ -55,6 +57,8 @@ export interface ColumnOptions {
   readonly name?: string;
   /** 插入时没给值就用它（客户端生成，如 uuid、雪花 id） */
   readonly defaultFn?: (() => unknown) | undefined;
+  /** 逻辑删除时一并写入（删除人、删除时间） */
+  readonly onDeleteFn?: (() => unknown) | undefined;
   /** 更新时没给值就用它（如更新时间） */
   readonly onUpdateFn?: (() => unknown) | undefined;
   readonly softDelete?: SoftDelete | undefined;
@@ -88,6 +92,11 @@ export interface VersionRule {
 export interface Encryption {
   encrypt(plain: string): string;
   decrypt(cipher: string): string;
+  /**
+   * 可分段搜索（对应 Java 版的 supportQueryLike）：一段明文的密文是整段密文的一部分（按固定长度分段、逐段加密的算法）。
+   * 为 true 时 like / startsWith / endsWith 把搜索词加密后匹配
+   */
+  readonly searchable?: boolean;
 }
 
 /** 一列：T 是 JS 类型，N 是否可空，O 插入时是否可省（自增、有默认值、可空） */
@@ -122,14 +131,25 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
     return new Column(this.codec, { ...this.options, hasDefault: true });
   }
 
-  /** 插入时没给值就调用 fn 生成（uuid、雪花 id 等客户端生成的默认值）；插入时这一列可省 */
-  $default(fn: () => T): Column<T, N, true> {
+  /**
+   * 插入时没给值就调用 fn 生成（uuid、雪花 id 等客户端生成的默认值）；插入时这一列可省。
+   * 也可以返回 sql 片段，由库里的函数生成（对应 Java 版的 generatedSQLColumnGenerator）：`$default(() => sql\`nextval('order_no')\`)`
+   */
+  $default(fn: () => T | Expr<T>): Column<T, N, true> {
     return new Column(this.codec, { ...this.options, defaultFn: fn });
   }
 
   /** 更新时没给值就调用 fn（更新时间、更新人） */
   $onUpdate(fn: () => T): Column<T, N, O> {
     return new Column(this.codec, { ...this.options, onUpdateFn: fn });
+  }
+
+  /**
+   * 逻辑删除时一并写入 fn 的值（删除人、删除时间）：`deletedBy: col.string().nullable().$onDelete(() => currentUser())`。
+   * 只在实体有 softDelete 列、delete 改写成 update 时生效；物理删除不写
+   */
+  $onDelete(fn: () => T): Column<T, N, O> {
+    return new Column(this.codec, { ...this.options, onDeleteFn: fn });
   }
 
   /** 只改 TS 类型不改运行时：品牌类型（`col.bigint().$type<UserId>()`）让不同表的 id 不能混用 */
@@ -180,13 +200,17 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
     return new Column(this.codec, { ...this.options, insertOnly: true });
   }
 
-  /** 透明加解密（仅字符串列） */
+  /**
+   * 透明加解密（仅字符串列）。等值比较照常可用；like / startsWith 只在策略声明 searchable 时可用（搜索词加密后匹配），
+   * 否则报错——要在库里搜索请改用 sqlConvert 由库加解密
+   */
   encrypted(this: Column<string, N, O>, strategy: Encryption): Column<string, N, O> {
     const inner = this.codec;
     const codec: Codec<string> = {
       kind: inner.kind,
       decode: (raw) => strategy.decrypt(inner.decode(raw)),
       encode: (v) => inner.encode(strategy.encrypt(v)),
+      encryption: strategy,
     };
     return new Column(codec, this.options);
   }
@@ -582,7 +606,8 @@ type OptionalKeys<F extends Fields> = {
       : never;
 }[keyof F];
 type RequiredKeys<F extends Fields> = Exclude<keyof F, OptionalKeys<F>>;
-type InsertValue<C> = C extends Embedded<infer G> ? InsertOf<G> : ValueOf<C>;
+/** 插入的值：值本身，或由库生成的 sql 片段（`sql\`nextval('s')\``） */
+type InsertValue<C> = C extends Embedded<infer G> ? InsertOf<G> : ValueOf<C> | Expr<ValueOf<C>>;
 
 /** 一组声明的列插入时的形状 */
 export type InsertOf<F extends Fields> = {

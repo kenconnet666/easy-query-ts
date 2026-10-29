@@ -164,16 +164,16 @@ export class Expr<T> {
 
   /** 包含 text（两边加 %）；text 里的 % _ 按字面匹配 */
   like(this: Expr<string | null>, text: string): Pred {
-    return this.likeNode(`%${escapeLike(text)}%`, false);
+    return this.likeNode('%', text, '%', false);
   }
   notLike(this: Expr<string | null>, text: string): Pred {
-    return this.likeNode(`%${escapeLike(text)}%`, true);
+    return this.likeNode('%', text, '%', true);
   }
   startsWith(this: Expr<string | null>, text: string): Pred {
-    return this.likeNode(`${escapeLike(text)}%`, false);
+    return this.likeNode('', text, '%', false);
   }
   endsWith(this: Expr<string | null>, text: string): Pred {
-    return this.likeNode(`%${escapeLike(text)}`, false);
+    return this.likeNode('%', text, '', false);
   }
 
   asc(): Order {
@@ -385,11 +385,18 @@ export class Expr<T> {
     return new Expr({ k: 'fn', name, args: [this.node] }, this.codec);
   }
 
-  private likeNode(pattern: string, not: boolean): Pred {
+  /** LIKE before + text + after；加密列上搜索词先按同样的策略加密（策略不可分段搜索时报错，否则会拿明文去比密文、静默查不到） */
+  private likeNode(before: string, text: string, after: string, not: boolean): Pred {
+    const encryption = this.codec?.encryption;
+    if (encryption && !encryption.searchable)
+      throw new Error(
+        'like / startsWith / endsWith on an encrypted column need a searchable encryption strategy; use sqlConvert to search inside the database',
+      );
+    const term = encryption ? encryption.encrypt(text) : text;
     return pred({
       k: 'like',
       e: this.node,
-      pattern: { k: 'param', value: pattern, codec: undefined },
+      pattern: { k: 'param', value: before + escapeLike(term) + after, codec: undefined },
       not,
     });
   }
