@@ -530,6 +530,56 @@ export class Expr<T> {
     );
   }
 
+  // ---- JSON（对应 Java 版的 JSONObject / JSONArray）：路径按 JSON 列的 TS 类型补全、检查 ----
+
+  /**
+   * 取 JSON 里路径处的元素（对象、数组或标量），类型由路径推出：`u.attrs.json('profile', 'tags')` 是 `string[] | null`。
+   * 数组下标写数字：`o.items.json(0, 'name')`。HANA 只能取对象和数组
+   */
+  json<P extends JsonPath<NonNullable<T>>>(
+    this: Expr<object | null>,
+    ...path: P
+  ): Expr<JsonAt<NonNullable<T>, P> | null> {
+    return new Expr(this.jsonNode('json_value', path), jsonCodec);
+  }
+
+  /** 取路径处的值作文字（字符串不带引号），比较、like 时用：`u.attrs.jsonText('code').eq('200')` */
+  jsonText<P extends JsonPath<NonNullable<T>>>(
+    this: Expr<object | null>,
+    ...path: P
+  ): Expr<string | null> {
+    return new Expr(this.jsonNode('json_text', path), codecs.string);
+  }
+
+  /** 取路径处的数字；路径的终点必须是数字 */
+  jsonNumber<P extends JsonLeafPath<NonNullable<T>, number>>(
+    this: Expr<object | null>,
+    ...path: P
+  ): Expr<number | null> {
+    return new Expr(this.jsonNode('json_number', path), codecs.double);
+  }
+
+  /** 取路径处的布尔；路径的终点必须是布尔 */
+  jsonBoolean<P extends JsonLeafPath<NonNullable<T>, boolean>>(
+    this: Expr<object | null>,
+    ...path: P
+  ): Expr<boolean | null> {
+    return new Expr(this.jsonNode('json_boolean', path), codecs.boolean);
+  }
+
+  /** 路径处有值（对应 Java 版的 containsKey） */
+  jsonHas<P extends JsonPath<NonNullable<T>>>(this: Expr<object | null>, ...path: P): Pred {
+    return pred(this.jsonNode('json_has', path));
+  }
+
+  /** 路径处（不写路径就是本身）数组的长度 */
+  jsonLength<P extends JsonLeafPath<NonNullable<T>, readonly unknown[]> | []>(
+    this: Expr<object | null>,
+    ...path: P
+  ): Expr<number | null> {
+    return new Expr(this.jsonNode('json_length', path), codecs.int);
+  }
+
   /**
    * 类型转换（CAST）。decimal 要给精度与小数位：`x.cast('decimal', 12, 2)`。
    * 各库的类型名不同（MySQL 的整数是 SIGNED、字符串是 CHAR），由方言函数表翻译。
@@ -565,6 +615,14 @@ export class Expr<T> {
 
   private fn(name: string): Expr<unknown> {
     return new Expr({ k: 'fn', name, args: [this.node] }, this.codec);
+  }
+
+  /** JSON 函数的节点：路径写成 JSON 数组的字面量，各库翻成自己的路径写法 */
+  private jsonNode(name: string, path: readonly (string | number)[]): Node {
+    for (const part of path)
+      if (typeof part === 'number' && (!Number.isSafeInteger(part) || part < 0))
+        throw new RangeError(`json array index must be a non-negative integer, got ${part}`);
+    return { k: 'fn', name, args: [this.node, { k: 'lit', sql: sqlString(JSON.stringify(path)) }] };
   }
 
   /** 数学函数：结果是浮点数 */
@@ -619,6 +677,57 @@ const DATE_UNITS: readonly DateUnit[] = [
   'minute',
   'second',
 ];
+
+/** JSON 元素的解码：各库都按 JSON 文字返回（取元素时转成文字），解析成对象、数组或标量 */
+const jsonCodec: Codec<any> = {
+  kind: 'json',
+  decode: (raw) => (typeof raw === 'string' ? JSON.parse(raw) : raw),
+  encode: (value) => JSON.stringify(value),
+};
+
+/** JSON 路径的递归深度上限（再深的路径类型不再展开） */
+type JsonDepth = [never, 0, 1, 2, 3, 4];
+
+/**
+ * JSON 列的类型 T 上可以走的路径：对象的键、数组的下标（数字），最多 5 层。
+ * T 是 unknown（`col.json()` 没写类型）时任何路径都行
+ */
+export type JsonPath<T, D extends number = 5> = unknown extends T
+  ? (string | number)[]
+  : [D] extends [never]
+    ? never
+    : T extends readonly (infer E)[]
+      ? [number] | [number, ...JsonPath<NonNullable<E>, JsonDepth[D]>]
+      : T extends object
+        ? {
+            [K in keyof T & string]: [K] | [K, ...JsonPath<NonNullable<T[K]>, JsonDepth[D]>];
+          }[keyof T & string]
+        : never;
+
+/** 终点的值是 V 的路径 */
+export type JsonLeafPath<T, V, D extends number = 5> = unknown extends T
+  ? (string | number)[]
+  : [D] extends [never]
+    ? never
+    : T extends readonly (infer E)[]
+      ? | (NonNullable<E> extends V ? [number] : never)
+        | [number, ...JsonLeafPath<NonNullable<E>, V, JsonDepth[D]>]
+      : T extends object
+        ? {
+            [K in keyof T & string]:
+              | (NonNullable<T[K]> extends V ? [K] : never)
+              | [K, ...JsonLeafPath<NonNullable<T[K]>, V, JsonDepth[D]>];
+          }[keyof T & string]
+        : never;
+
+/** 路径 P 处的值的类型 */
+export type JsonAt<T, P> = P extends readonly [infer K, ...infer Rest]
+  ? T extends readonly (infer E)[]
+    ? JsonAt<NonNullable<E>, Rest>
+    : K extends keyof T
+      ? JsonAt<NonNullable<T[K]>, Rest>
+      : unknown
+  : T;
 
 /** add 的时间单位 */
 export type TimeUnit = 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second';

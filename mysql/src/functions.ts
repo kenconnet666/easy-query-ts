@@ -9,6 +9,7 @@
 import {
   codecs,
   dialectFn,
+  standardJsonPath,
   unquoteSql,
   type Expr,
   type FunctionRenderer,
@@ -108,6 +109,13 @@ export const mysqlFunctions: Record<string, FunctionRenderer> = {
   // 日期时间列按 UTC 存，取 UTC 的当前时刻
   now: () => 'UTC_TIMESTAMP(3)',
   truncate: (a) => `TRUNCATE(${a[0]}, ${a[1]})`,
+  // JSON：取元素时转成文字，免得驱动把 JSON 类型先解析一遍（字符串 "200" 会被当成数字再解析）
+  json_value: (a) => `CAST(JSON_EXTRACT(${a[0]}, ${standardJsonPath(a[1]!)}) AS CHAR)`,
+  json_text: (a) => `JSON_UNQUOTE(JSON_EXTRACT(${a[0]}, ${standardJsonPath(a[1]!)}))`,
+  json_number: (a) => `CAST(JSON_EXTRACT(${a[0]}, ${standardJsonPath(a[1]!)}) AS DOUBLE)`,
+  json_boolean: (a) => `(JSON_EXTRACT(${a[0]}, ${standardJsonPath(a[1]!)}) = TRUE)`,
+  json_has: (a) => `JSON_CONTAINS_PATH(${a[0]}, 'one', ${standardJsonPath(a[1]!)})`,
+  json_length: (a) => `JSON_LENGTH(${a[0]}, ${standardJsonPath(a[1]!)})`,
   cast_string: (a) => `CAST(${a[0]} AS CHAR)`,
   cast_int: (a) => `CAST(${a[0]} AS SIGNED)`,
   cast_bigint: (a) => `CAST(${a[0]} AS SIGNED)`,

@@ -183,7 +183,11 @@ export const capabilities = {
     status: 'done',
     ts: 'sign、power、sqrt、exp、ln、log10、log、三角函数、truncate；suite.ts function library',
   },
-  'func.json': { title: 'JSON 函数', status: 'todo', ts: '待做（16.2.2）' },
+  'func.json': {
+    title: 'JSON 函数',
+    status: 'done',
+    ts: 'json / jsonText / jsonNumber / jsonBoolean / jsonHas / jsonLength，路径按列的 TS 类型补全检查；json-functions.test.ts、suite.ts function library',
+  },
   'func.general': {
     title: '通用函数（nullOrDefault、maxColumns …）',
     status: 'done',

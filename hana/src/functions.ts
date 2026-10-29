@@ -8,6 +8,7 @@
 import {
   codecs,
   dialectFn,
+  standardJsonPath,
   unquoteSql,
   type Expr,
   type FunctionRenderer,
@@ -68,6 +69,13 @@ export const hanaFunctions: Record<string, FunctionRenderer> = {
   now: () => 'CURRENT_UTCTIMESTAMP',
   truncate: (a) => `ROUND(${a[0]}, ${a[1]}, ROUND_DOWN)`,
   log10: (a) => `LOG(10, ${a[0]})`,
+  // JSON：JSON_QUERY 取对象、数组，JSON_VALUE 取标量
+  json_value: (a) => `JSON_QUERY(${a[0]}, ${standardJsonPath(a[1]!)})`,
+  json_text: (a) => `JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)})`,
+  json_number: (a) => `CAST(JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)}) AS DOUBLE)`,
+  json_boolean: (a) => `(JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)}) = 'true')`,
+  json_has: (a) =>
+    `(JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)}) IS NOT NULL OR JSON_QUERY(${a[0]}, ${standardJsonPath(a[1]!)}) IS NOT NULL)`,
   cast_string: (a) => `CAST(${a[0]} AS NVARCHAR(5000))`,
   cast_double: (a) => `CAST(${a[0]} AS DOUBLE)`,
   'hana.contains': (a) => `CONTAINS(${columnList(a.slice(0, -1))}, ${a[a.length - 1]})`,

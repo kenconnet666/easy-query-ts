@@ -2502,6 +2502,31 @@ export function liveSuite(
       ]);
     });
 
+    it('json functions: element, text, length, has (official func/json)', async () => {
+      const { db } = await seeded();
+      const rows = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({
+          tags: u.attrs.json('tags'),
+          first: u.attrs.jsonText('tags', 0),
+          count: u.attrs.jsonLength('tags'),
+          has: u.attrs.jsonHas('tags', 0),
+        }))
+        .toList();
+      assert.deepEqual(rows, [
+        { tags: ['vip'], first: 'vip', count: 1, has: true },
+        { tags: [], first: null, count: 0, has: false },
+        { tags: [], first: null, count: 0, has: false },
+      ]);
+      const vip = await db
+        .queryable(User)
+        .where((u) => u.attrs.jsonText('tags', 0).eq('vip'))
+        .select((u) => u.name)
+        .toList();
+      assert.deepEqual(vip, ['alice']);
+    });
+
     it('window value functions: firstValue / lastValue / nthValue', async () => {
       const { db } = await seeded();
       const rows = await db

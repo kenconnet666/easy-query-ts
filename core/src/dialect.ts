@@ -130,6 +130,14 @@ export abstract class Dialect {
       diff_time: (a) =>
         `CAST(TRUNC(EXTRACT(EPOCH FROM (CAST(${a[0]} AS TIMESTAMP) - CAST(${a[1]} AS TIMESTAMP))) / ${SECONDS[unquoteSql(a[2]!)]}) AS BIGINT)`,
       now: () => 'CURRENT_TIMESTAMP',
+      // JSON：基类按 PG 的 jsonb 写法；路径是 JSON 数组的字面量（见 Expr.json）
+      json_value: (a) => `CAST(CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)} AS TEXT)`,
+      json_text: (a) => `(CAST(${a[0]} AS JSONB) #>> ${pgJsonPath(a[1]!)})`,
+      json_number: (a) =>
+        `CAST(CAST(${a[0]} AS JSONB) #>> ${pgJsonPath(a[1]!)} AS DOUBLE PRECISION)`,
+      json_boolean: (a) => `CAST(CAST(${a[0]} AS JSONB) #>> ${pgJsonPath(a[1]!)} AS BOOLEAN)`,
+      json_has: (a) => `(CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)} IS NOT NULL)`,
+      json_length: (a) => `JSONB_ARRAY_LENGTH(CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)})`,
       // 类型转换：基类用标准类型名，各库差异覆盖
       cast_string: (a) => `CAST(${a[0]} AS VARCHAR(4000))`,
       cast_int: (a) => `CAST(${a[0]} AS INTEGER)`,
@@ -526,6 +534,30 @@ export abstract class Dialect {
     const s = this.node(n, w);
     return n.k === 'op' || n.k === 'and' || n.k === 'or' || n.k === 'raw' ? `(${s})` : s;
   }
+}
+
+/** 路径里的一段键：双引号括起来，里面的双引号与反斜杠前面加反斜杠 */
+function quoteJsonKey(key: string): string {
+  return `"${key.replace(/["\\]/g, (c) => `\\${c}`)}"`;
+}
+
+/** JSON 函数的路径（JSON 数组的字面量）拆回各段 */
+export function jsonPathParts(literal: string): (string | number)[] {
+  return JSON.parse(unquoteSql(literal)) as (string | number)[];
+}
+
+/** 标准 JSON 路径：$."key"[0]（MySQL、SQLite、HANA），键一律加引号 */
+export function standardJsonPath(literal: string): string {
+  const path = jsonPathParts(literal)
+    .map((p) => (typeof p === 'number' ? `[${p}]` : `.${quoteJsonKey(p)}`))
+    .join('');
+  return sqlString(`$${path}`);
+}
+
+/** PG 的路径：'{key,0}'（文字数组），每段加引号 */
+function pgJsonPath(literal: string): string {
+  const parts = jsonPathParts(literal).map((p) => quoteJsonKey(String(p)));
+  return sqlString(`{${parts.join(',')}}`);
 }
 
 /** diff 的单位折合多少秒 */

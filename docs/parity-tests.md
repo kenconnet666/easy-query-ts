@@ -3,7 +3,7 @@
 由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。
 对照的是官方 `dromara/easy-query` 的 sql-test（2249 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。
 
-合计：已对应 1538、写法不同 272、待做 365、不适用 74。
+合计：已对应 1550、写法不同 272、待做 353、不适用 74。
 
 ## 按能力
 
@@ -25,7 +25,7 @@
 | 日期函数（`func.date`）                                          | 96     | 已对应   | format、add / addYears / addHours …（数量可以是列）、hour / minute / second、dayOfYear、dayOfWeek、isoDayOfWeek、diff、now；suite.ts function library |
 | 通用函数（nullOrDefault、maxColumns …）（`func.general`）        | 53     | 已对应   | orElse（nullOrDefault）、greatest / least（忽略 NULL）；suite.ts function library                                                                     |
 | 字符串聚合（joining）（`func.joining`）                          | 29     | 已对应   | g.joining / u.posts.joining / groupJoin().joining；suite.ts function library                                                                          |
-| JSON 函数（`func.json`）                                         | 12     | 待做     | 待做（16.2.2）                                                                                                                                        |
+| JSON 函数（`func.json`）                                         | 12     | 已对应   | json / jsonText / jsonNumber / jsonBoolean / jsonHas / jsonLength，路径按列的 TS 类型补全检查；json-functions.test.ts、suite.ts function library      |
 | 数学函数（`func.math`）                                          | 4      | 已对应   | sign、power、sqrt、exp、ln、log10、log、三角函数、truncate；suite.ts function library                                                                 |
 | 字符串函数（`func.string`）                                      | 128    | 已对应   | ltrim / rtrim、padStart / padEnd、text 模板、compare、notStartsWith / notEndsWith（nullEmpty 用 orElse）；suite.ts function library                   |
 | 拦截器（`interceptor`）                                          | 3      | 已对应   | interceptor-toggles.test.ts、write-events.test.ts                                                                                                     |
@@ -710,7 +710,7 @@
 | StringFunctionsTest.java#joiningORACLE          | `SELECT t.\`                                                                                  |
 | StringFunctionsTest.java#joiningPGSQL           | `SELECT t.\`                                                                                  |
 
-### JSON 函数（`func.json`，待做）
+### JSON 函数（`func.json`，已对应）
 
 | 用例                                | 断言的 SQL（摘要）                                                                          |
 | ----------------------------------- | ------------------------------------------------------------------------------------------- |

@@ -52,6 +52,9 @@ export type {
   CastTypes,
   DiffUnit,
   JoiningOptions,
+  JsonAt,
+  JsonLeafPath,
+  JsonPath,
   TimeUnit,
   Cond,
   NumericExtensions,
@@ -104,7 +107,7 @@ export type {
 export type { DbOptions, KeyOf, ManyKeys, SaveInput, TreeWalk, WithCte } from './db.ts';
 export { Dialect, SqlWriter } from './dialect.ts';
 export type { DatePart, DateToken, FunctionRenderer, Statement } from './dialect.ts';
-export { coalesceEach, dateFormatParts } from './dialect.ts';
+export { coalesceEach, dateFormatParts, jsonPathParts, standardJsonPath } from './dialect.ts';
 export type {
   Adapter,
   Driver,

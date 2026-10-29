@@ -16,6 +16,7 @@ import {
   type ExecuteResult,
   coalesceEach,
   sqlString,
+  standardJsonPath,
   unquoteSql,
   type DatePart,
   type FunctionRenderer,
@@ -140,6 +141,13 @@ export class SqliteDialect extends Dialect {
       diff_time: (a) =>
         `(CAST(ROUND((julianday(${a[0]}) - julianday(${a[1]})) * 86400) AS INTEGER) / ${DIFF_SECONDS[unquoteSql(a[2]!)]})`,
       now: () => `strftime('%Y-%m-%d %H:%M:%f', 'now')`,
+      // JSON：-> 取元素（总是 JSON 文字），json_extract 取标量
+      json_value: (a) => `(${a[0]} -> ${standardJsonPath(a[1]!)})`,
+      json_text: (a) => `CAST(json_extract(${a[0]}, ${standardJsonPath(a[1]!)}) AS TEXT)`,
+      json_number: (a) => `CAST(json_extract(${a[0]}, ${standardJsonPath(a[1]!)}) AS REAL)`,
+      json_boolean: (a) => `json_extract(${a[0]}, ${standardJsonPath(a[1]!)})`,
+      json_has: (a) => `(json_type(${a[0]}, ${standardJsonPath(a[1]!)}) IS NOT NULL)`,
+      json_length: (a) => `json_array_length(${a[0]}, ${standardJsonPath(a[1]!)})`,
       // 没有 LPAD / RPAD：比 length 长时截断，否则补足（参数可以重复，见 Dialect.node 的 fn）
       pad_start: (a) => pad(a, true),
       pad_end: (a) => pad(a, false),
