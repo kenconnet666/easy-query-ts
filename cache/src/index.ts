@@ -15,6 +15,8 @@
  *   所以表达式更新也知道该删哪些键——官方要自己实现 CacheKeysProvider 按更新时间回查
  * - 写入时删一次，事务提交后再删一次（事务里别的请求可能把旧值读回缓存）；回滚了第二次也不删，第一次删掉的只是少命中一次
  * - 绕过本库的写入（直接改库、别的服务）不会失效，靠过期时间兜底，或接 CDC 调用 evict
+ * - onEvict 在失效之后收到删掉的键：多实例各用进程内缓存时经 PG 的 NOTIFY 转给别的实例，或推给浏览器
+ *   （前端存储包 @zerodep-dev/storage 的 cacheStore 能把 IndexedDB 等驱动变成这里的 CacheStore）
  * 读写拦截器（租户等）照常生效，它们加的条件是缓存字段的一部分：不同租户各缓存各的。
  */
 import {
@@ -86,6 +88,11 @@ export interface CacheOptions {
   readonly nullTtlMs?: number;
   /** 键的前缀，默认 'CACHE'：键是 CACHE:表名:主键、CACHE:表名:all */
   readonly keyPrefix?: string;
+  /**
+   * 失效之后通知删掉的键（写入时在提交后的那次删除之后，evict 时在删除之后）：
+   * `onEvict: (keys) => db.notify('cache_evict', JSON.stringify(keys))`，别的实例 listen 到后从自己的存储里删
+   */
+  readonly onEvict?: (keys: readonly string[]) => unknown;
 }
 
 /** 键的类型：单列主键的值 */
@@ -102,6 +109,7 @@ export class EasyCache {
   private readonly ttlMs: number;
   private readonly nullTtlMs: number;
   private readonly prefix: string;
+  private readonly onEvict: ((keys: readonly string[]) => unknown) | undefined;
 
   constructor(options: CacheOptions) {
     this.store = options.store ?? memoryStore();
@@ -109,6 +117,7 @@ export class EasyCache {
     this.ttlMs = options.ttlMs ?? 300_000;
     this.nullTtlMs = options.nullTtlMs ?? 10_000;
     this.prefix = options.keyPrefix ?? 'CACHE';
+    this.onEvict = options.onEvict;
     this.interceptor = {
       name: 'cache',
       before: (entity) => this.tables.has(entity.table),
@@ -118,7 +127,7 @@ export class EasyCache {
         const keys = [this.allKey(event.entity), ...this.keysOf(event.entity, rows)];
         // 延迟双删：现在删一次，提交后再删一次
         await this.store.delete(keys);
-        event.afterCommit(() => this.store.delete(keys));
+        event.afterCommit(() => this.remove(keys));
       },
     };
   }
@@ -130,7 +139,13 @@ export class EasyCache {
 
   /** 手动失效（CDC、别的服务改了库）：给主键删这几行，不给删这个实体的全部 kv 之外的 all 缓存 */
   async evict(entity: Entity, keys: readonly KeyValue[] = []): Promise<void> {
-    await this.store.delete([this.allKey(entity), ...keys.map((k) => this.kvKey(entity, k))]);
+    await this.remove([this.allKey(entity), ...keys.map((k) => this.kvKey(entity, k))]);
+  }
+
+  /** 删掉这些键并通知 onEvict */
+  private async remove(keys: readonly string[]): Promise<void> {
+    await this.store.delete(keys);
+    await this.onEvict?.(keys);
   }
 
   /** @internal 缓存里的值：undefined 是没缓存，null 是缓存了"库里没有" */

@@ -48,10 +48,32 @@ const redisStore: CacheStore = {
 
 键是 `CACHE:表名:主键`（kv）与 `CACHE:表名:all`（all），字段是条件 SQL 与参数的指纹；值按列的编码序列化，日期、大整数、二进制、值对象都原样读回。
 
+浏览器里跑 easy-query（PGlite、SQLite WASM）时，前端存储包 `@zerodep-dev/storage` 的 `cacheStore(driver)` 把 IndexedDB、localStorage、内存驱动变成 `CacheStore`：
+
+```ts
+import { cacheStore, indexedDbDriver } from '@zerodep-dev/storage';
+const cache = createCache({
+  entities: [Province],
+  store: cacheStore(indexedDbDriver({ store: 'orm-cache' })),
+});
+```
+
+## 失效通知
+
+`onEvict(keys)` 在失效之后收到删掉的键：写入时在事务提交后的那次删除之后（回滚不通知），`evict` 时在删除之后。多实例各用进程内缓存时，经 PG 的 NOTIFY 转给别的实例；也可以推给浏览器，让前端缓存跟着失效：
+
+```ts
+const cache = createCache({
+  entities: [User],
+  onEvict: (keys) => db.notify('cache_evict', JSON.stringify(keys)),
+});
+await listen(pool, 'cache_evict', (payload) => store.delete(JSON.parse(payload))); // 每个实例
+```
+
 ## 与官方的差异
 
 - 官方用注解（`CacheKvEntity` / `CacheAllEntity`）标实体；这里在 `createCache({ entities })` 里列出，两种模式都能用。
 - 官方的多级缓存（Redis + Caffeine）可以写一个先查进程内、再查 Redis 的 `CacheStore` 组合实现。
 - kv 只支持单列主键（与官方相同）。
 
-SQLite 上测试（`cache.test.ts`）：命中、表达式更新与删除失效、只给缓存的实体多读、提交后再删、条件字段、findMany、all 分页与插入失效、过期。
+SQLite 上测试（`cache.test.ts`）：命中、表达式更新与删除失效、只给缓存的实体多读、提交后再删、条件字段、findMany、all 分页与插入失效、过期、onEvict、以前端存储包的 cacheStore 为存储。

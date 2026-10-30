@@ -2,13 +2,19 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { createDb } from '@zerodep-dev/easy-query-ts';
-import { createCache, memoryStore } from '@zerodep-dev/easy-query-ts-cache';
+import { createCache, memoryStore, type CacheOptions } from '@zerodep-dev/easy-query-ts-cache';
+import { cacheStore, memoryDriver } from '@zerodep-dev/storage';
 import { Company, Post, schema, seed, User } from '../src/fixture.ts';
 import { memoryDb } from '../src/sqlite-env.ts';
 
-async function setup(now?: () => number) {
+async function setup(now?: () => number, options: Partial<CacheOptions> = {}) {
   const env = await seed(await memoryDb());
-  const cache = createCache({ entities: [User, Company], store: memoryStore(now), ttlMs: 1000 });
+  const cache = createCache({
+    entities: [User, Company],
+    store: memoryStore(now),
+    ttlMs: 1000,
+    ...options,
+  });
   const db = createDb({
     schema,
     adapter: env.adapter,
@@ -132,5 +138,35 @@ describe('cache: kv and all modes', () => {
     await cached.kv(User).find(1);
     assert.equal(reads(), 2);
     assert.throws(() => cached.kv(Post), /list t_post in createCache/);
+  });
+
+  it('onEvict 收到删掉的键：事务里的写入等提交之后，evict 在删除之后', async () => {
+    const evicted: (readonly string[])[] = [];
+    const { db, cache } = await setup(undefined, { onEvict: (keys) => evicted.push(keys) });
+    await db.transaction(async (tx) => {
+      await tx
+        .update(User)
+        .set({ name: 'alice2' })
+        .where((u) => u.id.eq(1))
+        .execute();
+      assert.equal(evicted.length, 0);
+    });
+    assert.deepEqual(evicted, [['CACHE:t_user:all', 'CACHE:t_user:1']]);
+    await cache.evict(Company, [3]);
+    assert.deepEqual(evicted[1], ['CACHE:t_company:all', 'CACHE:t_company:3']);
+  });
+
+  it('前端存储包的 cacheStore 当存储：驱动换成 IndexedDB 等用法不变', async () => {
+    const { cached, db, reads } = await setup(undefined, { store: cacheStore(memoryDriver()) });
+    await cached.kv(User).find(1);
+    assert.equal((await cached.kv(User).find(1))!.name, 'alice');
+    assert.equal(reads(), 1);
+    await db
+      .update(User)
+      .set({ name: 'alice3' })
+      .where((u) => u.id.eq(1))
+      .execute();
+    assert.equal((await cached.kv(User).find(1))!.name, 'alice3');
+    assert.equal(reads(), 3);
   });
 });
