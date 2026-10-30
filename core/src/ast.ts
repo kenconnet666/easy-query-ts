@@ -143,6 +143,11 @@ export interface InsertNode {
 export interface ConflictNode {
   readonly target: readonly string[];
   readonly update: readonly string[];
+  /**
+   * 只在条件为真时更新（DO UPDATE … WHERE）：条件里现有的行用 alias 引用（INSERT INTO t AS alias），新行用 excluded；
+   * 只有 Dialect.conditionalUpsert 的方言能写
+   */
+  readonly where?: { readonly alias: string; readonly cond: Node } | undefined;
 }
 
 export interface UpdateNode {
@@ -153,6 +158,14 @@ export interface UpdateNode {
   readonly joins?: readonly Join[];
   /** 目标表的主键列（库里的名字）：有 join 时按它把目标表与 FROM 里的同一张表对上 */
   readonly key?: readonly string[];
+  /** 只改前 count 行（Dialect.nativeWriteLimit 的方言直接写 ORDER BY … LIMIT；别的方言在构建时改写成主键 IN 子查询） */
+  readonly limit?: WriteLimit | undefined;
+}
+
+/** update / delete 的 orderBy(…).limit(n) */
+export interface WriteLimit {
+  readonly orderBy: readonly OrderNode[];
+  readonly count: number;
 }
 
 export interface DeleteNode {
@@ -161,6 +174,7 @@ export interface DeleteNode {
   /** 同 UpdateNode */
   readonly joins?: readonly Join[];
   readonly key?: readonly string[];
+  readonly limit?: WriteLimit | undefined;
 }
 
 /** 访问一棵树里引用到的表别名与声明的表别名，用来发现跨查询误用的导航 */

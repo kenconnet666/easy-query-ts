@@ -635,6 +635,10 @@ export abstract class Dialect {
 
   /** 是否支持 INSERT / UPDATE / DELETE … RETURNING（PG、SQLite 3.35+；MySQL、HANA 没有） */
   readonly supportsReturning: boolean = false;
+  /** upsert 能带条件（ON CONFLICT … DO UPDATE … WHERE，PG、SQLite）：merge(…, { onlyIf }) 要它 */
+  readonly conditionalUpsert: boolean = false;
+  /** update / delete 能直接写 ORDER BY … LIMIT（MySQL）；别的方言的 limit() 在构建时改写成主键 IN 子查询 */
+  readonly nativeWriteLimit: boolean = false;
 
   /** RETURNING 子句，列名已经是库里的名字 */
   returningColumns(columns: readonly string[]): string {
@@ -647,14 +651,18 @@ export abstract class Dialect {
     if (q.source)
       return `INSERT INTO ${this.table(q.table)} (${q.columns.map((c) => this.quote(c)).join(', ')}) ${this.select(q.source, w)}`;
     const rows = q.rows.map((r) => `(${r.map((n) => this.node(n, w)).join(', ')})`).join(', ');
-    return `INSERT INTO ${this.table(q.table)} (${q.columns.map((c) => this.quote(c)).join(', ')}) VALUES ${rows}${q.conflict ? this.onConflict(q.conflict) : ''}`;
+    // 带条件的 upsert：条件里用别名引用现有的行
+    const alias = q.conflict?.where ? ` AS ${q.conflict.where.alias}` : '';
+    return `INSERT INTO ${this.table(q.table)}${alias} (${q.columns.map((c) => this.quote(c)).join(', ')}) VALUES ${rows}${q.conflict ? this.onConflict(q.conflict, w) : ''}`;
   }
 
   /** upsert 子句；默认是 SQLite / PG 的 ON CONFLICT 写法 */
-  onConflict(c: ConflictNode): string {
+  onConflict(c: ConflictNode, w: SqlWriter = new SqlWriter()): string {
     const target = `(${c.target.map((t) => this.quote(t)).join(', ')})`;
     if (c.update.length === 0) return ` ON CONFLICT ${target} DO NOTHING`;
-    return ` ON CONFLICT ${target} DO UPDATE SET ${c.update.map((u) => `${this.quote(u)} = excluded.${this.quote(u)}`).join(', ')}`;
+    const set = c.update.map((u) => `${this.quote(u)} = excluded.${this.quote(u)}`).join(', ');
+    const where = c.where ? ` WHERE ${this.condition(c.where.cond, w)}` : '';
+    return ` ON CONFLICT ${target} DO UPDATE SET ${set}${where}`;
   }
 
   /** JOIN 子句（连着前面的 FROM） */

@@ -34,8 +34,12 @@ const MYSQL_MINIMUM: Record<string, string> = {
 
 export class MySqlDialect extends Dialect {
   /** 带 join：MySQL 的多表 UPDATE，JOIN 写在 SET 前面，SET 的列带上别名 */
+  /** UPDATE / DELETE 单表时可以带 ORDER BY … LIMIT */
+  override readonly nativeWriteLimit: boolean = true;
+
   override update(q: UpdateNode, w: SqlWriter = new SqlWriter()): string {
-    if (!q.joins?.length) return super.update(q, w);
+    if (!q.joins?.length)
+      return super.update({ ...q, limit: undefined }, w) + this.writeLimit(q, w);
     const alias = q.from.alias;
     let s = `UPDATE ${this.table(q.from.table)} AS ${alias}${this.joinClauses(q.joins, w)}`;
     s += ` SET ${q.set.map((c) => `${alias}.${this.quote(c.column)} = ${this.node(c.e, w)}`).join(', ')}`;
@@ -43,9 +47,18 @@ export class MySqlDialect extends Dialect {
     return s;
   }
 
+  private writeLimit(q: UpdateNode | DeleteNode, w: SqlWriter): string {
+    if (!q.limit) return '';
+    const order = q.limit.orderBy
+      .map((o) => `${this.node(o.e, w)}${o.desc ? ' DESC' : ''}`)
+      .join(', ');
+    return `${order ? ` ORDER BY ${order}` : ''} LIMIT ${q.limit.count}`;
+  }
+
   /** 带 join：`DELETE t0 FROM t AS t0 LEFT JOIN …` */
   override delete(q: DeleteNode, w: SqlWriter = new SqlWriter()): string {
-    if (!q.joins?.length) return super.delete(q, w);
+    if (!q.joins?.length)
+      return super.delete({ ...q, limit: undefined }, w) + this.writeLimit(q, w);
     let s = `DELETE ${q.from.alias} FROM ${this.table(q.from.table)} AS ${q.from.alias}${this.joinClauses(q.joins, w)}`;
     if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
     return s;

@@ -9,9 +9,9 @@ import {
   type UpdateNode,
 } from './ast.ts';
 import { SqlWriter, type Statement } from './dialect.ts';
-import { and, condNode, Expr, or, toNode, type Cond } from './expr.ts';
+import { and, condNode, Expr, or, orderNodes, toNode, type Cond, type OrderItem } from './expr.ts';
 import { newQueryable, type Built, type Query } from './query.ts';
-import { REF, refColumn, Scope, type Ref } from './ref.ts';
+import { makeRef, REF, refColumn, Scope, type Ref } from './ref.ts';
 import type { CapabilitiesOf, Requires, Unsupported } from './capabilities.ts';
 import type { AnySchema, EntityKey } from './relations.ts';
 import {
@@ -467,6 +467,9 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
    * ```ts
    * db.insert(User).values(row).onConflict(u => u.id).merge(u => [u.name, u.age])   // 用新值更新这些列；不传为插入的全部非冲突列
    * db.insert(User).values(row).onConflict(u => u.email).ignore()                    // 已存在就跳过
+   * db.insert(Doc).values(row).onConflict(d => d.id).merge(undefined, {               // 只在新版本更大时覆盖（PG、SQLite）
+   *   onlyIf: (current, incoming) => current.version.lt(incoming.version),
+   * })
    * ```
    * MySQL 按表上的主键 / 唯一键判断冲突（ON DUPLICATE KEY UPDATE），target 只用于 ignore 时的空更新。
    */
@@ -474,19 +477,19 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     this: Requires<S, 'upsert', InsertValues<S, K>>,
     target: Columns<S, K>,
   ): {
-    merge: (columns?: Columns<S, K>) => InsertValues<S, K>;
+    merge: (columns?: Columns<S, K>, options?: MergeOptions<S, K>) => InsertValues<S, K>;
     /** 不支持时不能调用（Doris、TDengine 写同一主键就是覆盖） */
     ignore: ['upsertIgnore'] extends [CapabilitiesOf<S>]
       ? () => InsertValues<S, K>
       : Unsupported<'upsertIgnore'>;
   };
   onConflict(target: Columns<S, K>): {
-    merge: (columns?: Columns<S, K>) => InsertValues<S, K>;
+    merge: (columns?: Columns<S, K>, options?: MergeOptions<S, K>) => InsertValues<S, K>;
     ignore: unknown;
   } {
     const targetColumns = this.columnNames(target);
     return {
-      merge: (columns) => {
+      merge: (columns, options) => {
         const update = columns
           ? this.columnNames(columns)
           : this.insertedColumns().filter((c) => !targetColumns.includes(c));
@@ -494,11 +497,28 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
           throw new Error(
             `onConflict(..).merge() on ${this.entity.table} has no column to update; use ignore()`,
           );
-        return new InsertValues(this.ctx, this.key, this.rows, { target: targetColumns, update });
+        return new InsertValues(this.ctx, this.key, this.rows, {
+          target: targetColumns,
+          update,
+          where: options?.onlyIf ? this.mergeCondition(options.onlyIf) : undefined,
+        });
       },
       ignore: () =>
         new InsertValues(this.ctx, this.key, this.rows, { target: targetColumns, update: [] }),
     };
+  }
+
+  /** merge 的 onlyIf：现有的行用别名 t0，新行用 excluded */
+  private mergeCondition(onlyIf: NonNullable<MergeOptions<S, K>['onlyIf']>): ConflictNode['where'] {
+    if (!this.ctx.dialect.conditionalUpsert)
+      throw new Error(
+        `merge(…, { onlyIf }) is not supported by the ${this.ctx.dialect.name} dialect (no ON CONFLICT … DO UPDATE … WHERE)`,
+      );
+    const scope = new Scope(this.ctx.schema, { n: 0 }, false);
+    const current = scope.root(this.key);
+    const incoming = makeRef(scope, this.key, 'excluded', false);
+    const cond = condNode(onlyIf(current as Ref<S, K>, incoming as Ref<S, K>));
+    return cond ? { alias: current[REF].alias, cond } : undefined;
   }
 
   /** lambda 里选的列 → 库里的列名（按表达式找回是哪一列：声明了 sqlConvert 的列读出来不是裸列） */
@@ -707,6 +727,18 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
   }
 }
 
+function positiveCount(n: number): number {
+  if (!Number.isSafeInteger(n) || n <= 0)
+    throw new RangeError(`limit must be a positive integer, got ${n}`);
+  return n;
+}
+
+/** upsert 的 merge 选项 */
+export interface MergeOptions<S extends AnySchema, K extends EntityKey<S>> {
+  /** 只在条件为真时用新值更新（PG、SQLite 的 DO UPDATE … WHERE）：current 是库里现有的行，incoming 是这次要插入的行 */
+  readonly onlyIf?: (current: Ref<S, K>, incoming: Ref<S, K>) => Cond;
+}
+
 /** 一组声明的列在 set 里的形状：每列可以是值或表达式，值对象可以只给其中几项 */
 export type SetOf<F extends Fields> = {
   [C in keyof F]?: F[C] extends Embedded<infer G>
@@ -771,6 +803,11 @@ interface WriteState {
   readonly ignoreVersion?: boolean;
   /** 带 RETURNING：不能再有导航产生的 join（自连接里两份目标表的列名会重名） */
   readonly returning?: boolean;
+  /** orderBy(…).limit(n)：只改 / 删前 n 行 */
+  readonly limit?: {
+    readonly orderBy: readonly ((r: any) => OrderItem | readonly OrderItem[])[];
+    readonly count?: number;
+  };
   /** expectRows：改到的行数必须是 count，否则抛 error(实际行数) */
   readonly expect?: { readonly count: number; readonly error: (affected: number) => Error };
 }
@@ -804,6 +841,44 @@ abstract class Filtered {
   }
 
   protected abstract readonly verb: string;
+
+  /**
+   * orderBy(…).limit(n)：MySQL 直接写 ORDER BY … LIMIT；别的方言改写成"主键 IN (按同样的条件排序取前 n 行的主键)"
+   */
+  protected limited(scope: Scope, root: any, where: Node[]): Pick<UpdateNode, 'where' | 'limit'> {
+    const spec = this.state.limit;
+    if (!spec) return { where };
+    const entity = this.ctx.schema.entities[this.key]!;
+    if (spec.count === undefined)
+      throw new Error(`orderBy() on an ${this.verb} of ${entity.table} needs limit(n)`);
+    if (scope.joins.length > 0 || entity.sharding)
+      throw new Error(
+        `limit() on an ${this.verb} of ${entity.table} cannot be combined with navigations or sharding`,
+      );
+    const orderBy = spec.orderBy.flatMap((f) => orderNodes(f(root)));
+    const limit = { orderBy, count: spec.count };
+    if (this.ctx.dialect.nativeWriteLimit) return { where, limit };
+    if (entity.primaryKey.length !== 1)
+      throw new Error(
+        `limit() on an ${this.verb} of ${entity.table} needs a single-column primary key`,
+      );
+    const alias = root[REF].alias;
+    const key: Node = { k: 'col', alias, name: entity.columnNames[entity.primaryKey[0]!]! };
+    const picked: SelectNode = {
+      from: { table: entity.table, alias },
+      joins: [],
+      where,
+      groupBy: [],
+      having: [],
+      orderBy,
+      columns: [{ e: key, as: 'k' }],
+      distinct: false,
+      limit: spec.count,
+      offset: undefined,
+      forUpdate: false,
+    };
+    return { where: [{ k: 'in_sub', e: key, q: picked, not: false }] };
+  }
 
   /** 语句的目标：表与别名、导航产生的 join、主键列（有 join 时各库按它对上同一行） */
   protected target(scope: Scope, root: any): Pick<UpdateNode, 'from' | 'joins' | 'key'> {
@@ -1129,6 +1204,23 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
     return new Updatable(this.ctx, this.key as K, { ...this.state, ...change }, this.values);
   }
 
+  /** 和 limit(n) 一起用：按这个顺序取前 n 行 */
+  orderBy(order: (r: Ref<S, K>) => OrderItem | readonly OrderItem[]): Updatable<S, K> {
+    const limit = this.state.limit;
+    return this.withState({ limit: { ...limit, orderBy: [...(limit?.orderBy ?? []), order] } });
+  }
+
+  /**
+   * 只改前 n 行（按 orderBy），分批处理大表、避免长事务：
+   * `while ((await db.update(Log).set({ archived: true }).where(…).orderBy((l) => l.id).limit(1000).execute()) > 0) {}`。
+   * MySQL 写成 ORDER BY … LIMIT，别的库写成主键 IN 子查询（要单列主键）；不能与导航、分表一起用
+   */
+  limit(n: number): Updatable<S, K> {
+    return this.withState({
+      limit: { orderBy: this.state.limit?.orderBy ?? [], count: positiveCount(n) },
+    });
+  }
+
   /**
    * 不管乐观锁（对应 Java 版的 ignoreVersion）：不带版本条件、也不换版本；entity(row) 不再要求版本。
    * 管理端的批量修正这类不该让别人手里的版本失效的更新用它；写在 entity / entities 前后都行
@@ -1185,7 +1277,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       });
     }
     if (set.length === 0) throw new Error(`update of ${entity.table} sets no columns`);
-    const node = { ...this.target(scope, root), set, where };
+    const node = { ...this.target(scope, root), set, ...this.limited(scope, root, where) };
     checkAliases(node);
     const w = new SqlWriter();
     const written = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
@@ -1244,6 +1336,23 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
 
   private withState(change: Partial<WriteState>): Deletable<S, K> {
     return new Deletable(this.ctx, this.key as K, { ...this.state, ...change });
+  }
+
+  /** 和 limit(n) 一起用：按这个顺序取前 n 行 */
+  orderBy(order: (r: Ref<S, K>) => OrderItem | readonly OrderItem[]): Deletable<S, K> {
+    const limit = this.state.limit;
+    return this.withState({ limit: { ...limit, orderBy: [...(limit?.orderBy ?? []), order] } });
+  }
+
+  /**
+   * 只删前 n 行（按 orderBy），分批清理大表、避免长事务：
+   * `while ((await db.delete(Log).where((l) => l.at.lt(cutoff)).orderBy((l) => l.id).limit(1000).execute()) > 0) {}`。
+   * MySQL 写成 ORDER BY … LIMIT，别的库写成主键 IN 子查询（要单列主键）；不能与导航、分表一起用
+   */
+  limit(n: number): Deletable<S, K> {
+    return this.withState({
+      limit: { orderBy: this.state.limit?.orderBy ?? [], count: positiveCount(n) },
+    });
   }
 
   /**
@@ -1311,7 +1420,7 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
         column: entity.columnNames[p]!,
         e: columnValue(entity.columns[p]!, v),
       }));
-      const update = { ...target, set, where };
+      const update = { ...target, set, ...this.limited(scope, root, where) };
       checkAliases(update);
       const w = new SqlWriter();
       return {
@@ -1323,7 +1432,7 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
       throw new Error(
         `physical delete of ${entity.table} is forbidden (hardDelete: 'forbid'); give it a softDelete column or call .hard()`,
       );
-    const node = { ...target, where };
+    const node = { ...target, ...this.limited(scope, root, where) };
     checkAliases(node);
     const w = new SqlWriter();
     return {

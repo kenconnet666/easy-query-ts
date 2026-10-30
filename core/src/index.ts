@@ -150,6 +150,7 @@ export type {
   EntityUpdateOptions,
   InsertOptions,
   SetOf,
+  MergeOptions,
   SetValues,
 } from './mutation.ts';
 export { createDb, Db, Transaction } from './db.ts';

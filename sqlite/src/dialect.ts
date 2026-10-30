@@ -54,6 +54,7 @@ export class SqliteDialect extends Dialect {
   override readonly nullSafeEquals = 'IS';
   /** SQLite 3.35+（node:sqlite 自带的版本满足） */
   override readonly supportsReturning = true;
+  override readonly conditionalUpsert = true;
   /** 没有注释；外键只能写在建表语句里；DDL 能放进事务 */
   override readonly commentStyle = 'none';
   override readonly inlineForeignKeys = true;

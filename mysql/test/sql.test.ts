@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import type { Pool } from 'mysql2/promise';
 import { col, createDb, Dialect, entity, win, type Driver } from '@zerodep-dev/easy-query-ts';
-import { ddlSchema, Gadget, schema, Token, User } from '@zerodep-dev/easy-query-ts-test/fixture';
+import {
+  ddlSchema,
+  Gadget,
+  Post,
+  schema,
+  Token,
+  User,
+} from '@zerodep-dev/easy-query-ts-test/fixture';
 import { MySQL, mysql } from '../src/index.ts';
 
 describe('mysql: SQL text', () => {
@@ -98,6 +105,22 @@ describe('mysql: JSON edits and jsonSome', () => {
       'UPDATE `t_jorder` AS t0 SET `body` = JSON_SET(t0.`body`, \'$."items"[0]."qty"\', CAST(? AS JSON))' +
         ' WHERE ((SELECT COUNT(*) FROM JSON_TABLE(t0.`body`, \'$."items"[*]\' COLUMNS (`sku` VARCHAR(255) PATH \'$."sku"\', `qty` INT PATH \'$."qty"\')) eq_j' +
         ' WHERE eq_j.`sku` = ? AND eq_j.`qty` > ?) > 0)',
+    );
+  });
+});
+
+describe('mysql: batched writes', () => {
+  const db = createDb({ schema, adapter: mysql({} as Pool) });
+
+  it('writes orderBy().limit(n) on a delete as ORDER BY … LIMIT', () => {
+    assert.equal(
+      db
+        .delete(Post)
+        .where((p) => p.userId.eq(1))
+        .orderBy((p) => p.id)
+        .limit(500)
+        .toSQL().sql,
+      'DELETE FROM `t_post` AS t0 WHERE t0.`user_id` = ? ORDER BY t0.`id` LIMIT 500',
     );
   });
 });

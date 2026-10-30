@@ -19,6 +19,9 @@ export class OpenGaussDialect extends PostgresDialect {
     return '';
   }
 
+  /** ON DUPLICATE KEY UPDATE 不能带条件 */
+  override readonly conditionalUpsert = false;
+
   /** upsert 写成 ON DUPLICATE KEY UPDATE（冲突列由表上的主键 / 唯一约束决定） */
   override onConflict(c: ConflictNode): string {
     if (c.update.length === 0) return ' ON DUPLICATE KEY UPDATE NOTHING';

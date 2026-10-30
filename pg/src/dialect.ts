@@ -158,6 +158,7 @@ export class PostgresDialect extends Dialect {
 
   override readonly nullSafeEquals = 'IS NOT DISTINCT FROM';
   override readonly supportsReturning = true;
+  override readonly conditionalUpsert: boolean = true;
   override readonly transactionalDdl = true;
 
   /** 读库结构时判断自增列（pg_attribute 别名 a、pg_attrdef 别名 d）：IDENTITY 列或默认值取序列 */

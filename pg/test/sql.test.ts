@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import type { Pool } from 'pg';
 import { col, createDb, entity } from '@zerodep-dev/easy-query-ts';
-import { ddlSchema, Gadget, schema, Token, User } from '@zerodep-dev/easy-query-ts-test/fixture';
+import {
+  ddlSchema,
+  Gadget,
+  Post,
+  schema,
+  Token,
+  User,
+} from '@zerodep-dev/easy-query-ts-test/fixture';
 import { postgres } from '../src/index.ts';
 
 describe('postgres: SQL text', () => {
@@ -51,6 +58,22 @@ describe('postgres: JSON edits and jsonSome', () => {
         ' WHERE eq_j."sku" = $2 AND eq_j."qty" > $3)',
     );
     assert.deepEqual(s.params, ['2', 'A1', 2]);
+  });
+});
+
+describe('postgres: batched writes', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+
+  it('rewrites orderBy().limit(n) on a delete into a primary-key IN subquery', () => {
+    assert.equal(
+      db
+        .delete(Post)
+        .where((p) => p.userId.eq(1))
+        .orderBy((p) => p.id)
+        .limit(500)
+        .toSQL().sql,
+      'DELETE FROM "t_post" AS t0 WHERE t0."id" IN (SELECT t0."id" AS "k" FROM "t_post" t0 WHERE t0."user_id" = $1 ORDER BY t0."id" ASC LIMIT 500)',
+    );
   });
 });
 

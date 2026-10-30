@@ -65,6 +65,9 @@ export class DorisDialect extends MySqlDialect {
   }
 
   /** 带 join 的更新、删除用核心的通用写法（UPDATE … FROM、DELETE … WHERE EXISTS）；Doris 不认 MySQL 的多表写法 */
+  /** Doris 的 UPDATE / DELETE 没有 ORDER BY … LIMIT：limit() 改写成主键 IN 子查询 */
+  override readonly nativeWriteLimit = false;
+
   override update(q: UpdateNode, w: SqlWriter = new SqlWriter()): string {
     return Dialect.prototype.update.call(this, q, w);
   }

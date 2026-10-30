@@ -391,6 +391,44 @@ export function liveSuite(
       assert.equal(after.createdAt.toISOString(), alice.createdAt.toISOString());
     });
 
+    it('updates and deletes in batches with orderBy().limit(n)', async () => {
+      const { db } = await seeded();
+      const ids = async () =>
+        (
+          await db
+            .queryable(Post)
+            .orderBy((p) => p.id)
+            .select((p) => ({ id: p.id, title: p.title }))
+            .toList()
+        ).map((p) => [Number(p.id), p.title] as const);
+      const before = await ids();
+      // 只改 id 最大的一行
+      assert.equal(
+        await db
+          .update(Post)
+          .set({ title: 'last' })
+          .where((p) => p.id.gt(0))
+          .orderBy((p) => p.id.desc())
+          .limit(1)
+          .execute(),
+        1,
+      );
+      assert.deepEqual((await ids()).at(-1), [before.at(-1)![0], 'last']);
+      // 分批删：每批两行，直到删完
+      let batches = 0;
+      while (
+        (await db
+          .delete(Post)
+          .where((p) => p.id.gt(0))
+          .orderBy((p) => p.id)
+          .limit(2)
+          .execute()) > 0
+      )
+        batches += 1;
+      assert.equal(batches, Math.ceil(before.length / 2));
+      assert.equal(await db.queryable(Post).count(), 0);
+    });
+
     it('deletes everything only with all()', async () => {
       const { db } = await seeded();
       assert.equal(await db.delete(Comment).all().execute(), 2);
@@ -529,6 +567,32 @@ export function liveSuite(
   });
 
   describe(`${name}: upsert and interceptors`, () => {
+    it('merges only when the condition on the current and incoming rows holds', async () => {
+      const { db, adapter } = await seeded();
+      const alice = await db
+        .queryable(User)
+        .where((u) => u.name.eq('alice'))
+        .single();
+      const upsert = (name: string, age: number) =>
+        db
+          .insert(User)
+          .values({ ...alice, name, age })
+          .onConflict((u) => u.id)
+          .merge((u) => [u.name, u.age], {
+            onlyIf: (current, incoming) => current.age.lt(incoming.age),
+          });
+      if (!adapter.dialect.conditionalUpsert) {
+        assert.throws(() => upsert('x', 1), /not supported/);
+        return;
+      }
+      // 新行的 age 不比现有的大：不更新
+      await upsert('older', 20).execute();
+      assert.deepEqual(await db.queryable(User).findOrThrow(alice.id), { ...alice });
+      await upsert('alice2', 31).execute();
+      const after = await db.queryable(User).findOrThrow(alice.id);
+      assert.deepEqual([after.name, after.age], ['alice2', 31]);
+    });
+
     it('upserts by merging, defaulting the merged columns, and ignoring', async () => {
       const { db } = await seeded();
       await db
