@@ -192,6 +192,57 @@ class PostgresDriver extends PostgresSession implements Driver {
   }
 }
 
+/** listen 用到的连接：pg 与 Neon 的 PoolClient 都满足 */
+interface ListenClient {
+  query(sql: string): Promise<unknown>;
+  on(
+    event: 'notification',
+    listener: (message: { channel: string; payload?: string }) => void,
+  ): unknown;
+  off(
+    event: 'notification',
+    listener: (message: { channel: string; payload?: string }) => void,
+  ): unknown;
+  release(): void;
+}
+
+/**
+ * 收听 NOTIFY（ROADMAP 19.10，与 db.notify 配对）：从池里借一条专用连接 LISTEN 这个频道，每条通知调一次 handler(payload)；
+ * 返回的函数 UNLISTEN 并归还连接。连接断了不会自动重连，要重新 listen
+ * ```ts
+ * const stop = await listen(pool, 'cache_evict', (key) => cache.delete(key))
+ * await db.notify('cache_evict', 'user:7')   // 在事务里时随提交发出
+ * ```
+ */
+export async function listen(
+  // 只要 connect：pg 与 Neon 的 PoolClient 的 on 是一组重载，按结构类型对不上，借出来之后按 ListenClient 用
+  pool: { connect(): Promise<unknown> },
+  channel: string,
+  handler: (payload: string) => void,
+): Promise<() => Promise<void>> {
+  const client = (await pool.connect()) as ListenClient;
+  const name = `"${channel.replace(/"/g, '""')}"`;
+  const onNotification = (message: { channel: string; payload?: string }) => {
+    if (message.channel === channel) handler(message.payload ?? '');
+  };
+  client.on('notification', onNotification);
+  try {
+    await client.query(`LISTEN ${name}`);
+  } catch (error) {
+    client.off('notification', onNotification);
+    client.release();
+    throw error;
+  }
+  return async () => {
+    client.off('notification', onNotification);
+    try {
+      await client.query(`UNLISTEN ${name}`);
+    } finally {
+      client.release();
+    }
+  };
+}
+
 export function postgres(pool: PgPool): Adapter {
   return { dialect: new PostgresDialect(), driver: new PostgresDriver(pool) };
 }

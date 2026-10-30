@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { createDb, sql, type Statement } from '@zerodep-dev/easy-query-ts';
 import { Post, schema, seed, User, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
-import { Pg, postgres } from '../src/index.ts';
+import { listen, Pg, postgres } from '../src/index.ts';
 import { arraySuite } from './arrays.ts';
 import { bulkSuite } from './bulk.ts';
 import { enumSuite } from './enums.ts';
@@ -51,6 +51,57 @@ for (const url of urls) {
   arraySuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
   bulkSuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
   enumSuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
+
+  describe(`postgres ${new URL(url).port}: advisory locks and notifications`, () => {
+    it('serializes by lock name until the transaction ends; notify reaches listeners after commit', async () => {
+      const db = createDb({ schema, adapter: postgres(pool) });
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let acquired!: () => void;
+      const locked = new Promise<void>((resolve) => (acquired = resolve));
+      const first = db.transaction(async (tx) => {
+        assert.equal(await tx.advisoryLock('report:2026-10'), true);
+        acquired();
+        await held;
+      });
+      await locked;
+      // 同名的锁别的事务拿不到，别的名字照常
+      assert.equal(
+        await db.transaction((tx) => tx.advisoryLock('report:2026-10', { wait: false })),
+        false,
+      );
+      assert.equal(
+        await db.transaction((tx) => tx.advisoryLock('report:2026-11', { wait: false })),
+        true,
+      );
+      release();
+      await first;
+      assert.equal(
+        await db.transaction((tx) => tx.advisoryLock('report:2026-10', { wait: false })),
+        true,
+      );
+      await assert.rejects(db.advisoryLock('x'), /inside a transaction/);
+
+      const got: string[] = [];
+      let heard!: () => void;
+      const arrived = new Promise<void>((resolve) => (heard = resolve));
+      const stop = await listen(pool, 'eqts_evict', (payload) => {
+        got.push(payload);
+        heard();
+      });
+      try {
+        await db.transaction(async (tx) => {
+          await tx.notify('eqts_evict', 'user:7');
+          // 提交之前收不到
+          assert.deepEqual(got, []);
+        });
+        await arrived;
+        assert.deepEqual(got, ['user:7']);
+      } finally {
+        await stop();
+      }
+    });
+  });
 
   describe(`postgres ${new URL(url).port}: server-side cancellation`, () => {
     const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

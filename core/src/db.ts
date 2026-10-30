@@ -6,7 +6,7 @@
  * await db.transaction(async tx => { await tx.insert(User).values({ ... }).execute() })
  * ```
  */
-import type { Statement } from './dialect.ts';
+import { SqlWriter, type Statement } from './dialect.ts';
 import {
   columnRules,
   Interceptors,
@@ -826,6 +826,45 @@ export class Db<S extends AnySchema> {
       .forUpdate()
       .toList();
     return rows.length > 0;
+  }
+
+  /**
+   * 咨询锁（ROADMAP 19.10，PG）：按一个名字加锁直到事务结束——没有对应的行也能锁（"同一时间只有一个任务在生成月报"），
+   * 跨进程、跨机器都生效。`wait: false` 时拿不到立即返回 false（不排队），默认等到拿到为止返回 true
+   * ```ts
+   * await db.transaction(async (tx) => {
+   *   if (!(await tx.advisoryLock(`report:${month}`, { wait: false }))) return; // 别人在做
+   *   …
+   * });
+   * ```
+   */
+  async advisoryLock(key: string, options: { readonly wait?: boolean } = {}): Promise<boolean> {
+    if (!this.inTransaction)
+      throw new Error(
+        'advisoryLock() must be called inside a transaction: the lock lasts until it ends',
+      );
+    const w = new SqlWriter();
+    const sql = this.ctx.dialect.advisoryLockStatement(
+      this.ctx.dialect.bindParam(key, w),
+      options.wait !== false,
+    );
+    const [row] = await query(this.ctx, { sql, params: w.params });
+    const ok = row?.['ok'];
+    return ok === true || ok === 1 || ok === 't' || ok === '1';
+  }
+
+  /**
+   * 发一条通知（ROADMAP 19.10，PG 的 NOTIFY）：在事务里时随提交发出、回滚就不发。收听用方言包的 listen（PG：easy-query-ts-pg 的 listen）。
+   * 二级缓存的失效、跨进程的事件可以接它
+   */
+  async notify(channel: string, payload = ''): Promise<void> {
+    const w = new SqlWriter();
+    const dialect = this.ctx.dialect;
+    const sql = dialect.notifyStatement(
+      dialect.bindParam(channel, w),
+      dialect.bindParam(payload, w),
+    );
+    await query(primary(this.ctx), { sql, params: w.params });
   }
 
   /** 嵌套事务：SAVEPOINT，成功则释放，失败则回滚到保存点 */

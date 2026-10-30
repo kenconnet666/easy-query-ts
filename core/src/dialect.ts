@@ -424,6 +424,19 @@ export abstract class Dialect {
   readonly indexIfNotExists: boolean = true;
 
   /**
+   * 事务级的咨询锁（ROADMAP 19.10，Db.advisoryLock）：按一个名字加锁、事务结束自动释放；wait 为 false 时拿不到立即返回假。
+   * 名字是绑定参数（key 处）。返回一行一列（ok）的查询；没有的方言报错
+   */
+  advisoryLockStatement(_key: string, _wait: boolean): string {
+    throw new Error(`advisoryLock() is not supported by the ${this.name} dialect`);
+  }
+
+  /** 通知（Db.notify）：在事务里时随提交发出；没有的方言报错 */
+  notifyStatement(_channel: string, _payload: string): string {
+    throw new Error(`notify() is not supported by the ${this.name} dialect`);
+  }
+
+  /**
    * 执行计划（ROADMAP 19.8）：把一条语句包成 EXPLAIN；analyze 时真的执行一遍拿实际耗时。没有的方言报错
    */
   explainStatement(_sql: string, _analyze: boolean): string {

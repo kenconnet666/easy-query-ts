@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { createDb, defineSchema, type Driver } from '@zerodep-dev/easy-query-ts';
 import { SqliteDialect } from '@zerodep-dev/easy-query-ts-sqlite';
+import { memoryDb } from '../src/sqlite-env.ts';
 
 /** 永远不返回的驱动：记下每条语句收到的信号 */
 function hangingDriver(signals: (AbortSignal | undefined)[]): Driver {
@@ -42,5 +43,17 @@ describe('withTimeout / statementTimeout', () => {
     await assert.rejects(pending, /stop/);
     assert.equal(signals[0]?.aborted, true);
     assert.throws(() => db.withTimeout(0), /positive number of milliseconds/);
+  });
+});
+
+describe('advisoryLock / notify on dialects without them', () => {
+  it('reports them as not supported; advisoryLock also needs a transaction', async () => {
+    const { db } = await memoryDb();
+    await assert.rejects(db.notify('x', 'y'), /notify\(\) is not supported by the sqlite dialect/);
+    await assert.rejects(db.advisoryLock('x'), /inside a transaction/);
+    await assert.rejects(
+      db.transaction((tx) => tx.advisoryLock('x')),
+      /advisoryLock\(\) is not supported by the sqlite dialect/,
+    );
   });
 });

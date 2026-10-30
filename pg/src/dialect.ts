@@ -245,6 +245,18 @@ export class PostgresDialect extends Dialect {
 
   override readonly indexFeatures = { using: true, partial: true, expressions: true };
 
+  /** 名字先哈希成 64 位整数（hashtextextended，PG 11+）；try 版本拿不到就返回假 */
+  override advisoryLockStatement(key: string, wait: boolean): string {
+    return wait
+      ? // pg_advisory_xact_lock 返回 void：拿到锁之后才会产出这一行
+        `SELECT 1 AS ok FROM (SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))) eq_l`
+      : `SELECT pg_try_advisory_xact_lock(hashtextextended(${key}, 0)) AS ok`;
+  }
+
+  override notifyStatement(channel: string, payload: string): string {
+    return `SELECT pg_notify(${channel}, ${payload})`;
+  }
+
   override explainStatement(sql: string, analyze: boolean): string {
     return `EXPLAIN (FORMAT JSON${analyze ? ', ANALYZE' : ''}) ${sql}`;
   }

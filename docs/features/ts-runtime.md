@@ -35,6 +35,25 @@ createDb({ schema, adapter, statementTimeout: 30_000 }); // 整个 Db 的默认
 带信号或超时的语句会先从池里借一条连接；取消请求发完才归还，不会落到复用这条连接的下一条语句上。
 别的库的驱动只做到"客户端不再等"，库里的语句照样跑完。驱动在 `Session.query / execute` 的第三个参数收到这条语句的信号。
 
+## 咨询锁与通知（PG，ROADMAP 19.10）
+
+```ts
+await db.transaction(async (tx) => {
+  if (!(await tx.advisoryLock(`report:${month}`, { wait: false }))) return; // 别人在做，跳过
+  …
+}); // 事务结束自动释放
+
+const stop = await listen(pool, 'cache_evict', (key) => cache.delete(key)); // easy-query-ts-pg 的 listen
+await db.notify('cache_evict', 'user:7'); // 在事务里时随提交发出、回滚不发
+await stop();
+```
+
+- `advisoryLock(名字, { wait })`：事务级的咨询锁（`pg_advisory_xact_lock`，名字经 `hashtextextended` 哈希成 64 位整数），没有对应的行也能锁，
+  跨进程、跨机器生效；`wait: false` 拿不到立即返回 false。只能在事务里用。
+- `notify(频道, 内容)` 是 `pg_notify`；收听用 PG 包的 `listen(pool, 频道, handler)`：借一条专用连接 LISTEN，返回的函数 UNLISTEN 并归还连接，
+  连接断了不自动重连。二级缓存的跨进程失效、事件推送可以接它。
+- 别的库渲染时报不支持（MySQL 的 GET_LOCK 是连接级的，提交时释放不了，没有做）。
+
 ## 嵌套事务（保存点）
 
 ```ts
