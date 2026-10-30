@@ -113,6 +113,7 @@ export type {
   Numeric,
   Operand,
   OrderItem,
+  LikeOptions,
   Pred,
   Subquery,
   Temporal,

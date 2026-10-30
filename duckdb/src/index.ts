@@ -92,6 +92,8 @@ export class DuckDbDialect extends Dialect {
       date_trunc: (a) => `DATE_TRUNC(${a[1]}, ${a[0]})`,
       diff_days: (a) => `DATE_DIFF('day', CAST(${a[1]} AS DATE), CAST(${a[0]} AS DATE))`,
       now: () => `CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP)`,
+      // 正则（Expr.matches）：选项 'c' 区分大小写、'i' 忽略
+      regex_match: (a) => `regexp_matches(${a[0]}, ${a[1]}, ${a[2]})`,
       json_value: (a) => `CAST(json_extract(${a[0]}, ${standardJsonPath(a[1]!)}) AS VARCHAR)`,
       json_text: (a) => `json_extract_string(${a[0]}, ${standardJsonPath(a[1]!)})`,
       json_number: (a) =>

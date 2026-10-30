@@ -100,6 +100,30 @@ for (const url of urls) {
           .count(),
         3,
       );
+      // DISTINCT ON：每个用户最新的一篇
+      assert.deepEqual(
+        await db
+          .queryable(Post)
+          .distinctOn((p) => p.userId)
+          .orderBy((p) => p.id.desc())
+          .select((p) => ({ userId: p.userId, id: p.id }))
+          .toList(),
+        await Promise.all(
+          [1, 2].map(async (userId) => ({
+            userId,
+            id: (await db
+              .queryable(Post)
+              .where((p) => p.userId.eq(userId as never))
+              .orderBy((p) => p.id.desc())
+              .first())!.id,
+          })),
+        ),
+      );
+      // 共享锁、FOR NO KEY UPDATE 在事务里照常
+      await db.transaction(async (tx) => {
+        assert.equal((await tx.queryable(Post).forShare().toList()).length, 4);
+        assert.equal((await tx.queryable(Post).forNoKeyUpdate().toList()).length, 4);
+      });
       // JSONPath：过滤表达式、谓词
       assert.equal(
         await db

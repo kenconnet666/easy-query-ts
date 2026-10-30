@@ -79,6 +79,10 @@ export const pgFunctions: Record<string, FunctionRenderer> = {
     a[1] === "'[]'"
       ? `(CAST(${a[0]} AS JSONB) || jsonb_build_array(CAST(${a[2]} AS JSONB)))`
       : `jsonb_set(CAST(${a[0]} AS JSONB), ${pgJsonPath(a[1]!)}, coalesce(CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)}, '[]'::jsonb) || jsonb_build_array(CAST(${a[2]} AS JSONB)))`,
+  // 正则（Expr.matches）：'i' 忽略大小写
+  regex_match: (a) => `(${a[0]} ${a[2] === "'i'" ? '~*' : '~'} ${a[1]})`,
+  // COLLATE：PG 的排序规则名要加双引号
+  collate: (a) => `(${a[0]} COLLATE "${unquoteSql(a[1]!)}")`,
   // jsonSome 的元素字段：jsonb_to_recordset 展开出来的列
   json_field: (a) => `eq_j."${unquoteSql(a[0]!).replace(/"/g, '""')}"`,
   // 数组（col.array 的列方法与 Pg.array 共用）

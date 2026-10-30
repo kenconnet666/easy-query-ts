@@ -186,6 +186,8 @@ export abstract class Dialect {
       now: () => 'CURRENT_TIMESTAMP',
       in_csv: (a) => `(CONCAT(',', ${a[1]}, ',') LIKE CONCAT('%,', ${a[0]}, ',%'))`,
       // JSON：基类按 PG 的 jsonb 写法；路径是 JSON 数组的字面量（见 Expr.json）
+      // COLLATE（Expr.collate）：规则名原样（PG 覆盖成带双引号）
+      collate: (a) => `(${a[0]} COLLATE ${unquoteSql(a[1]!)})`,
       json_value: (a) => `CAST(CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)} AS TEXT)`,
       json_text: (a) => `(CAST(${a[0]} AS JSONB) #>> ${pgJsonPath(a[1]!)})`,
       json_number: (a) =>
@@ -252,7 +254,7 @@ export abstract class Dialect {
 
   /** 渲染出来本身是条件的函数（函数表里的名字）；方言专属的条件函数在子类里追加 */
   protected conditionFunctions(): readonly string[] {
-    return ['in_csv', 'json_has'];
+    return ['in_csv', 'json_has', 'regex_match'];
   }
 
   private cachedConditionFunctions: ReadonlySet<string> | undefined;
@@ -560,6 +562,25 @@ export abstract class Dialect {
     return ' FOR UPDATE' + (wait === 'nowait' ? ' NOWAIT' : wait === 'skip' ? ' SKIP LOCKED' : '');
   }
 
+  /** 行锁子句：FOR UPDATE 交给 forUpdate；FOR SHARE、FOR NO KEY UPDATE 只有覆盖了它的方言能写 */
+  protected rowLock(mode: SelectNode['lockMode'], wait: SelectNode['lockWait']): string {
+    if (mode)
+      throw new Error(
+        `${mode === 'share' ? 'forShare()' : 'forNoKeyUpdate()'} is not supported by the ${this.name} dialect`,
+      );
+    return this.forUpdate(wait);
+  }
+
+  /** 忽略大小写的 LIKE：默认两边都 LOWER（PG 覆盖成 ILIKE） */
+  protected likeIgnoreCase(e: string, pattern: string, not: boolean): string {
+    return `LOWER(${e}) ${not ? 'NOT ' : ''}LIKE LOWER(${pattern})${this.likeEscape()}`;
+  }
+
+  /** DISTINCT ON (…)：只有 PG 有 */
+  protected distinctOn(_keys: readonly string[]): string {
+    throw new Error(`distinctOn() is not supported by the ${this.name} dialect`);
+  }
+
   /** null 安全相等的运算符（MySQL `<=>`、PG `IS NOT DISTINCT FROM`）；没有的库写成 (a = b OR (a IS NULL AND b IS NULL)) */
   readonly nullSafeEquals: string | undefined = undefined;
 
@@ -624,7 +645,13 @@ export abstract class Dialect {
       q.columns.length === 0
         ? '1'
         : q.columns.map((c) => `${this.value(c.e, w)} AS ${this.quote(c.as)}`).join(', ');
-    let s = `SELECT ${q.distinct ? 'DISTINCT ' : ''}${cols} FROM ${q.from.sub ? `(${this.select(q.from.sub, w)})` : this.table(q.from.table)} ${q.from.alias}${q.from.hint ? ` ${q.from.hint}` : ''}`;
+    const hints = q.hints?.length ? `/*+ ${q.hints.join(' ')} */ ` : '';
+    const distinct = q.distinctOn?.length
+      ? this.distinctOn(q.distinctOn.map((d) => this.node(d, w)))
+      : q.distinct
+        ? 'DISTINCT '
+        : '';
+    let s = `SELECT ${hints}${distinct}${cols} FROM ${q.from.sub ? `(${this.select(q.from.sub, w)})` : this.table(q.from.table)} ${q.from.alias}${q.from.hint ? ` ${q.from.hint}` : ''}`;
     s += this.joinClauses(q.joins, w);
     if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
     if (q.groupBy.length > 0)
@@ -636,7 +663,7 @@ export abstract class Dialect {
     if (q.orderBy.length > 0)
       s += ` ORDER BY ${q.orderBy.map((o) => this.node(o.e, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
     s += this.limitOffset(q.limit, q.offset, q.orderBy.length > 0);
-    if (q.forUpdate) s += this.forUpdate(q.lockWait);
+    if (q.forUpdate) s += this.rowLock(q.lockMode, q.lockWait);
     return s;
   }
 
@@ -792,8 +819,12 @@ export abstract class Dialect {
         return `${this.operand(n.e, w)} ${n.not ? 'NOT ' : ''}IN (${this.select(n.q, w)})`;
       case 'between':
         return `${this.operand(n.e, w)} BETWEEN ${this.operand(n.lo, w)} AND ${this.operand(n.hi, w)}`;
-      case 'like':
-        return `${this.operand(n.e, w)} ${n.not ? 'NOT ' : ''}LIKE ${this.node(n.pattern, w)}${this.likeEscape()}`;
+      case 'like': {
+        const e = this.operand(n.e, w);
+        const pattern = this.node(n.pattern, w);
+        if (n.ci) return this.likeIgnoreCase(e, pattern, n.not);
+        return `${e} ${n.not ? 'NOT ' : ''}LIKE ${pattern}${this.likeEscape()}`;
+      }
       case 'fn': {
         const render = (this.cachedFunctions ??= this.functions())[n.name];
         if (!render)

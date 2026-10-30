@@ -9,6 +9,7 @@ import {
   type DbTable,
   type Entity,
   type FunctionRenderer,
+  type SelectNode,
   type InsertNode,
   type Node,
   type QueryRunner,
@@ -227,6 +228,20 @@ export class PostgresDialect extends Dialect {
   }
 
   /** CASE 分支里的字符串 / 数字 / 布尔参数 PG 推断不出类型（"could not determine data type of parameter"），加显式转换 */
+  protected override likeIgnoreCase(e: string, pattern: string, not: boolean): string {
+    return `${e} ${not ? 'NOT ' : ''}ILIKE ${pattern}${this.likeEscape()}`;
+  }
+
+  protected override distinctOn(keys: readonly string[]): string {
+    return `DISTINCT ON (${keys.join(', ')}) `;
+  }
+
+  protected override rowLock(mode: SelectNode['lockMode'], wait: SelectNode['lockWait']): string {
+    const strength =
+      mode === 'share' ? 'SHARE' : mode === 'noKeyUpdate' ? 'NO KEY UPDATE' : 'UPDATE';
+    return ` FOR ${strength}${wait === 'nowait' ? ' NOWAIT' : wait === 'skip' ? ' SKIP LOCKED' : ''}`;
+  }
+
   /** 一次插入 100 行起、值都是参数时用 unnest：每列一个数组参数，一条语句插完 */
   override readonly arrayInsertFrom: number | undefined = 100;
 

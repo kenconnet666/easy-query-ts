@@ -173,25 +173,72 @@ export class Expr<T> {
     return pred({ k: 'null', e: this.node, not: true });
   }
 
-  /** 包含 text（两边加 %）；text 里的 % _ 按字面匹配 */
-  /** 包含 text；text 也可以是一列（如路径左匹配 `c.path.startsWith(d.path)`，列里的 % _ 不转义） */
-  like(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
-    return this.likeNode('%', text, '%', false);
+  /**
+   * 包含 text（两边加 %，text 里的 % _ 按字面匹配）；text 也可以是一列（如路径左匹配 `c.path.startsWith(d.path)`，列里的 % _ 不转义）。
+   * `{ ignoreCase: true }` 忽略大小写：PG 写成 ILIKE，别的库两边 LOWER
+   */
+  like(this: Expr<string | null>, text: string | Expr<string | null>, options?: LikeOptions): Pred {
+    return this.likeNode('%', text, '%', false, options);
   }
-  notLike(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
-    return this.likeNode('%', text, '%', true);
+  notLike(
+    this: Expr<string | null>,
+    text: string | Expr<string | null>,
+    options?: LikeOptions,
+  ): Pred {
+    return this.likeNode('%', text, '%', true, options);
   }
-  startsWith(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
-    return this.likeNode('', text, '%', false);
+  startsWith(
+    this: Expr<string | null>,
+    text: string | Expr<string | null>,
+    options?: LikeOptions,
+  ): Pred {
+    return this.likeNode('', text, '%', false, options);
   }
-  endsWith(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
-    return this.likeNode('%', text, '', false);
+  endsWith(
+    this: Expr<string | null>,
+    text: string | Expr<string | null>,
+    options?: LikeOptions,
+  ): Pred {
+    return this.likeNode('%', text, '', false, options);
   }
-  notStartsWith(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
-    return this.likeNode('', text, '%', true);
+  notStartsWith(
+    this: Expr<string | null>,
+    text: string | Expr<string | null>,
+    options?: LikeOptions,
+  ): Pred {
+    return this.likeNode('', text, '%', true, options);
   }
-  notEndsWith(this: Expr<string | null>, text: string | Expr<string | null>): Pred {
-    return this.likeNode('%', text, '', true);
+  notEndsWith(
+    this: Expr<string | null>,
+    text: string | Expr<string | null>,
+    options?: LikeOptions,
+  ): Pred {
+    return this.likeNode('%', text, '', true, options);
+  }
+
+  /**
+   * 正则匹配（ROADMAP 19.6）：PG `~` / `~*`，MySQL 8.0.4+ 与 Oracle REGEXP_LIKE，DuckDB regexp_matches；别的库渲染时报不支持。
+   * 正则的方言各库略有不同（PG 是 POSIX，MySQL 8 是 ICU），只用常见的写法
+   */
+  matches(this: Expr<string | null>, pattern: string, options?: LikeOptions): Pred {
+    return pred({
+      k: 'fn',
+      name: 'regex_match',
+      args: [
+        this.node,
+        { k: 'param', value: pattern, codec: undefined },
+        { k: 'lit', sql: options?.ignoreCase ? "'i'" : "'c'" },
+      ],
+    });
+  }
+
+  /** 按指定的排序规则比较、排序（COLLATE）：`u.name.collate('utf8mb4_bin').eq(x)` 区分大小写；规则名原样写进 SQL，只能是字母数字与 _ - . */
+  collate(this: Expr<string | null>, name: string): Expr<T> {
+    if (!/^[\w.-]+$/.test(name)) throw new RangeError(`invalid collation name: ${name}`);
+    return new Expr(
+      { k: 'fn', name: 'collate', args: [this.node, { k: 'lit', sql: sqlString(name) }] },
+      this.codec,
+    );
   }
 
   /**
@@ -790,7 +837,9 @@ export class Expr<T> {
     text: string | Expr<string | null>,
     after: string,
     not: boolean,
+    options: LikeOptions | undefined,
   ): Pred {
+    const ci = options?.ignoreCase ? { ci: true } : {};
     if (text instanceof Expr) {
       // 模式是一列：前后拼上 %，列里的通配符原样生效
       const parts = [
@@ -803,9 +852,14 @@ export class Expr<T> {
         e: this.node,
         pattern: { k: 'fn', name: 'concat', args: parts.filter((p): p is Node => !!p) },
         not,
+        ...ci,
       });
     }
     const encryption = this.codec?.encryption;
+    if (encryption && options?.ignoreCase)
+      throw new Error(
+        'like / startsWith / endsWith with ignoreCase cannot search an encrypted column',
+      );
     if (encryption && !encryption.searchable)
       throw new Error(
         'like / startsWith / endsWith on an encrypted column need a searchable encryption strategy; use sqlConvert to search inside the database',
@@ -825,11 +879,18 @@ export class Expr<T> {
         codec: undefined,
       },
       not,
+      ...ci,
     });
   }
 }
 
 export type Pred = Expr<boolean>;
+
+/** like 家族与 matches 的选项 */
+export interface LikeOptions {
+  /** 忽略大小写 */
+  readonly ignoreCase?: boolean;
+}
 
 /** dateTrunc 的时间单位 */
 export type DateUnit = 'year' | 'quarter' | 'month' | 'week' | 'day' | 'hour' | 'minute' | 'second';

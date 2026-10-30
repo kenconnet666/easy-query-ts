@@ -240,6 +240,8 @@ export class OracleDialect extends Dialect {
       now: () => `SYS_EXTRACT_UTC(SYSTIMESTAMP)`,
       in_csv: (a) => `(',' || ${a[1]} || ',' LIKE '%,' || ${a[0]} || ',%')`,
       truncate: (a) => `TRUNC(${a[0]}, ${a[1]})`,
+      // 正则（Expr.matches）：第三个参数 'c' 区分大小写、'i' 忽略
+      regex_match: (a) => `REGEXP_LIKE(${a[0]}, ${a[1]}, ${a[2]})`,
       json_value: (a) => `JSON_QUERY(${a[0]}, ${standardJsonPath(a[1]!)} WITH CONDITIONAL WRAPPER)`,
       json_text: (a) => `JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)})`,
       json_number: (a) => `JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)} RETURNING BINARY_DOUBLE)`,

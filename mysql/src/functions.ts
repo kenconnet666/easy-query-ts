@@ -125,6 +125,9 @@ export const mysqlFunctions: Record<string, FunctionRenderer> = {
   json_boolean: (a) => `(JSON_EXTRACT(${a[0]}, ${standardJsonPath(a[1]!)}) = TRUE)`,
   json_has: (a) => `JSON_CONTAINS_PATH(${a[0]}, 'one', ${standardJsonPath(a[1]!)})`,
   json_length: (a) => `JSON_LENGTH(${a[0]}, ${standardJsonPath(a[1]!)})`,
+  // 正则（8.0.4+ 的 REGEXP_LIKE，第三个参数 'c' 区分大小写、'i' 忽略）
+  regex_match: (a) => `REGEXP_LIKE(${a[0]}, ${a[1]}, ${a[2]})`,
+  collate: (a) => `(${a[0]} COLLATE ${unquoteSql(a[1]!)})`,
   // jsonSome 的元素字段：JSON_TABLE 展开出来的列
   json_field: (a) => `eq_j.\`${unquoteSql(a[0]!).replace(/`/g, '``')}\``,
   // JSON 的更新写法：值是 JSON 文字的参数；浅合并逐键 JSON_SET（JSON_MERGE_PATCH 是递归的，语义不同）

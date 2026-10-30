@@ -61,6 +61,33 @@ describe('postgres: JSON edits and jsonSome', () => {
   });
 });
 
+describe('postgres: query forms', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+
+  it('renders DISTINCT ON with its keys leading the ORDER BY, ILIKE, ~*, COLLATE and the lock strengths', () => {
+    assert.equal(
+      db
+        .queryable(Post)
+        .distinctOn((p) => p.userId)
+        .orderBy((p) => p.id.desc())
+        .where((p) => [
+          p.title.startsWith('a', { ignoreCase: true }),
+          p.title.matches('^o', { ignoreCase: true }),
+        ])
+        .select((p) => p.title.collate('C'))
+        .toSQL().sql,
+      'SELECT DISTINCT ON (t0."user_id") (t0."title" COLLATE "C") AS "c0" FROM "t_post" t0' +
+        ` WHERE t0."title" ILIKE $1 ESCAPE '\\' AND (t0."title" ~* $2) ORDER BY t0."user_id" ASC, t0."id" DESC`,
+    );
+    assert.match(db.queryable(Post).forShare().toSQL().sql, / FOR SHARE$/);
+    assert.match(db.queryable(Post).forNoKeyUpdate().toSQL().sql, / FOR NO KEY UPDATE$/);
+    assert.match(
+      db.queryable(Post).optimizerHint('SeqScan(t0)').toSQL().sql,
+      /^SELECT \/\*\+ SeqScan\(t0\) \*\/ /,
+    );
+  });
+});
+
 describe('postgres: batched writes', () => {
   const db = createDb({ schema, adapter: postgres({} as Pool) });
 

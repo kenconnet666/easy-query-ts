@@ -112,6 +112,12 @@ interface State {
   readonly hint?: string;
   /** 排序全部反过来（深分页倒序取） */
   readonly reverse?: boolean;
+  /** PG 的 DISTINCT ON：每组只留排序后的第一行 */
+  readonly distinctOn?: Fn<OrderItem | readonly OrderItem[]>;
+  /** 行锁的强度（forShare、forNoKeyUpdate） */
+  readonly lockMode?: 'share' | 'noKeyUpdate';
+  /** 优化器提示（optimizerHint） */
+  readonly hints?: readonly string[];
 }
 
 /**
@@ -821,6 +827,41 @@ export class Queryable<
     return this.with({ forUpdate: true, lockWait: 'skip' });
   }
 
+  /** 共享锁（FOR SHARE，PG、MySQL 8）：别人还能读、也能再加共享锁，但改不了，直到事务结束。在事务里用 */
+  forShare(this: Requires<S, 'forUpdate', Queryable<S, K, Out, Refs>>): Queryable<S, K, Out, Refs>;
+  forShare(): Queryable<S, K, Out, Refs> {
+    return this.with({ forUpdate: true, lockMode: 'share' });
+  }
+
+  /**
+   * PG 的 FOR NO KEY UPDATE：比 FOR UPDATE 弱，不挡住别的事务插入引用这些行的外键（只改非键列时用它，少些锁冲突）。在事务里用
+   */
+  forNoKeyUpdate(
+    this: Requires<S, 'forUpdate', Queryable<S, K, Out, Refs>>,
+  ): Queryable<S, K, Out, Refs>;
+  forNoKeyUpdate(): Queryable<S, K, Out, Refs> {
+    return this.with({ forUpdate: true, lockMode: 'noKeyUpdate' });
+  }
+
+  /**
+   * PG 的 DISTINCT ON：按这些键每组只留一行，留哪行由排序决定——键会自动排在 ORDER BY 最前面，后面接 orderBy 的排序。
+   * 取每个用户最新的一篇：`db.queryable(Post).distinctOn((p) => p.userId).orderBy((p) => p.createdAt.desc())`
+   */
+  distinctOn(
+    keys: (...refs: Refs) => OrderItem | readonly OrderItem[],
+  ): Queryable<S, K, Out, Refs> {
+    return this.with({ distinctOn: keys as Fn<OrderItem | readonly OrderItem[]> });
+  }
+
+  /**
+   * 优化器提示，写进 SELECT 后面的提示注释里：MySQL `optimizerHint('MAX_EXECUTION_TIME(1000)')`、`'INDEX(t0 idx_user)'`，
+   * Oracle 的各种提示，PG 装了 pg_hint_plan 时也认；不认的库当成注释。按调用顺序拼在一起
+   */
+  optimizerHint(hint: string): Queryable<S, K, Out, Refs> {
+    if (hint.includes('*/')) throw new Error('an optimizer hint cannot contain */');
+    return this.with({ hints: [...(this.state.hints ?? []), hint] });
+  }
+
   /** 这条查询不用这些拦截器（按名字，如 'tenant'；名字见 InterceptorNames） */
   noInterceptor(...names: InterceptorName[]): Queryable<S, K, Out, Refs> {
     return this.interceptors({ skip: names });
@@ -1306,6 +1347,10 @@ function build(ctx: Context, state: State, bare = false): Built {
     shape.compile(shapeOf(state, refs));
   }
 
+  // DISTINCT ON 的键排在最前面（PG 要求 ORDER BY 以它们开头），留哪一行由后面的排序决定
+  const distinctOn = state.distinctOn ? orderNodes(state.distinctOn(...refs)) : undefined;
+  if (distinctOn) orderBy = [...distinctOn, ...orderBy];
+
   if (state.reverse) orderBy = orderBy.map((o) => ({ ...o, desc: !o.desc }));
 
   const entity = ctx.schema.entities[state.key]!;
@@ -1330,6 +1375,9 @@ function build(ctx: Context, state: State, bare = false): Built {
     offset: state.offset,
     forUpdate: state.forUpdate,
     lockWait: state.lockWait,
+    lockMode: state.lockMode,
+    distinctOn: distinctOn?.map((o) => o.e),
+    hints: state.hints,
     groupMode: state.group ? state.groupMode : undefined,
     ctes: scope.ctes.size > 0 ? [...scope.ctes.values()] : undefined,
   };

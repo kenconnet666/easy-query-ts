@@ -109,6 +109,37 @@ describe('mysql: JSON edits and jsonSome', () => {
   });
 });
 
+describe('mysql: query forms', () => {
+  const db = createDb({ schema, adapter: mysql({} as Pool) });
+
+  it('renders REGEXP_LIKE, COLLATE, FOR SHARE and optimizer hints; rejects DISTINCT ON and FOR NO KEY UPDATE', () => {
+    assert.equal(
+      db
+        .queryable(Post)
+        .optimizerHint('MAX_EXECUTION_TIME(1000)')
+        .where((p) => [p.title.matches('^o'), p.title.collate('utf8mb4_bin').eq('x')])
+        .select((p) => p.id)
+        .forShare()
+        .toSQL().sql,
+      "SELECT /*+ MAX_EXECUTION_TIME(1000) */ t0.`id` AS `c0` FROM `t_post` t0 WHERE REGEXP_LIKE(t0.`title`, ?, 'c')" +
+        ' AND (t0.`title` COLLATE utf8mb4_bin) = ? FOR SHARE',
+    );
+    assert.throws(
+      () =>
+        db
+          .queryable(Post)
+          .distinctOn((p) => p.userId)
+          .toSQL(),
+      /distinctOn\(\) is not supported/,
+    );
+    assert.throws(
+      () => db.queryable(Post).forNoKeyUpdate().toSQL(),
+      /forNoKeyUpdate\(\) is not supported/,
+    );
+    assert.throws(() => db.queryable(Post).optimizerHint('x */ y'), /cannot contain/);
+  });
+});
+
 describe('mysql: batched writes', () => {
   const db = createDb({ schema, adapter: mysql({} as Pool) });
 

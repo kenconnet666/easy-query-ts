@@ -274,6 +274,13 @@ export class MySqlDialect extends Dialect {
     return super.forUpdate(wait);
   }
 
+  /** FOR SHARE 要 8.0.1（之前是 LOCK IN SHARE MODE）；没有 FOR NO KEY UPDATE */
+  protected override rowLock(mode: SelectNode['lockMode'], wait: SelectNode['lockWait']): string {
+    if (mode !== 'share') return super.rowLock(mode, wait);
+    this.requires('FOR SHARE', '8.0.1');
+    return ` FOR SHARE${wait === 'nowait' ? ' NOWAIT' : wait === 'skip' ? ' SKIP LOCKED' : ''}`;
+  }
+
   override limitOffset(
     limit: number | undefined,
     offset: number | undefined,

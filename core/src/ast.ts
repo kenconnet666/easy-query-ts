@@ -22,7 +22,14 @@ export type Node =
   | { readonly k: 'in_sub'; readonly e: Node; readonly q: SelectNode; readonly not: boolean }
   | { readonly k: 'between'; readonly e: Node; readonly lo: Node; readonly hi: Node }
   /** LIKE；pattern 已经转义过 % _ \ 并加好通配符 */
-  | { readonly k: 'like'; readonly e: Node; readonly pattern: Node; readonly not: boolean }
+  /** ci：忽略大小写（PG 的 ILIKE，别的库 LOWER(…) LIKE LOWER(…)） */
+  | {
+      readonly k: 'like';
+      readonly e: Node;
+      readonly pattern: Node;
+      readonly not: boolean;
+      readonly ci?: boolean | undefined;
+    }
   /** 方言函数表里的函数（upper、year …），由方言决定写法 */
   | { readonly k: 'fn'; readonly name: string; readonly args: readonly Node[] }
   | {
@@ -112,6 +119,12 @@ export interface SelectNode {
   readonly forUpdate: boolean;
   /** 行锁遇到被别人锁住的行怎么办：nowait 立即报错，skip 跳过那些行；省略为等待 */
   readonly lockWait?: 'nowait' | 'skip' | undefined;
+  /** 锁的强度：share 是共享锁（FOR SHARE），noKeyUpdate 是 PG 的 FOR NO KEY UPDATE；省略为 FOR UPDATE */
+  readonly lockMode?: 'share' | 'noKeyUpdate' | undefined;
+  /** PG 的 DISTINCT ON (…)：每组只留排序后的第一行 */
+  readonly distinctOn?: readonly Node[] | undefined;
+  /** 优化器提示：写在 SELECT 后面的提示注释里（以 /*+ 开头的那种，MySQL、Oracle；PG 装了 pg_hint_plan 时也认），不认的库当成注释 */
+  readonly hints?: readonly string[] | undefined;
   /** GROUP BY 的方式：rollup 逐级小计加总计，cube 所有组合；省略为普通分组 */
   readonly groupMode?: 'rollup' | 'cube' | undefined;
   /** 复合查询：本查询 UNION [ALL] 后面这些；各成员不带 orderBy / limit / offset（需要时包一层派生表） */

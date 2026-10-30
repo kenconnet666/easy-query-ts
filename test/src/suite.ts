@@ -279,6 +279,40 @@ export function liveSuite(
       assert.equal(await base.any(), true);
     });
 
+    it('likes ignoring case and matches regular expressions', async () => {
+      const { db } = await seeded();
+      const users = () => db.queryable(User).orderBy((u) => u.id);
+      const names = (q: ReturnType<typeof users>) => q.select((u) => u.name).toList();
+      assert.deepEqual(
+        await names(users().where((u) => u.name.startsWith('AL', { ignoreCase: true }))),
+        ['alice'],
+      );
+      assert.deepEqual(await names(users().where((u) => u.name.like('O', { ignoreCase: true }))), [
+        'bob',
+        'carol',
+      ]);
+      // 正则：没有的库渲染时报不支持
+      let regex = true;
+      try {
+        db.queryable(User)
+          .where((u) => u.name.matches('^a'))
+          .toSQL();
+      } catch (error) {
+        assert.match((error as Error).message, /not supported/);
+        regex = false;
+      }
+      if (regex) {
+        assert.deepEqual(await names(users().where((u) => u.name.matches('^(a|b)'))), [
+          'alice',
+          'bob',
+        ]);
+        assert.deepEqual(
+          await names(users().where((u) => u.name.matches('^A', { ignoreCase: true }))),
+          ['alice'],
+        );
+      }
+    });
+
     it('combines and / or / not helpers', async () => {
       const { db } = await seeded();
       const n = await db
