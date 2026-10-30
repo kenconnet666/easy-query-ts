@@ -101,6 +101,14 @@ export interface Guards {
   readonly maxRows: number | undefined;
   /** 分页的偏移量超过它、且超过总数一半时倒序取再翻回来（深分页）；undefined 不倒序 */
   readonly reversePageAfter: number | undefined;
+  /** db.readonly() 之后：写入、DDL、sql.execute 直接报错 */
+  readonly readonly: boolean;
+}
+
+/** 写入前检查：只读的 Db 上报错（类型上已经没有写方法，这里兜住从 JS 调用、断言掉类型的情况） */
+export function assertWritable(ctx: Context): void {
+  if (ctx.guards.readonly)
+    throw new Error('this Db is read-only (db.readonly()): writes are not allowed');
 }
 
 /** 事务结束后要做的事：一层一帧，保存点（嵌套事务）成功时并进外层，失败时丢掉它登记的提交后的事 */

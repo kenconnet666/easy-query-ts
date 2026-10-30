@@ -207,8 +207,10 @@ export type {
   Capability,
   CapabilitiesOf,
   Capable,
+  ReadOnly,
   Requires,
   Unsupported,
   WithCapabilities,
   Without,
+  WriteCapability,
 } from './capabilities.ts';

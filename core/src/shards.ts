@@ -68,7 +68,7 @@ export class ShardedDb<S extends AnySchema> {
     }
     let affected = 0;
     for (const [name, list] of groups)
-      affected += await this.shard(name)
+      affected += await (this.shard(name) as unknown as Db<AnySchema>)
         .insert(entity)
         .values(list as never)
         .execute();
@@ -94,7 +94,7 @@ export class ShardedDb<S extends AnySchema> {
     entity: E,
     build: (remove: Deletable<S, KeyOf<S, E>>) => Deletable<S, KeyOf<S, E>>,
   ): Promise<number> {
-    const run = (db: Db<S>) => build(db.delete(entity) as never);
+    const run = (db: Db<S>) => build((db as unknown as Db<AnySchema>).delete(entity) as never);
     return this.write(
       entity,
       (db) => run(db).conditions(),

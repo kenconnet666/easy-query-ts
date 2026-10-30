@@ -25,6 +25,11 @@
       "@vue-tsx-pro/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./context": {
+      "@vue-tsx-pro/source": "./src/context.ts",
+      "types": "./dist/context.d.ts",
+      "default": "./dist/context.js"
     }
   },
   "files": [

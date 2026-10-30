@@ -9,7 +9,7 @@
  * 泛型 T 只是你对结果形状的断言，不会被检查。
  */
 import { SqlWriter, type Dialect, type Statement } from './dialect.ts';
-import { execute, query, type Context } from './session.ts';
+import { assertWritable, execute, query, type Context } from './session.ts';
 
 /** 需要按方言加引号的标识符（表名、列名）；表名可以带 schema 前缀（a.b） */
 export class SqlIdent {
@@ -34,8 +34,10 @@ export function createSqlTag(ctx: Context): SqlTag {
   // async：渲染阶段的错误（undefined、空数组）也走 Promise 的拒绝，调用方只需要一种错误处理方式
   const tag = (async <T>(strings: TemplateStringsArray, ...values: unknown[]) =>
     (await query(ctx, render(ctx.dialect, strings, values))) as T[]) as SqlTag;
-  tag.execute = async (strings, ...values) =>
-    (await execute(ctx, render(ctx.dialect, strings, values))).affected;
+  tag.execute = async (strings, ...values) => {
+    assertWritable(ctx);
+    return (await execute(ctx, render(ctx.dialect, strings, values))).affected;
+  };
   tag.ident = (name) => new SqlIdent(name);
   return tag;
 }

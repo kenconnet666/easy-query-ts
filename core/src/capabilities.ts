@@ -3,14 +3,17 @@
  * Db、查询、写入构造器的方法按能力有无——不支持的写法在调用处就报错：
  * ```ts
  * const db = createDb({ schema, adapter: tdengine(sql) })
- * db.update(Reading)   // 类型错误：'error: the dialect of this Db does not support': "update"
+ * db.update(Reading)   // 类型错误：'error: this Db does not support': "update"
  * ```
  * schema 本来就贯穿 Db、Queryable 与各写入构造器，能力跟着它走，不用给每个类型加泛型参数。
+ * `db.readonly()` 也是去掉能力（写入、加锁），只读的 Db 在类型上就没有写方法。
  * 运行时的报错照旧保留（从 JS 调用、或类型被断言掉时兜底）。表达式层面的差异（某个库没有某个函数）仍在渲染时报出
  */
 
-/** 方言可能缺的能力 */
+/** 方言可能缺的能力；write 只由 db.readonly() 去掉 */
 export type Capability =
+  /** 写入：insert、delete、save、remove、建表与同步、迁移 */
+  | 'write'
   /** UPDATE（TDengine 没有：同一时间戳再写一次就是覆盖） */
   | 'update'
   /** 能回滚的事务：transaction()、begin()（ClickHouse、Doris、TDengine 没有） */
@@ -54,8 +57,14 @@ export type CapabilitiesOf<S> = S extends { readonly [capabilities]?: infer C }
 
 /** 不支持时方法的 this 变成这个类型：调用处报错，错误信息里写出缺的能力 */
 export interface Unsupported<K extends Capability> {
-  readonly 'error: the dialect of this Db does not support': K;
+  readonly 'error: this Db does not support': K;
 }
+
+/** db.readonly() 去掉的能力：写入、UPDATE、加锁（从库上都做不了） */
+export type WriteCapability = 'write' | 'update' | 'lock' | 'forUpdate' | 'skipLocked' | 'noWait';
+
+/** 只读的 schema：去掉写入与加锁的能力 */
+export type ReadOnly<S> = WithCapabilities<S, Exclude<CapabilitiesOf<S>, WriteCapability>>;
 
 /** 方法的 this：有能力 K 时是 Self，没有时是 Unsupported<K> */
 export type Requires<S, K extends Capability, Self> = [K] extends [CapabilitiesOf<S>]

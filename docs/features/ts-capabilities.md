@@ -6,13 +6,14 @@
 ```ts
 const db = createDb({ schema, adapter: tdengine(sql) });
 db.update(Reading);
-// 类型错误：Property ''error: the dialect of this Db does not support'' is missing … 'Unsupported<"update">'
+// 类型错误：Property ''error: this Db does not support'' is missing … 'Unsupported<"update">'
 ```
 
 ## 能力
 
 | 能力            | 管哪些方法                       | 没有的库                                      |
 | --------------- | -------------------------------- | --------------------------------------------- |
+| `write`         | 写入、DDL、迁移                  | 只由 `db.readonly()` 去掉，见 ts-readonly.md  |
 | `update`        | `db.update`                      | TDengine                                      |
 | `transactions`  | `db.transaction`、`db.begin`     | ClickHouse、Doris、TDengine                   |
 | `lock`          | `db.lock`                        | ClickHouse、Doris、TDengine                   |

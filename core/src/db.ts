@@ -43,10 +43,17 @@ import type { Ref } from './ref.ts';
 import type { DerivedEntity, Entity, Row } from './schema.ts';
 import { createSqlTag, type SqlTag } from './native.ts';
 import { checksum, historyEntity, ordered, type Migration } from './migrate.ts';
-import type { Capability, CapabilitiesOf, Requires, WithCapabilities } from './capabilities.ts';
+import type {
+  Capability,
+  CapabilitiesOf,
+  ReadOnly,
+  Requires,
+  WithCapabilities,
+} from './capabilities.ts';
 import { AggregateSaver, type SaveInclude, type SaveValue } from './save.ts';
 import { createStatements, findTable, planSync, type DbTable, type SyncPlan } from './ddl.ts';
 import {
+  assertWritable,
   execute,
   query,
   type Adapter,
@@ -145,31 +152,43 @@ export class Db<S extends AnySchema> {
     return newQueryable(ctx, key);
   }
 
-  insert<E extends SchemaEntity<S>>(entity: E): Insertable<S, KeyOf<S, E>>;
-  insert<E extends Entity>(entity: E): Insertable<AdhocSchema<E>, E['name']>;
+  insert<E extends SchemaEntity<S>>(
+    this: Requires<S, 'write', Db<S>>,
+    entity: E,
+  ): Insertable<S, KeyOf<S, E>>;
+  insert<E extends Entity>(
+    this: Requires<S, 'write', Db<S>>,
+    entity: E,
+  ): Insertable<AdhocSchema<E>, E['name']>;
   insert(entity: Entity): Insertable<any, string> {
     const { ctx, key } = this.target(entity);
-    return new Insertable(primary(ctx), key);
+    return new Insertable(writable(ctx), key);
   }
 
   update<E extends SchemaEntity<S>>(
-    this: Requires<S, 'update', Db<S>>,
+    this: Requires<S, 'update' | 'write', Db<S>>,
     entity: E,
   ): Updatable<S, KeyOf<S, E>>;
   update<E extends Entity>(
-    this: Requires<S, 'update', Db<S>>,
+    this: Requires<S, 'update' | 'write', Db<S>>,
     entity: E,
   ): Updatable<AdhocSchema<E>, E['name']>;
   update(entity: Entity): Updatable<any, string> {
     const { ctx, key } = this.target(entity);
-    return new Updatable(primary(ctx), key);
+    return new Updatable(writable(ctx), key);
   }
 
-  delete<E extends SchemaEntity<S>>(entity: E): Deletable<S, KeyOf<S, E>>;
-  delete<E extends Entity>(entity: E): Deletable<AdhocSchema<E>, E['name']>;
+  delete<E extends SchemaEntity<S>>(
+    this: Requires<S, 'write', Db<S>>,
+    entity: E,
+  ): Deletable<S, KeyOf<S, E>>;
+  delete<E extends Entity>(
+    this: Requires<S, 'write', Db<S>>,
+    entity: E,
+  ): Deletable<AdhocSchema<E>, E['name']>;
   delete(entity: Entity): Deletable<any, string> {
     const { ctx, key } = this.target(entity);
-    return new Deletable(primary(ctx), key);
+    return new Deletable(writable(ctx), key);
   }
 
   /** 实体在 schema 里就用它；不在就临时登记进这条语句的 schema（名字被占用时加序号） */
@@ -315,6 +334,12 @@ export class Db<S extends AnySchema> {
    * - 导航按 include 保存：一对多 / 一对一按差异增改、移除；多对一先存目标再设外键；多对多只增删中间表的行。细则见 save.ts
    * - 必填列的检查交给数据库：插入新行时少了必填列会报错
    */
+  save<E extends SchemaEntity<S>, const I extends SaveInclude<S, KeyOf<S, E>> = {}>(
+    this: Requires<S, 'write', Db<S>>,
+    entity: E,
+    input: NoInfer<SaveValue<S, KeyOf<S, E>, I>>,
+    options?: { readonly include?: I },
+  ): Promise<Row<E>>;
   async save<E extends SchemaEntity<S>, const I extends SaveInclude<S, KeyOf<S, E>> = {}>(
     entity: E,
     input: NoInfer<SaveValue<S, KeyOf<S, E>, I>>,
@@ -345,6 +370,12 @@ export class Db<S extends AnySchema> {
    * await db.remove(User, 1, { include: { posts: { include: { comments: true } }, roles: true } })
    * ```
    */
+  remove<E extends SchemaEntity<S>, const I extends SaveInclude<S, KeyOf<S, E>> = {}>(
+    this: Requires<S, 'write', Db<S>>,
+    entity: E,
+    key: KeyInput<E>,
+    options?: { readonly include?: I },
+  ): Promise<boolean>;
   async remove<E extends SchemaEntity<S>, const I extends SaveInclude<S, KeyOf<S, E>> = {}>(
     entity: E,
     key: KeyInput<E>,
@@ -383,6 +414,7 @@ export class Db<S extends AnySchema> {
    * 建库里还没有的表（连同注释、索引、外键），已有的表不动；默认是 schema 里全部非派生的实体。
    * 适合测试、原型和"库里还没有表"的起步；已有的表要跟上实体的变化用 planSync / syncTables
    */
+  createTables(this: Requires<S, 'write', Db<S>>, ...entities: Entity[]): Promise<void>;
   async createTables(...entities: Entity[]): Promise<void> {
     const tables = await this.introspect();
     const missing = this.targets(entities).filter((e) => !findTable(tables, e.table));
@@ -421,6 +453,7 @@ export class Db<S extends AnySchema> {
   }
 
   /** 算出同步计划并执行它的语句（PG、SQLite 在一个事务里；MySQL、HANA 的 DDL 会隐式提交），返回计划 */
+  syncTables(this: Requires<S, 'write', Db<S>>, ...entities: Entity[]): Promise<SyncPlan>;
   async syncTables(...entities: Entity[]): Promise<SyncPlan> {
     const plan = await this.planSync(...entities);
     await this.runDdl(plan.statements);
@@ -428,6 +461,7 @@ export class Db<S extends AnySchema> {
   }
 
   /** 删掉这些实体的表（库里没有的跳过） */
+  dropTables(this: Requires<S, 'write', Db<S>>, ...entities: Entity[]): Promise<void>;
   async dropTables(...entities: Entity[]): Promise<void> {
     const tables = await this.introspect();
     await this.runDdl(
@@ -435,6 +469,20 @@ export class Db<S extends AnySchema> {
         .filter((e) => findTable(tables, e.table))
         .map((e) => this.ctx.dialect.dropTable(e.table)),
     );
+  }
+
+  /**
+   * 只读的 Db：类型上没有写方法（insert、update、delete、save、remove、DDL、迁移、加锁），运行时写入也报错。
+   * 给只读接口、报表、只连从库的服务用：`createDb({ schema, adapter: replica }).readonly()`。
+   * 查询、事务（读一致的快照）照常；`db.sql.execute` 在类型上不受限，运行时报错
+   */
+  readonly(): Db<ReadOnly<S>> {
+    return new Db(
+      { ...this.ctx, guards: { ...this.ctx.guards, readonly: true } },
+      this.adapter,
+      this.keys,
+      this.inTransaction,
+    ) as never;
   }
 
   /** 之后的读也走主库（读写分离时，刚写完马上要读到自己写的数据） */
@@ -460,10 +508,16 @@ export class Db<S extends AnySchema> {
    * 执行还没执行过的迁移（按 id 的顺序），记进历史表（默认 eqts_migrations，没有就建），返回这次执行的 id。
    * 每条迁移连同它的历史记录在一个事务里（DDL 能放进事务的库）；已经执行过的迁移被改了（校验和对不上）直接报错。见 migrate.ts
    */
+  migrate(
+    this: Requires<S, 'write', Db<S>>,
+    migrations: readonly Migration[],
+    options?: { readonly table?: string },
+  ): Promise<string[]>;
   async migrate(
     migrations: readonly Migration[],
     options: { readonly table?: string } = {},
   ): Promise<string[]> {
+    assertWritable(this.ctx);
     const history = historyEntity(options.table ?? 'eqts_migrations');
     if (!findTable(await this.introspect(), history.table))
       await this.runDdl([this.ctx.dialect.createTable(history, true)]);
@@ -484,7 +538,7 @@ export class Db<S extends AnySchema> {
       const run = async (db: Db<S>) => {
         if (typeof migration.up === 'function') await migration.up(db);
         else for (const sql of migration.up) await execute(db.ctx, { sql, params: [] });
-        await db
+        await (db as unknown as Db<AnySchema>)
           .insert(history)
           .values({ id: migration.id, checksum: sum, appliedAt: new Date() })
           .execute();
@@ -499,6 +553,7 @@ export class Db<S extends AnySchema> {
 
   private async runDdl(statements: readonly string[]): Promise<void> {
     if (statements.length === 0) return;
+    assertWritable(this.ctx);
     const run = async (db: Db<S>) => {
       for (const sql of statements) await execute(db.ctx, { sql, params: [] });
     };
@@ -871,6 +926,12 @@ export class Transaction<S extends AnySchema> extends Db<S> {
   }
 }
 
+/** 写入用的上下文：只读的 Db 报错，写入走主库 */
+function writable(ctx: Context): Context {
+  assertWritable(ctx);
+  return primary(ctx);
+}
+
 /** 去掉从库：写入与要读到最新数据的地方用 */
 function primary(ctx: Context): Context {
   return ctx.replicas ? { ...ctx, replicas: undefined } : ctx;
@@ -905,6 +966,7 @@ export function createDb<S extends AnySchema, C extends Capability = Capability>
       hardDelete: options.hardDelete ?? 'allow',
       maxRows: options.maxRows,
       reversePageAfter: options.reversePageAfter,
+      readonly: false,
     },
     // 列修饰器驱动的内置规则在前，用户的拦截器在后
     interceptors: new Interceptors([...columnRules(), ...(options.interceptors ?? [])]),
