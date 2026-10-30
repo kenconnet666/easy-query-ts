@@ -43,6 +43,7 @@ import {
   type Selected,
 } from './ref.ts';
 import type { Requires } from './capabilities.ts';
+import type { ColumnScope, HasColumns } from './scope.ts';
 import type { AnySchema, EntityKey, Schema } from './relations.ts';
 import type { KeyOf } from './db.ts';
 import {
@@ -229,6 +230,11 @@ type NarrowVariant<Out, E, N extends string> =
   VariantsOf<E> extends VariantTypes<any, infer D, any>
     ? Extract<Out, { readonly [P in D]: N }>
     : Out;
+
+/** apply 的实体缺列时，scope 参数多出这个必填属性：错误信息里写出依赖的列 */
+interface MissingColumns<C> {
+  readonly 'error: the entity lacks columns this scope needs': keyof C;
+}
 
 export type KeyInput<E extends Entity> = Row<E>[keyof Row<E>] | Partial<Row<E>>;
 
@@ -506,6 +512,17 @@ export class Queryable<
 
   where(filter: (...refs: Refs) => Cond): Queryable<S, K, Out, Refs> {
     return this.with({ where: [...this.state.where, filter] });
+  }
+
+  /**
+   * 加上一个可复用的条件（defineScope）：实体要有它依赖的列，否则类型错误；参数跟在后面：
+   * `db.queryable(Order).apply(ofTenant, 7)`
+   */
+  apply<C, A extends readonly unknown[]>(
+    scope: ColumnScope<C, A> & (Refs[0] extends HasColumns<C> ? unknown : MissingColumns<C>),
+    ...args: A
+  ): Queryable<S, K, Out, Refs> {
+    return this.where(((root: HasColumns<C>) => scope.condition(root, ...args)) as never);
   }
 
   /**
