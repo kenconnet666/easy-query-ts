@@ -15,6 +15,7 @@
 import oracledb from 'oracledb';
 import {
   type Adapter,
+  type Without,
   type Driver,
   type ExecuteResult,
   type Session,
@@ -182,7 +183,10 @@ export interface OracleOptions {
  * 连接池：建池时给 sessionCallback 设好会话的日期格式与时区（见 oracleSession），
  * `oracledb.createPool({ …, sessionCallback: oracleSession })`
  */
-export function oracle(pool: oracledb.Pool, options: OracleOptions = {}): Adapter {
+export function oracle(
+  pool: oracledb.Pool,
+  options: OracleOptions = {},
+): Adapter<Without<'returning'>> {
   return {
     dialect: new OracleDialect({ version: options.version }),
     driver: new OracleDriver(pool),
@@ -190,7 +194,7 @@ export function oracle(pool: oracledb.Pool, options: OracleOptions = {}): Adapte
 }
 
 /** 连上库读出服务器版本（如 23.5.0.24.7）再建 adapter，部署到 11g 还是 23ai 都自动选对写法 */
-oracle.detect = async (pool: oracledb.Pool): Promise<Adapter> => {
+oracle.detect = async (pool: oracledb.Pool): Promise<Adapter<Without<'returning'>>> => {
   const conn = await pool.getConnection();
   try {
     return {

@@ -16,6 +16,7 @@ import {
   standardJsonPath,
   unquoteSql,
   type Adapter,
+  type Without,
   type ColumnOptions,
   type Driver,
   type ExecuteResult,
@@ -262,7 +263,7 @@ class DamengDriver extends DamengSession implements Driver {
  * 连接池用 dmdb.createPool 建。会把 dmdb 的全局读取设置改成：日期时间、数字、CLOB 按文字读（时区、精度都不经过 JS 的转换，
  * 由列的 codec 解码），BLOB 按 Buffer 读
  */
-export function dameng(pool: dmdb.Pool): Adapter {
+export function dameng(pool: dmdb.Pool): Adapter<Without<'returning'>> {
   dmdb.fetchAsString = [dmdb.DATE, dmdb.NUMBER, dmdb.CLOB];
   dmdb.fetchAsBuffer = [dmdb.BLOB];
   return { dialect: new DamengDialect(), driver: new DamengDriver(pool) };

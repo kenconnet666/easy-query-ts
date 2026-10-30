@@ -18,6 +18,7 @@ import {
   standardJsonPath,
   unquoteSql,
   type Adapter,
+  type Without,
   type ConflictNode,
   type DeleteNode,
   type ColumnOptions,
@@ -430,6 +431,9 @@ class Db2Driver extends Db2Session implements Driver {
 }
 
 /** pool 是 ibm_db 的 Pool；connectionString 是 CLI 连接串（DATABASE=…;HOSTNAME=…;PORT=…;UID=…;PWD=…） */
-export function db2(pool: Pool, connectionString: string): Adapter {
+export function db2(
+  pool: Pool,
+  connectionString: string,
+): Adapter<Without<'returning' | 'noWait'>> {
   return { dialect: new Db2Dialect(), driver: new Db2Driver(pool, connectionString) };
 }

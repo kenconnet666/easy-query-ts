@@ -19,6 +19,7 @@ import {
   standardJsonPath,
   unquoteSql,
   type Adapter,
+  type Without,
   type ColumnOptions,
   type DatePart,
   type DbTable,
@@ -282,6 +283,7 @@ class DuckDbDriver extends DuckDbSession implements Driver {
   }
 }
 
-export function duckdb(instance: DuckDBInstance): Adapter {
+/** 单写者、事务排队：锁行是空操作，SKIP LOCKED / NOWAIT 的语义做不到 */
+export function duckdb(instance: DuckDBInstance): Adapter<Without<'skipLocked' | 'noWait'>> {
   return { dialect: new DuckDbDialect(), driver: new DuckDbDriver(instance) };
 }

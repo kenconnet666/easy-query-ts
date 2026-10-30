@@ -20,6 +20,7 @@ import {
   standardJsonPath,
   unquoteSql,
   type Adapter,
+  type Without,
   type ColumnOptions,
   type DbTable,
   type DeleteNode,
@@ -356,6 +357,21 @@ class ClickHouseDriver implements Driver {
   }
 }
 
-export function clickhouse(client: ClickHouseClient): Adapter {
+/** ClickHouse 缺的能力：没有事务、行锁、RETURNING、自增、upsert */
+export type ClickHouseAdapter = Adapter<
+  Without<
+    | 'transactions'
+    | 'lock'
+    | 'forUpdate'
+    | 'skipLocked'
+    | 'noWait'
+    | 'returning'
+    | 'generatedKeys'
+    | 'upsert'
+    | 'upsertIgnore'
+  >
+>;
+
+export function clickhouse(client: ClickHouseClient): ClickHouseAdapter {
   return { dialect: new ClickHouseDialect(), driver: new ClickHouseDriver(client) };
 }

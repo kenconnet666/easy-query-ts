@@ -12,6 +12,7 @@ import { SqlWriter, type Statement } from './dialect.ts';
 import { and, condNode, Expr, or, toNode, type Cond } from './expr.ts';
 import { newQueryable, type Built, type Query } from './query.ts';
 import { REF, refColumn, Scope, type Ref } from './ref.ts';
+import type { CapabilitiesOf, Requires, Unsupported } from './capabilities.ts';
 import type { AnySchema, EntityKey } from './relations.ts';
 import {
   flattenRow,
@@ -469,9 +470,19 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
    * ```
    * MySQL 按表上的主键 / 唯一键判断冲突（ON DUPLICATE KEY UPDATE），target 只用于 ignore 时的空更新。
    */
+  onConflict(
+    this: Requires<S, 'upsert', InsertValues<S, K>>,
+    target: Columns<S, K>,
+  ): {
+    merge: (columns?: Columns<S, K>) => InsertValues<S, K>;
+    /** 不支持时不能调用（Doris、TDengine 写同一主键就是覆盖） */
+    ignore: ['upsertIgnore'] extends [CapabilitiesOf<S>]
+      ? () => InsertValues<S, K>
+      : Unsupported<'upsertIgnore'>;
+  };
   onConflict(target: Columns<S, K>): {
     merge: (columns?: Columns<S, K>) => InsertValues<S, K>;
-    ignore: () => InsertValues<S, K>;
+    ignore: unknown;
   } {
     const targetColumns = this.columnNames(target);
     return {
@@ -511,11 +522,16 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
   }
 
   /** 插入后返回这些列（已解码）；见 Returning */
-  returning(): Returning<Row<EntityOf<S, K>>>;
+  returning(this: Requires<S, 'returning', InsertValues<S, K>>): Returning<Row<EntityOf<S, K>>>;
   returning<C extends keyof Row<EntityOf<S, K>> & string>(
+    this: Requires<S, 'returning', InsertValues<S, K>>,
     ...columns: C[]
   ): Returning<Pick<Row<EntityOf<S, K>>, C>>;
   returning(...columns: string[]): Returning<unknown> {
+    return this.returningColumns(columns);
+  }
+
+  private returningColumns(columns: readonly string[]): Returning<unknown> {
     return new Returning(
       this.ctx,
       this.entity,
@@ -543,7 +559,12 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
   }
 
   /** 单行插入，返回自增主键 */
-  async returnId(): Promise<number | bigint> {
+  returnId(this: Requires<S, 'generatedKeys', InsertValues<S, K>>): Promise<number | bigint>;
+  returnId(): Promise<number | bigint> {
+    return this.generatedId();
+  }
+
+  private async generatedId(): Promise<number | bigint> {
     const statements = this.toSQL();
     if (this.rows.length !== 1 || statements.length !== 1)
       throw new Error('returnId() needs exactly one row');
@@ -579,12 +600,12 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     // sqlConvert 的列 RETURNING 拿不到转换后的值：插入后再按主键查回
     const converted = Object.values(this.entity.columns).some((c) => c.options.sqlRead);
     if (this.ctx.dialect.supportsReturning && !converted)
-      return (await this.returning().execute())[0] as Row<EntityOf<S, K>>;
+      return (await this.returningColumns([]).execute())[0] as Row<EntityOf<S, K>>;
     const values: Record<string, unknown> = { ...this.filled()[0] };
     const generated = this.entity.primaryKey.filter((k) => values[k] === undefined);
     if (generated.length > 1)
       throw new Error('returnEntity() can only generate a single-column primary key');
-    if (generated.length === 1) values[generated[0]!] = await this.returnId();
+    if (generated.length === 1) values[generated[0]!] = await this.generatedId();
     else await this.execute();
     const key = this.key;
     const found = await newQueryable(this.ctx, key)
@@ -1056,8 +1077,9 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   }
 
   /** 更新后返回这些列（已解码）；见 Returning */
-  returning(): Returning<Row<EntityOf<S, K>>>;
+  returning(this: Requires<S, 'returning', Updatable<S, K>>): Returning<Row<EntityOf<S, K>>>;
   returning<C extends keyof Row<EntityOf<S, K>> & string>(
+    this: Requires<S, 'returning', Updatable<S, K>>,
     ...columns: C[]
   ): Returning<Pick<Row<EntityOf<S, K>>, C>>;
   returning(...columns: string[]): Returning<unknown> {
@@ -1198,8 +1220,9 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   }
 
   /** 删除后返回这些列（已解码）；逻辑删除时返回被标记的行。见 Returning */
-  returning(): Returning<Row<EntityOf<S, K>>>;
+  returning(this: Requires<S, 'returning', Deletable<S, K>>): Returning<Row<EntityOf<S, K>>>;
   returning<C extends keyof Row<EntityOf<S, K>> & string>(
+    this: Requires<S, 'returning', Deletable<S, K>>,
     ...columns: C[]
   ): Returning<Pick<Row<EntityOf<S, K>>, C>>;
   returning(...columns: string[]): Returning<unknown> {

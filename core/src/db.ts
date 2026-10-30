@@ -40,6 +40,7 @@ import type { Expr } from './expr.ts';
 import type { Ref } from './ref.ts';
 import type { DerivedEntity, Entity, Row } from './schema.ts';
 import { createSqlTag, type SqlTag } from './native.ts';
+import type { Capability, CapabilitiesOf, Requires, WithCapabilities } from './capabilities.ts';
 import { AggregateSaver, type SaveInclude, type SaveValue } from './save.ts';
 import { createStatements, findTable, planSync, type DbTable, type SyncPlan } from './ddl.ts';
 import {
@@ -77,9 +78,9 @@ export interface TreeWalk<S extends AnySchema, K extends EntityKey<S>> {
 }
 
 /** 加上一个 CTE 实体之后的 schema：原有实体 + 名字为 N、列取自查询输出 Out 的派生实体 */
-export type WithCte<S extends AnySchema, N extends string, Out> = Schema<
-  S['entities'] & { [P in N]: DerivedEntity<N, Out> },
-  S['relations'] & { [P in N]: {} }
+export type WithCte<S extends AnySchema, N extends string, Out> = WithCapabilities<
+  Schema<S['entities'] & { [P in N]: DerivedEntity<N, Out> }, S['relations'] & { [P in N]: {} }>,
+  CapabilitiesOf<S>
 >;
 
 export interface DbOptions<S extends AnySchema> {
@@ -148,8 +149,14 @@ export class Db<S extends AnySchema> {
     return new Insertable(primary(ctx), key);
   }
 
-  update<E extends SchemaEntity<S>>(entity: E): Updatable<S, KeyOf<S, E>>;
-  update<E extends Entity>(entity: E): Updatable<AdhocSchema<E>, E['name']>;
+  update<E extends SchemaEntity<S>>(
+    this: Requires<S, 'update', Db<S>>,
+    entity: E,
+  ): Updatable<S, KeyOf<S, E>>;
+  update<E extends Entity>(
+    this: Requires<S, 'update', Db<S>>,
+    entity: E,
+  ): Updatable<AdhocSchema<E>, E['name']>;
   update(entity: Entity): Updatable<any, string> {
     const { ctx, key } = this.target(entity);
     return new Updatable(primary(ctx), key);
@@ -325,7 +332,7 @@ export class Db<S extends AnySchema> {
         )
         .firstOrThrow() as Promise<Row<E>>;
     };
-    return this.inTransaction ? run(this) : this.transaction(run);
+    return this.inTransaction ? run(this) : this.runInTransaction(run);
   }
 
   /**
@@ -354,7 +361,7 @@ export class Db<S extends AnySchema> {
       );
       return true;
     };
-    return this.inTransaction ? run(this) : this.transaction(run);
+    return this.inTransaction ? run(this) : this.runInTransaction(run);
   }
 
   /** 按实体定义生成建表语句（列、主键、唯一约束、MySQL 的注释），不执行。类型规则见各方言的 columnType */
@@ -451,7 +458,7 @@ export class Db<S extends AnySchema> {
     const run = async (db: Db<S>) => {
       for (const sql of statements) await execute(db.ctx, { sql, params: [] });
     };
-    if (this.ctx.dialect.transactionalDdl && !this.inTransaction) await this.transaction(run);
+    if (this.ctx.dialect.transactionalDdl && !this.inTransaction) await this.runInTransaction(run);
     else await run(this);
   }
 
@@ -542,7 +549,7 @@ export class Db<S extends AnySchema> {
     schema: T & DistinctEntities<[S, T]>,
     relations?: RelationDefs<MergedEntities<[S, T]>, R> &
       DistinctNavigations<MergedEntities<[S, T]>, MergedRelations<[S, T]>, R>,
-  ): Db<MergedSchema<[S, T], R>> {
+  ): Db<WithCapabilities<MergedSchema<[S, T], R>, CapabilitiesOf<S>>> {
     const merged = (
       mergeSchemas as (schemas: readonly AnySchema[], relations?: unknown) => AnySchema
     )([this.ctx.schema, schema], relations);
@@ -578,7 +585,20 @@ export class Db<S extends AnySchema> {
    * work 里用 tx 执行的语句在同一个事务里；work 抛错时回滚。
    * 已经在事务里再调用，开的是嵌套事务（保存点）：work 抛错只回滚到保存点，外层事务不受影响（异常仍会抛出，由调用方决定要不要吞掉）。
    */
-  async transaction<T>(work: (tx: Db<S>) => Promise<T>, options?: TransactionOptions): Promise<T> {
+  transaction<T>(
+    this: Requires<S, 'transactions', Db<S>>,
+    work: (tx: Db<S>) => Promise<T>,
+    options?: TransactionOptions,
+  ): Promise<T>;
+  transaction<T>(work: (tx: Db<S>) => Promise<T>, options?: TransactionOptions): Promise<T> {
+    return this.runInTransaction(work, options);
+  }
+
+  /** transaction 的实现；内部（save、remove、syncTables）不看能力直接用：没有事务的库由驱动依次执行 */
+  private async runInTransaction<T>(
+    work: (tx: Db<S>) => Promise<T>,
+    options?: TransactionOptions,
+  ): Promise<T> {
     if (this.inTransaction) {
       if (options?.isolation || options?.readOnly)
         throw new Error(
@@ -639,6 +659,11 @@ export class Db<S extends AnySchema> {
    * });
    * ```
    */
+  lock<E extends SchemaEntity<S>>(
+    this: Requires<S, 'lock', Db<S>>,
+    entity: E,
+    key: KeyInput<E>,
+  ): Promise<boolean>;
   async lock<E extends SchemaEntity<S>>(entity: E, key: KeyInput<E>): Promise<boolean> {
     if (!this.inTransaction) {
       throw new Error('lock() must be called inside a transaction: the lock lasts until it ends');
@@ -695,6 +720,10 @@ export class Db<S extends AnySchema> {
    * await tx.commit()
    * ```
    */
+  begin(
+    this: Requires<S, 'transactions', Db<S>>,
+    options?: TransactionOptions,
+  ): Promise<Transaction<S>>;
   async begin(options?: TransactionOptions): Promise<Transaction<S>> {
     if (this.inTransaction)
       throw new Error(
@@ -799,7 +828,9 @@ function replicaSet<S extends AnySchema>(options: DbOptions<S>): Replicas | unde
   return { sessions: replicas.map((r) => r.driver), next: 0 };
 }
 
-export function createDb<S extends AnySchema>(options: DbOptions<S>): Db<S> {
+export function createDb<S extends AnySchema, C extends Capability = Capability>(
+  options: DbOptions<S> & { readonly adapter: Adapter<C> },
+): Db<WithCapabilities<S, C>> {
   const keys = new Map<Entity, string>();
   for (const [key, entity] of Object.entries(options.schema.entities)) keys.set(entity, key);
   const ctx: Context = {
@@ -819,5 +850,5 @@ export function createDb<S extends AnySchema>(options: DbOptions<S>): Db<S> {
     // 列修饰器驱动的内置规则在前，用户的拦截器在后
     interceptors: new Interceptors([...columnRules(), ...(options.interceptors ?? [])]),
   };
-  return new Db(ctx, options.adapter, keys, false);
+  return new Db(ctx, options.adapter, keys, false) as never;
 }

@@ -24,6 +24,7 @@ import {
   standardJsonPath,
   unquoteSql,
   type Adapter,
+  type Without,
   type ColumnOptions,
   type ConflictNode,
   type DatePart,
@@ -567,7 +568,10 @@ export interface MsSqlOptions {
 }
 
 /** pool 要已经 connect() 过 */
-export function mssql(pool: sql.ConnectionPool, options: MsSqlOptions = {}): Adapter {
+export function mssql(
+  pool: sql.ConnectionPool,
+  options: MsSqlOptions = {},
+): Adapter<Without<'returning'>> {
   return { dialect: new MsSqlDialect({ version: options.version }), driver: new MsSqlDriver(pool) };
 }
 
@@ -584,7 +588,7 @@ const RELEASES: Record<number, SqlServerVersion> = {
 };
 
 /** 连上库读出服务器版本再建 adapter，部署到哪个版本都自动选对写法；比 2008 R2 还老的库读不到主版本，按 2008 渲染 */
-mssql.detect = async (pool: sql.ConnectionPool): Promise<Adapter> => {
+mssql.detect = async (pool: sql.ConnectionPool): Promise<Adapter<Without<'returning'>>> => {
   const result = await pool
     .request()
     .query<{ v: number | null }>(`SELECT CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) AS v`);

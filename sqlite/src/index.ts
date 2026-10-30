@@ -13,6 +13,7 @@ import {
   type DbTable,
   type Entity,
   type Adapter,
+  type Without,
   type Driver,
   type QueryRunner,
   type ExecuteResult,
@@ -356,6 +357,10 @@ class SqliteDriver extends SqliteSession implements Driver {
   }
 }
 
-export function sqlite(database: DatabaseSync, options: SqliteOptions = {}): Adapter {
+/** SQLite 没有 SELECT … FOR UPDATE（lock() 用写锁模拟，照常可用） */
+export function sqlite(
+  database: DatabaseSync,
+  options: SqliteOptions = {},
+): Adapter<Without<'forUpdate' | 'skipLocked' | 'noWait'>> {
   return { dialect: new SqliteDialect(), driver: new SqliteDriver(database, options) };
 }

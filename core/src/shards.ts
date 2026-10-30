@@ -80,7 +80,8 @@ export class ShardedDb<S extends AnySchema> {
     entity: E,
     build: (update: Updatable<S, KeyOf<S, E>>) => Updatable<S, KeyOf<S, E>>,
   ): Promise<number> {
-    const run = (db: Db<S>) => build(db.update(entity) as never);
+    // 分库按能力最全的 Db 调：各库的能力由各自的 adapter 决定，运行时照常检查
+    const run = (db: Db<S>) => build((db as unknown as Db<AnySchema>).update(entity) as never);
     return this.write(
       entity,
       (db) => run(db).conditions(),

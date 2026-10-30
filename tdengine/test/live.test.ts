@@ -33,7 +33,9 @@ if (!raw) {
   const database = url.pathname.slice(1);
   let sql: WsSql;
   const statements: Statement[] = [];
-  let db: ReturnType<typeof createDb<typeof schema>>;
+  const open = (connection: WsSql) =>
+    createDb({ schema, adapter: tdengine(connection), log: (s) => statements.push(s) });
+  let db: ReturnType<typeof open>;
 
   beforeAll(async () => {
     const conf = new WSConfig(`ws://${url.host}`);
@@ -45,7 +47,7 @@ if (!raw) {
     await admin.close();
     conf.setDb(database);
     sql = await sqlConnect(conf);
-    db = createDb({ schema, adapter: tdengine(sql), log: (s) => statements.push(s) });
+    db = open(sql);
   });
   afterAll(async () => {
     await sql?.close();
@@ -140,8 +142,10 @@ if (!raw) {
         statements.at(-1)!.sql,
         /^DELETE FROM `t_reading` WHERE `ts` < '2026-01-02 03:02:05\.006'$/,
       );
+      // 没有 UPDATE：类型上就报错（方言能力），运行时也拦住
       assert.throws(
         () =>
+          // @ts-expect-error the dialect of this Db does not support "update"
           db
             .update(Reading)
             .set({ device: 'x' })

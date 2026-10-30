@@ -18,6 +18,7 @@ import {
   sqlString,
   SqlWriter,
   type Adapter,
+  type Without,
   type ColumnOptions,
   type ConflictNode,
   type DbTable,
@@ -281,6 +282,21 @@ class TdengineDriver implements Driver {
 }
 
 /** sql 是 sqlConnect 建好的连接（WSConfig 里设好库与时区 UTC） */
-export function tdengine(sql: WsSql): Adapter {
+/** TDengine 缺的能力：没有 UPDATE、事务、行锁、RETURNING、自增；写同一时间戳就是覆盖 */
+export type TdengineAdapter = Adapter<
+  Without<
+    | 'update'
+    | 'transactions'
+    | 'lock'
+    | 'forUpdate'
+    | 'skipLocked'
+    | 'noWait'
+    | 'returning'
+    | 'generatedKeys'
+    | 'upsertIgnore'
+  >
+>;
+
+export function tdengine(sql: WsSql): TdengineAdapter {
   return { dialect: new TdengineDialect(), driver: new TdengineDriver(sql) };
 }

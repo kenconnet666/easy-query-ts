@@ -10,6 +10,7 @@
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import {
   type Adapter,
+  type Without,
   type Driver,
   type ExecuteResult,
   type Session,
@@ -181,7 +182,7 @@ export interface MySqlOptions {
   readonly version?: MySqlVersion;
 }
 
-export function mysql(pool: Pool, options: MySqlOptions = {}): Adapter {
+export function mysql(pool: Pool, options: MySqlOptions = {}): Adapter<Without<'returning'>> {
   return { dialect: new MySqlDialect({ version: options.version }), driver: new MySqlDriver(pool) };
 }
 
@@ -189,7 +190,7 @@ export function mysql(pool: Pool, options: MySqlOptions = {}): Adapter {
  * 连上库读出服务器版本再建 adapter：同一份代码部署到 8.0.18 还是 8.4 都自动选对写法，不用手配 version。
  * MariaDB 按 8.0 渲染（有窗口函数、CTE，upsert 用 VALUES()）。
  */
-mysql.detect = async (pool: Pool): Promise<Adapter> => {
+mysql.detect = async (pool: Pool): Promise<Adapter<Without<'returning'>>> => {
   const [rows] = await pool.query('SELECT VERSION() AS v');
   const text = String((rows as { v: string }[])[0]?.v ?? '');
   const version = /mariadb/i.test(text) ? '8.0' : /^\d+(\.\d+)*/.exec(text)?.[0];
@@ -204,6 +205,20 @@ class DorisDriver extends MySqlDriver {
 }
 
 /** Apache Doris（MySQL 协议，驱动同样是 mysql2）；建表的副本数见 DorisOptions */
-export function doris(pool: Pool, options: DorisOptions = {}): Adapter {
+/** Doris 缺的能力：没有 RETURNING、行锁、能回滚的事务，取不回自增值，upsert 只能整行覆盖 */
+export type DorisAdapter = Adapter<
+  Without<
+    | 'returning'
+    | 'lock'
+    | 'forUpdate'
+    | 'skipLocked'
+    | 'noWait'
+    | 'transactions'
+    | 'generatedKeys'
+    | 'upsertIgnore'
+  >
+>;
+
+export function doris(pool: Pool, options: DorisOptions = {}): DorisAdapter {
   return { dialect: new DorisDialect(options), driver: new DorisDriver(pool) };
 }

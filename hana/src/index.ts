@@ -14,6 +14,7 @@ import {
   SqlWriter,
   type ColumnOptions,
   type Adapter,
+  type Without,
   type DbTable,
   type Driver,
   type QueryRunner,
@@ -359,6 +360,6 @@ export function closeHana(adapter: Adapter): void {
   if (adapter.driver instanceof HanaDriver) adapter.driver.end();
 }
 
-export function hana(options: HanaOptions): Adapter {
+export function hana(options: HanaOptions): Adapter<Without<'returning'>> {
   return { dialect: new HanaDialect(), driver: new HanaDriver(new Pool(options)) };
 }

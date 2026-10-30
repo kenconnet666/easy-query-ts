@@ -42,6 +42,7 @@ import {
   type RefInfo,
   type Selected,
 } from './ref.ts';
+import type { Requires } from './capabilities.ts';
 import type { AnySchema, EntityKey, Schema } from './relations.ts';
 import type { KeyOf } from './db.ts';
 import {
@@ -747,16 +748,23 @@ export class Queryable<
   }
 
   /** 行锁（SELECT … FOR UPDATE），在事务里用 */
+  forUpdate(this: Requires<S, 'forUpdate', Queryable<S, K, Out, Refs>>): Queryable<S, K, Out, Refs>;
   forUpdate(): Queryable<S, K, Out, Refs> {
     return this.with({ forUpdate: true });
   }
 
   /** 拿不到锁立即报错，不在锁上排队（FOR UPDATE NOWAIT）；在事务里用。SQLite 没有行锁，是空操作 */
+  forUpdateNoWait(
+    this: Requires<S, 'noWait', Queryable<S, K, Out, Refs>>,
+  ): Queryable<S, K, Out, Refs>;
   forUpdateNoWait(): Queryable<S, K, Out, Refs> {
     return this.with({ forUpdate: true, lockWait: 'nowait' });
   }
 
   /** 跳过被别人锁住的行（FOR UPDATE SKIP LOCKED）：多个消费者抢任务，各拿各的。在事务里用 */
+  forUpdateSkipLocked(
+    this: Requires<S, 'skipLocked', Queryable<S, K, Out, Refs>>,
+  ): Queryable<S, K, Out, Refs>;
   forUpdateSkipLocked(): Queryable<S, K, Out, Refs> {
     return this.with({ forUpdate: true, lockWait: 'skip' });
   }

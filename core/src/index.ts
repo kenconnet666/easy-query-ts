@@ -189,3 +189,13 @@ export type {
   FilterOp,
 } from './table.ts';
 export type { TreeNode } from './tree.ts';
+
+export type {
+  Capability,
+  CapabilitiesOf,
+  Capable,
+  Requires,
+  Unsupported,
+  WithCapabilities,
+  Without,
+} from './capabilities.ts';

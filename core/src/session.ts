@@ -1,6 +1,7 @@
 /**
  * 驱动接口与执行上下文。驱动只管执行文本 SQL；方言管渲染，两者由各数据库包一起提供（Adapter）。
  */
+import type { Capability, Capable } from './capabilities.ts';
 import type { AnySchema } from './relations.ts';
 import type { Dialect, Statement } from './dialect.ts';
 import type { Interceptors } from './interceptor.ts';
@@ -40,8 +41,8 @@ export interface Driver extends Session {
   transaction<T>(work: (session: Session) => Promise<T>, options?: TransactionOptions): Promise<T>;
 }
 
-/** 各数据库包提供：方言 + 驱动 */
-export interface Adapter {
+/** 各数据库包提供：方言 + 驱动；C 是方言支持的能力（只在类型里，见 capabilities.ts） */
+export interface Adapter<C extends Capability = Capability> extends Capable<C> {
   readonly dialect: Dialect;
   readonly driver: Driver;
 }
