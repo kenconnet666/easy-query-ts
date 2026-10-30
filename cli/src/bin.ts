@@ -5,6 +5,7 @@
  *   eqts pull --adapter ./db-adapter.ts [--out src/schema.ts] [--tables t_a,t_b] [--strip-prefix t_]
  *   eqts migrate generate --adapter ./db-adapter.ts --schema ./src/schema.ts --name add_orders [--dir migrations]
  *   eqts migrate up --adapter ./db-adapter.ts [--dir migrations] [--table eqts_migrations]
+ *   eqts snapshot src/queries.snap.ts [more.snap.ts …] [--out sql-snapshots] [--check]
  *
  * --adapter 指向一个模块，默认导出（或导出名为 adapter）一个 easy-query 的 Adapter，例如：
  *   export default mysql(createPool(process.env.DATABASE_URL!))
@@ -12,25 +13,30 @@
  * pull：读当前 schema 的表结构，生成实体与 defineSchema 的源码；不给 --out 时打印到标准输出。
  * migrate generate：对开发库算 planSync，写成 <时间戳>_<name>.ts 迁移文件（没有要改的就不写）。
  * migrate up：按文件名的顺序执行目录里还没执行过的迁移（db.migrate），记进历史表。
+ * snapshot：模块默认导出 defineSnapshots(...)，按每个方言渲染成 <out>/<模块名>.<方言标签>.sql（不连库）；
+ *   --check 只比较不写，有没更新的快照时失败（CI 里用）。
  */
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   createDb,
   defineSchema,
   migrationSource,
+  renderSnapshots,
   type Adapter,
   type AnySchema,
   type Migration,
+  type SnapshotDefinition,
 } from '@zerodep-dev/easy-query-ts';
 import { entitySource } from './index.ts';
 
 const USAGE = `usage:
   eqts pull --adapter <module> [--out <file>] [--tables <a,b>] [--strip-prefix <prefix>]
   eqts migrate generate --adapter <module> --schema <module> --name <name> [--dir <dir>]
-  eqts migrate up --adapter <module> [--dir <dir>] [--table <history table>]`;
+  eqts migrate up --adapter <module> [--dir <dir>] [--table <history table>]
+  eqts snapshot <module> [<module> …] [--out <dir>] [--check]`;
 
 async function load<T>(path: string, names: readonly string[], what: string): Promise<T> {
   const loaded = (await import(pathToFileURL(resolve(path)).href)) as Record<string, unknown>;
@@ -116,10 +122,48 @@ async function migrate(args: readonly string[]): Promise<void> {
   throw new Error(USAGE);
 }
 
+async function snapshot(args: readonly string[]): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: {
+      out: { type: 'string', default: 'sql-snapshots' },
+      check: { type: 'boolean', default: false },
+    },
+  });
+  if (positionals.length === 0) throw new Error(`give at least one snapshot module\n${USAGE}`);
+  const out = values.out!;
+  const stale: string[] = [];
+  for (const module of positionals) {
+    const definition = await load<SnapshotDefinition<AnySchema>>(
+      module,
+      ['default', 'snapshots'],
+      'snapshot definition',
+    );
+    const stem = basename(module).replace(/\.[cm]?[jt]s$/, '');
+    for (const [label, text] of Object.entries(renderSnapshots(definition))) {
+      const file = join(out, `${stem}.${label}.sql`);
+      if (values.check) {
+        const current = await readFile(file, 'utf8').catch(() => undefined);
+        if (current !== text) stale.push(file);
+        continue;
+      }
+      await mkdir(out, { recursive: true });
+      await writeFile(file, text);
+      console.error(`wrote ${file}`);
+    }
+  }
+  if (stale.length > 0)
+    throw new Error(
+      `SQL snapshots are out of date (run eqts snapshot without --check and review the diff):\n  ${stale.join('\n  ')}`,
+    );
+}
+
 async function main(argv: readonly string[]): Promise<void> {
   const [command, ...rest] = argv;
   if (command === 'pull') return pull(rest);
   if (command === 'migrate') return migrate(rest);
+  if (command === 'snapshot') return snapshot(rest);
   throw new Error(USAGE);
 }
 

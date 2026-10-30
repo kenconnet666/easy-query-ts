@@ -203,6 +203,7 @@ export type {
 } from './table.ts';
 export type { TreeNode } from './tree.ts';
 export { statementSpans, type SpanTracer } from './tracing.ts';
+export { defineSnapshots, renderSnapshots, type SnapshotDefinition } from './snapshot.ts';
 
 export type {
   Capability,
