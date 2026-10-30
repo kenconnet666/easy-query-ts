@@ -46,6 +46,36 @@ defineSchema(
 - 索引名默认 `表_列_idx` / `uidx`；索引列的名字在类型上限定为实体的列（值对象写展开后的路径）。
 - 外键声明在多对一导航上（对应官方 `@ForeignKey`），名字默认 `fk_表_列`：建完所有表再 `ALTER TABLE … ADD CONSTRAINT`；SQLite 只能写进建表语句。
 
+## 生成列与索引的写法（ROADMAP 19.7）
+
+```ts
+const Line = entity(
+  't_line',
+  {
+    id: col.int().primaryKey(),
+    attrs: col.json<{ tags: string[] }>(),
+    qty: col.int(),
+    price: col.int(),
+    total: col.int().generatedAs('qty * price'), // 库算出来；写入时给值会报错
+  },
+  {
+    indexes: [
+      { columns: ['attrs'], using: 'gin', name: 't_line_attrs_gin' }, // PG：jsonb、数组、全文用 GIN
+      { columns: ['qty'], where: 'qty > 0', name: 't_line_live_idx' }, // 部分索引（PG、SQLite）
+      { expressions: ['lower(sku)'], name: 't_line_lower_sku_idx' }, // 表达式索引（PG、SQLite、MySQL 8.0.13+）
+      // MySQL 的多值索引（MEMBER OF / JSON_CONTAINS 靠它走索引）也是表达式索引
+      { expressions: ["CAST(attrs->'$.tags' AS CHAR(32) ARRAY)"], name: 't_line_tags_mvi' },
+    ],
+  },
+);
+```
+
+- 生成列：`generatedAs(sql, { stored })`，sql 是受信任的 SQL、引用库里的列名；stored 默认 true（PG 只有 STORED），MySQL、SQLite 可以 VIRTUAL。
+  插入、更新给它赋值在构建时报错；`entity(row)`、`changes` 自动跳过它。PG、MySQL、SQLite 支持，别的库建表时报错。
+- 索引的 `using`（PG 的 gin / gist / brin / hash，MySQL 的 btree / hash）、`where`（部分索引）、`expressions`（表达式）都是受信任的 SQL；
+  方言不支持的写法在建表时报错（`Dialect.indexFeatures`），不发出半截语句。
+- `planSync` 按名字比较索引：库里没有就建；已有同名索引但定义变了不会自动改。PG 读出的表达式索引在 `eqts pull` 里生成 `expressions`。
+
 ## 同步：`planSync` / `syncTables`（对应官方 syncTableCommand）
 
 ```ts

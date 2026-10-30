@@ -88,6 +88,37 @@ describe('postgres: query forms', () => {
   });
 });
 
+describe('postgres: generated columns and index kinds', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+  const Doc = entity(
+    't_gdoc',
+    {
+      id: col.int().primaryKey(),
+      attrs: col.json<{ tags: string[] }>(),
+      qty: col.int(),
+      price: col.int(),
+      total: col.int().generatedAs('qty * price'),
+    },
+    {
+      indexes: [
+        { columns: ['attrs'], using: 'gin', name: 't_gdoc_attrs_gin' },
+        { columns: ['qty'], where: 'qty > 0', name: 't_gdoc_live_idx' },
+        { expressions: ["CAST(attrs->'$.tags' AS CHAR(32) ARRAY)"], name: 't_gdoc_tags_mvi' },
+      ],
+    },
+  );
+
+  it('renders GENERATED ALWAYS AS … STORED, USING gin, partial and expression indexes', () => {
+    const sql = db.createTablesSql(Doc);
+    assert.match(sql[0]!, /"total" INTEGER GENERATED ALWAYS AS \(qty \* price\) STORED NOT NULL/);
+    assert.deepEqual(sql.slice(1), [
+      'CREATE INDEX IF NOT EXISTS "t_gdoc_attrs_gin" ON "t_gdoc" USING gin ("attrs")',
+      'CREATE INDEX IF NOT EXISTS "t_gdoc_live_idx" ON "t_gdoc" ("qty") WHERE qty > 0',
+      `CREATE INDEX IF NOT EXISTS "t_gdoc_tags_mvi" ON "t_gdoc" ((CAST(attrs->'$.tags' AS CHAR(32) ARRAY)))`,
+    ]);
+  });
+});
+
 describe('postgres: batched writes', () => {
   const db = createDb({ schema, adapter: postgres({} as Pool) });
 

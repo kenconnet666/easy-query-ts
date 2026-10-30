@@ -16,6 +16,7 @@ import {
   type Node,
   type QueryRunner,
   type SelectNode,
+  type TableIndex,
   type UpdateNode,
 } from '@zerodep-dev/easy-query-ts';
 import { mysqlFunctions } from './functions.ts';
@@ -138,6 +139,28 @@ export class MySqlDialect extends Dialect {
   override readonly commentStyle = 'inline';
   /** MySQL 的 CREATE INDEX 没有 IF NOT EXISTS */
   override readonly indexIfNotExists = false;
+
+  /** 表达式索引（8.0.13+，多值索引也是它）与 USING BTREE / HASH；没有部分索引 */
+  override readonly indexFeatures = { using: true, partial: false, expressions: true };
+
+  /** 表达式写成 ((expr))；方法写在列后面，只有 BTREE、HASH */
+  // MySQL 的 CREATE INDEX 没有 IF NOT EXISTS（indexIfNotExists），ifNotExists 用不上
+  override createIndex(table: string, index: TableIndex, _ifNotExists: boolean): string {
+    this.checkIndex(index);
+    if (index.using && !['btree', 'hash'].includes(index.using))
+      throw new Error(`index ${index.name}: USING ${index.using} is not supported by MySQL`);
+    if (index.expressions?.length) this.requires('expression indexes', '8.0.13');
+    const parts = [
+      ...index.columns.map((c) => this.quote(c)),
+      ...(index.expressions ?? []).map((e) => `(${e})`),
+    ];
+    const using = index.using ? ` USING ${index.using.toUpperCase()}` : '';
+    return `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this.quote(index.name)} ON ${this.table(table)} (${parts.join(', ')})${using}`;
+  }
+
+  protected override generatedColumn(computed: NonNullable<ColumnOptions['computed']>): string {
+    return `GENERATED ALWAYS AS (${computed.sql}) ${computed.stored ? 'STORED' : 'VIRTUAL'}`;
+  }
 
   protected override tableOptions(entity: Entity): string {
     return entity.comment !== undefined ? ` COMMENT=${sqlString(entity.comment)}` : '';

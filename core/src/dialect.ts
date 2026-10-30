@@ -360,6 +360,7 @@ export abstract class Dialect {
     return [
       this.quote(name),
       this.columnType(kind, o),
+      o.computed ? this.generatedColumn(o.computed) : undefined,
       o.generated ? this.identity() : undefined,
       o.nullable ? undefined : 'NOT NULL',
       o.dbDefault !== undefined ? `DEFAULT ${o.dbDefault}` : undefined,
@@ -422,9 +423,45 @@ export abstract class Dialect {
   /** CREATE INDEX 认不认 IF NOT EXISTS（MySQL、HANA 不认） */
   readonly indexIfNotExists: boolean = true;
 
+  /** 索引能写的东西：方法（USING）、部分索引（WHERE）、表达式；没有的写了就在建表时报错 */
+  readonly indexFeatures: {
+    readonly using: boolean;
+    readonly partial: boolean;
+    readonly expressions: boolean;
+  } = { using: false, partial: false, expressions: false };
+
   createIndex(table: string, index: TableIndex, ifNotExists: boolean): string {
+    this.checkIndex(index);
     const guard = ifNotExists && this.indexIfNotExists ? 'IF NOT EXISTS ' : '';
-    return `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${guard}${this.quote(index.name)} ON ${this.table(table)} (${index.columns.map((c) => this.quote(c)).join(', ')})`;
+    const parts = [
+      ...index.columns.map((c) => this.quote(c)),
+      ...(index.expressions ?? []).map((e) => `(${e})`),
+    ];
+    const using = index.using ? ` USING ${index.using}` : '';
+    const where = index.where ? ` WHERE ${index.where}` : '';
+    return `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${guard}${this.quote(index.name)} ON ${this.table(table)}${using} (${parts.join(', ')})${where}`;
+  }
+
+  /** 索引里用了这个方言没有的写法：报错 */
+  protected checkIndex(index: TableIndex): void {
+    const f = this.indexFeatures;
+    const missing = [
+      index.using && !f.using ? `USING ${index.using}` : undefined,
+      index.where && !f.partial ? 'partial indexes (where)' : undefined,
+      index.expressions?.length && !f.expressions ? 'expression indexes' : undefined,
+    ].filter(Boolean);
+    if (missing.length > 0)
+      throw new Error(
+        `index ${index.name}: ${missing.join(', ')} not supported by the ${this.name} dialect`,
+      );
+  }
+
+  /** 生成列的子句（接在类型后面）：GENERATED ALWAYS AS (…) STORED | VIRTUAL；没有的方言报错 */
+  protected generatedColumn(computed: NonNullable<ColumnOptions['computed']>): string {
+    void computed;
+    throw new Error(
+      `generated columns (generatedAs) are not supported by the ${this.name} dialect`,
+    );
   }
 
   /** 外键约束子句（建表语句里与 ALTER TABLE ADD 共用） */

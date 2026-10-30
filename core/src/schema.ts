@@ -89,6 +89,8 @@ export interface ColumnOptions {
   readonly comment?: string | undefined;
   /** 无符号（MySQL 的 INT UNSIGNED 等）；没有无符号类型的库忽略 */
   readonly unsigned?: boolean | undefined;
+  /** 生成列（Column.generatedAs）：库按表达式算出来，写入时不能给值 */
+  readonly computed?: { readonly sql: string; readonly stored: boolean } | undefined;
   /** 数组列的元素列（建表时取它的类型，如 VARCHAR(50)[]） */
   readonly element?: Column<unknown, boolean, boolean> | undefined;
   /** col.enum 的取值（建表时 MySQL 的 ENUM(…)、PG 的 CREATE TYPE … AS ENUM 用） */
@@ -228,6 +230,18 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
   native(typeName?: string): Column<T, N, O> {
     if (!this.options.enumValues) throw new TypeError('native() is for col.enum(…) columns');
     return new Column(this.codec, { ...this.options, nativeEnum: typeName ?? true });
+  }
+
+  /**
+   * 生成列（ROADMAP 19.7）：库按表达式算出这一列（`GENERATED ALWAYS AS (sql) STORED | VIRTUAL`），插入、更新时不能给值。
+   * sql 是受信任的 SQL，引用的是库里的列名：`col.int().generatedAs('qty * price')`。stored 默认 true（PG 只有 STORED）；
+   * MySQL、SQLite 可以 `{ stored: false }`（VIRTUAL，不占空间、读时算）。PG、MySQL、SQLite 支持，别的库建表时报错
+   */
+  generatedAs(sql: string, options: { readonly stored?: boolean } = {}): Column<T, N, true> {
+    return new Column(this.codec, {
+      ...this.options,
+      computed: { sql, stored: options.stored ?? true },
+    }) as unknown as Column<T, N, true>;
   }
 
   /** 无符号（数值列）：MySQL 建成 INT UNSIGNED 等，取值范围翻倍；别的库没有无符号类型，建表时忽略 */
@@ -724,6 +738,12 @@ export interface TableIndex {
   readonly name: string;
   readonly columns: readonly string[];
   readonly unique: boolean;
+  /** 表达式（受信任的 SQL，排在列后面）：`lower(email)`、MySQL 的多值索引 `CAST(attrs->'$.tags' AS CHAR(32) ARRAY)` */
+  readonly expressions?: readonly string[] | undefined;
+  /** 索引方法：PG 的 gin、gist、brin、hash，MySQL 的 btree、hash */
+  readonly using?: string | undefined;
+  /** 部分索引的条件（受信任的 SQL，PG、SQLite）：`deleted_at IS NULL` */
+  readonly where?: string | undefined;
 }
 
 /** 能当索引列的列（值对象不能整个当索引列，写它展开后的路径 'address.city'） */
@@ -736,9 +756,16 @@ export interface EntityOptions<F extends Fields = Fields> {
   readonly comment?: string;
   /** 索引：`[{ columns: ['tenantId', 'createdAt'] }, { columns: ['email'], unique: true }]`；名字默认 表_列_idx / uidx */
   readonly indexes?: readonly {
-    readonly columns: readonly [IndexColumn<F>, ...IndexColumn<F>[]];
+    /** 列；只用表达式时可以不写（此时要给 name） */
+    readonly columns?: readonly [IndexColumn<F>, ...IndexColumn<F>[]];
     readonly unique?: boolean;
     readonly name?: string;
+    /** 表达式索引（受信任的 SQL，排在列后面）：`['lower(email)']`；MySQL 8.0.13+、PG、SQLite */
+    readonly expressions?: readonly string[];
+    /** 索引方法：PG 的 `'gin'`（jsonb、数组、全文）、`'gist'`、`'brin'`、`'hash'`；MySQL 的 `'btree'`、`'hash'` */
+    readonly using?: 'btree' | 'hash' | 'gin' | 'gist' | 'brin';
+    /** 部分索引：只给满足条件的行建索引（受信任的 SQL，PG、SQLite）：`'deleted_at IS NULL'` */
+    readonly where?: string;
   }[];
   readonly renamedFrom?: string;
   /** 分表：`byMonth('createdAt', { from: '2025-01' })`、`byMod('userId', 4)`，见 sharding.ts */
@@ -795,16 +822,24 @@ export function entity(
   // 默认的索引名：表名（去掉 schema 前缀）_列_idx / uidx
   const bare = table.split('@')[0]!.split('.').pop()!;
   const indexes = (options?.indexes ?? []).map((index): TableIndex => {
-    const names = index.columns.map((path) => {
+    const names = (index.columns ?? []).map((path) => {
       const name = columnNames[path];
       if (name === undefined) throw new Error(`${table}: index column '${path}' is not a column`);
       return name;
     });
     const unique = index.unique === true;
+    const expressions = index.expressions ?? [];
+    if (names.length + expressions.length === 0)
+      throw new Error(`${table}: an index needs columns or expressions`);
+    if (names.length === 0 && index.name === undefined)
+      throw new Error(`${table}: an index on expressions only needs a name`);
     return {
       name: index.name ?? `${bare}_${names.join('_')}_${unique ? 'uidx' : 'idx'}`,
       columns: names,
       unique,
+      ...(expressions.length > 0 ? { expressions } : {}),
+      ...(index.using ? { using: index.using } : {}),
+      ...(index.where ? { where: index.where } : {}),
     };
   });
   return {

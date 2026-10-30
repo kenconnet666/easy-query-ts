@@ -140,6 +140,49 @@ describe('mysql: query forms', () => {
   });
 });
 
+describe('mysql: generated columns and index kinds', () => {
+  const db = createDb({ schema, adapter: mysql({} as Pool) });
+  const Doc = entity(
+    't_gdoc',
+    {
+      id: col.int().primaryKey(),
+      attrs: col.json<{ tags: string[] }>(),
+      qty: col.int(),
+      price: col.int(),
+      total: col.int().generatedAs('qty * price'),
+    },
+    {
+      indexes: [
+        { columns: ['attrs'], using: 'gin', name: 't_gdoc_attrs_gin' },
+        { columns: ['qty'], where: 'qty > 0', name: 't_gdoc_live_idx' },
+        { expressions: ["CAST(attrs->'$.tags' AS CHAR(32) ARRAY)"], name: 't_gdoc_tags_mvi' },
+      ],
+    },
+  );
+
+  it('renders generated columns and multi-valued (expression) indexes; rejects GIN and partial indexes', () => {
+    assert.match(
+      db.createTableSql(Doc),
+      /`total` INT GENERATED ALWAYS AS \(qty \* price\) STORED NOT NULL/,
+    );
+    assert.throws(() => db.createTablesSql(Doc), /USING gin|partial indexes/);
+    const Tags = entity(
+      't_gtags',
+      { id: col.int().primaryKey(), attrs: col.json<{ tags: string[] }>(), sku: col.string(20) },
+      {
+        indexes: [
+          { expressions: ["CAST(attrs->'$.tags' AS CHAR(32) ARRAY)"], name: 't_gtags_mvi' },
+          { columns: ['sku'], using: 'hash', name: 't_gtags_sku' },
+        ],
+      },
+    );
+    assert.deepEqual(db.createTablesSql(Tags).slice(1), [
+      "CREATE INDEX `t_gtags_mvi` ON `t_gtags` ((CAST(attrs->'$.tags' AS CHAR(32) ARRAY)))",
+      'CREATE INDEX `t_gtags_sku` ON `t_gtags` (`sku`) USING HASH',
+    ]);
+  });
+});
+
 describe('mysql: batched writes', () => {
   const db = createDb({ schema, adapter: mysql({} as Pool) });
 

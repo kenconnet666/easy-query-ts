@@ -207,11 +207,12 @@ export class PostgresDialect extends Dialect {
          WHERE a.attnum > 0 AND NOT a.attisdropped ORDER BY t.relname, a.attnum`,
       ),
       indexes: await run(
-        `SELECT t.relname AS table_name, ic.relname AS index_name, i.indisunique AS is_unique, a.attname AS column_name
+        `SELECT t.relname AS table_name, ic.relname AS index_name, i.indisunique AS is_unique,
+           coalesce(a.attname, pg_get_indexdef(i.indexrelid, k.ord::int, true)) AS column_name
          FROM (${tables}) t JOIN pg_index i ON i.indrelid = t.oid AND NOT i.indisprimary
          JOIN pg_class ic ON ic.oid = i.indexrelid
          CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ord)
-         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+         LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
          ORDER BY t.relname, ic.relname, k.ord`,
       ),
       foreignKeys: await run(
@@ -240,6 +241,15 @@ export class PostgresDialect extends Dialect {
     const strength =
       mode === 'share' ? 'SHARE' : mode === 'noKeyUpdate' ? 'NO KEY UPDATE' : 'UPDATE';
     return ` FOR ${strength}${wait === 'nowait' ? ' NOWAIT' : wait === 'skip' ? ' SKIP LOCKED' : ''}`;
+  }
+
+  override readonly indexFeatures = { using: true, partial: true, expressions: true };
+
+  /** 生成列只有 STORED（VIRTUAL 要 PG 18） */
+  protected override generatedColumn(computed: NonNullable<ColumnOptions['computed']>): string {
+    if (!computed.stored)
+      throw new Error('PostgreSQL only has stored generated columns: drop { stored: false }');
+    return `GENERATED ALWAYS AS (${computed.sql}) STORED`;
   }
 
   /** 一次插入 100 行起、值都是参数时用 unnest：每列一个数组参数，一条语句插完 */

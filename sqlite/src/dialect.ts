@@ -60,7 +60,7 @@ export class SqliteDialect extends Dialect {
   override readonly inlineForeignKeys = true;
   override readonly transactionalDdl = true;
 
-  /** 读 sqlite_master 与 pragma_table_info / index_list / foreign_key_list（外键没有名字，按列比较） */
+  /** 读 sqlite_master 与 pragma_table_xinfo / index_list / foreign_key_list（外键没有名字，按列比较） */
   override async introspect(run: QueryRunner): Promise<DbTable[]> {
     const tables = await run(
       `SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
@@ -70,7 +70,8 @@ export class SqliteDialect extends Dialect {
       const name = String(t['name']);
       const autoincrement = /\bAUTOINCREMENT\b/i.test(typeof t['sql'] === 'string' ? t['sql'] : '');
       const columns = await run(
-        `SELECT name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_info(?) ORDER BY cid`,
+        // table_xinfo 才列出生成列（hidden 2、3）；hidden 1 是虚拟表的隐藏列
+        `SELECT name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_xinfo(?) WHERE hidden <> 1 ORDER BY cid`,
         [name],
       );
       const indexes = [];
@@ -144,6 +145,12 @@ export class SqliteDialect extends Dialect {
       default:
         return 'TEXT';
     }
+  }
+
+  override readonly indexFeatures = { using: false, partial: true, expressions: true };
+
+  protected override generatedColumn(computed: NonNullable<ColumnOptions['computed']>): string {
+    return `GENERATED ALWAYS AS (${computed.sql}) ${computed.stored ? 'STORED' : 'VIRTUAL'}`;
   }
 
   /** 自增主键必须写成 `INTEGER PRIMARY KEY AUTOINCREMENT`（主键约束就在列上） */

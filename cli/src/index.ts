@@ -66,8 +66,16 @@ function entityLines(table: DbTable, name: string): string[] {
   if (table.comment) options.push(`comment: ${quote(table.comment)}`);
   if (table.indexes.length > 0) {
     const items = table.indexes.map((i) => {
-      const columns = i.columns.map((c) => quote(props.get(c) ?? c)).join(', ');
-      return `{ columns: [${columns}]${i.unique ? ', unique: true' : ''}, name: ${quote(i.name)} }`;
+      // 不是列名的是表达式（PG 读出来的 lower((sku)::text) 之类）：写进 expressions
+      const columns = i.columns.filter((c) => props.has(c)).map((c) => quote(props.get(c)!));
+      const expressions = i.columns.filter((c) => !props.has(c)).map(quote);
+      const parts = [
+        columns.length > 0 ? `columns: [${columns.join(', ')}]` : '',
+        expressions.length > 0 ? `expressions: [${expressions.join(', ')}]` : '',
+        i.unique ? 'unique: true' : '',
+        `name: ${quote(i.name)}`,
+      ].filter(Boolean);
+      return `{ ${parts.join(', ')} }`;
     });
     options.push(`indexes: [${items.join(', ')}]`);
   }
