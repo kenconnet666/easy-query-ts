@@ -11,6 +11,8 @@
     { "path": "oracle/tsconfig.build.json" },
     { "path": "dameng/tsconfig.build.json" },
     { "path": "clickhouse/tsconfig.build.json" },
+    { "path": "db2/tsconfig.build.json" },
+    { "path": "tdengine/tsconfig.build.json" },
     { "path": "duckdb/tsconfig.build.json" },
     { "path": "decimal/tsconfig.build.json" },
     { "path": "date/tsconfig.build.json" },

@@ -83,6 +83,10 @@ export interface LiveSuiteOptions {
   readonly ddl?: boolean;
   /** 窗口函数 NTH_VALUE（SQL Server 没有） */
   readonly nthValue?: boolean;
+  /** FOR UPDATE NOWAIT（Db2 LUW 没有，只有 SKIP LOCKED DATA） */
+  readonly noWait?: boolean;
+  /** jsonLength（Db2 的 JSON_TABLE 只能从根展开，数不了数组长度） */
+  readonly jsonLength?: boolean;
 }
 
 export function liveSuite(
@@ -2014,6 +2018,7 @@ export function liveSuite(
           skipped.map((u) => u.name),
           ['bob', 'carol'],
         );
+        if (options.noWait === false) return;
         // NOWAIT 碰到被锁的行立即报错，而不是排队
         await assert.rejects(() =>
           db.transaction((other) =>
@@ -3210,15 +3215,23 @@ export function liveSuite(
         .select((u) => ({
           tags: u.attrs.json('tags'),
           first: u.attrs.jsonText('tags', 0),
-          count: u.attrs.jsonLength('tags'),
           has: u.attrs.jsonHas('tags', 0),
         }))
         .toList();
       assert.deepEqual(rows, [
-        { tags: ['vip'], first: 'vip', count: 1, has: true },
-        { tags: [], first: null, count: 0, has: false },
-        { tags: [], first: null, count: 0, has: false },
+        { tags: ['vip'], first: 'vip', has: true },
+        { tags: [], first: null, has: false },
+        { tags: [], first: null, has: false },
       ]);
+      if (options.jsonLength !== false)
+        assert.deepEqual(
+          await db
+            .queryable(User)
+            .orderBy((u) => u.id)
+            .select((u) => u.attrs.jsonLength('tags'))
+            .toList(),
+          [1, 0, 0],
+        );
       const vip = await db
         .queryable(User)
         .where((u) => u.attrs.jsonText('tags', 0).eq('vip'))

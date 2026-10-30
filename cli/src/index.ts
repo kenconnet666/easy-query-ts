@@ -131,8 +131,8 @@ function columnBuilder(column: DbColumn): { builder: string; note?: string } {
   const args = /\(([^)]*)\)/
     .exec(t)?.[1]
     ?.split(',')
-    // Oracle 的 VARCHAR2(50 CHAR)：长度后面的单位不算
-    .map((s) => Number(s.trim().replace(/\s+(char|byte)$/, '')));
+    // Oracle 的 VARCHAR2(50 CHAR)、Db2 的 VARCHAR(50 CODEUNITS32)：长度后面的单位不算
+    .map((s) => Number(s.trim().replace(/\s+(char|byte|codeunits32|codeunits16|octets)$/, '')));
   const base = t
     .replace(/\(.*$/, '')
     .replace(/\s+(unsigned|without time zone)$/, '')
