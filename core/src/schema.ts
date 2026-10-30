@@ -91,6 +91,10 @@ export interface ColumnOptions {
   readonly unsigned?: boolean | undefined;
   /** 数组列的元素列（建表时取它的类型，如 VARCHAR(50)[]） */
   readonly element?: Column<unknown, boolean, boolean> | undefined;
+  /** col.enum 的取值（建表时 MySQL 的 ENUM(…)、PG 的 CREATE TYPE … AS ENUM 用） */
+  readonly enumValues?: readonly string[] | undefined;
+  /** 用库里的原生枚举类型（见 Column.native）：PG 是类型名，MySQL 不需要名字（true） */
+  readonly nativeEnum?: string | true | undefined;
   /** 库里原来的列名：syncTables 发现新列名不在、旧列名在时改名而不是加列（对应 Java 版的 @Column(renameFrom)） */
   readonly renamedFrom?: string | undefined;
 }
@@ -215,6 +219,15 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
    */
   brand<B extends string>(): Column<Branded<T, B>, N, O> {
     return this as unknown as Column<Branded<T, B>, N, O>;
+  }
+
+  /**
+   * 枚举列用库里的原生枚举类型：MySQL 建成 `ENUM('a', 'b')`；PG 建成名为 typeName 的类型（`CREATE TYPE … AS ENUM`，
+   * 建表前先建，同步时补上新加的值），PG 上必须给名字。别的库照常是 VARCHAR（取值由列的 codec 检查）
+   */
+  native(typeName?: string): Column<T, N, O> {
+    if (!this.options.enumValues) throw new TypeError('native() is for col.enum(…) columns');
+    return new Column(this.codec, { ...this.options, nativeEnum: typeName ?? true });
   }
 
   /** 无符号（数值列）：MySQL 建成 INT UNSIGNED 等，取值范围翻倍；别的库没有无符号类型，建表时忽略 */
@@ -610,8 +623,16 @@ export const col = {
         );
       return v as V;
     };
-    return base(codec<V>('string', (r) => check(String(r)), check));
+    return base(
+      codec<V>('string', (r) => check(String(r)), check),
+      { enumValues: values },
+    );
   },
+  /**
+   * 时间间隔（PostgreSQL 的 INTERVAL）：JS 里是 PG 输出的文字，如 `'1 day 02:00:00'`、`'3 mons'`；写入时给 PG 认得的写法
+   * （`'2 hours'`、`'P1DT2H'`）。别的库没有间隔类型，建表时报不支持
+   */
+  interval: () => base(codec<string>('interval', (r) => String(r))),
   /** 自定义的读写 */
   custom: <T>(kind: ColumnKind, decode: (raw: unknown) => T, encode: (value: T) => unknown) =>
     base(codec<T>(kind, decode, encode)),

@@ -54,6 +54,10 @@ export const Order = entity('t_order', {
 - **数组（PG）**：`col.array(col.string(30))` 建成 `VARCHAR(30)[]`，元素逐个经过元素列的 codec（日期时间、bigint、decimal 的数组按文字读，
   不经过驱动按本地时区解析）；元素可空写 `col.array(col.int().nullable())`。条件：`has(v)`（`? = ANY(col)`）、`hasAll([…])`（`@>`）、
   `hasAny([…])`（`&&`）、`arrayLength()`（`cardinality`）。只支持一维；别的库建表时报不支持，改用 `col.json<T[]>()`。
+- **原生枚举**：`col.enum(['todo', 'done']).native('task_state')`。MySQL 建成 `ENUM('todo', 'done')`；PG 建成名为 `task_state` 的类型，
+  建表前先建（`DO $$ … EXCEPTION WHEN duplicate_object …`，能重复执行），`planSync` 发现新加的值就 `ALTER TYPE … ADD VALUE`，
+  库里多出来的值（PG 删不了）写进差异。PG 上必须给类型名；别的库照常是 VARCHAR，取值由列的 codec 检查。`eqts pull` 把 MySQL 的 enum 生成原生枚举。
+- **时间间隔（PG）**：`col.interval()` 建成 INTERVAL，读出 PG 输出的文字（`'02:00:00'`、`'1 day'`、`'3 mons'`），写入给 PG 认得的写法；别的库建表时报不支持。
 - **无符号**：`col.int().unsigned()`、`col.bigint().unsigned()` 在 MySQL 建成 `INT UNSIGNED` 等；别的库没有无符号类型，建表时忽略。
   `eqts pull` 认得 `uuid`、`uniqueidentifier` 与 `unsigned`。
 

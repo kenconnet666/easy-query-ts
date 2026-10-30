@@ -82,6 +82,7 @@ export class MySqlDialect extends Dialect {
   }
 
   private baseColumnType(kind: string, o: ColumnOptions): string {
+    if (o.nativeEnum && o.enumValues) return `ENUM(${o.enumValues.map(sqlString).join(', ')})`;
     switch (kind) {
       // 16 个字节：比 CHAR(36) 省一半多，比较也快；绑定时把文字换成字节（encodeParam）
       case 'uuid':

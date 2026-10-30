@@ -9,6 +9,7 @@ import { schema, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
 import { pglite } from '../src/pglite.ts';
 import { arraySuite } from './arrays.ts';
+import { enumSuite } from './enums.ts';
 import { DDL } from './ddl.ts';
 
 const database = new PGlite();
@@ -26,3 +27,4 @@ const open = async (): Promise<TestEnv> => {
 liveSuite('pglite', open, { extensionTypes: true, extraTables: true, rowLocks: false });
 
 arraySuite('pglite', async () => pglite(database));
+enumSuite('pglite', async () => pglite(database));

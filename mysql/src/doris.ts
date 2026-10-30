@@ -86,9 +86,9 @@ export class DorisDialect extends MySqlDialect {
     if (o.dbType) return o.dbType;
     if (kind === 'bytes') return 'STRING';
     if (kind === 'time') return 'VARCHAR(12)';
-    // Doris 没有 BINARY 与无符号整数：uuid 存文字
+    // Doris 没有 BINARY、无符号整数与 ENUM：uuid 存文字，枚举照常是 VARCHAR
     if (kind === 'uuid') return 'VARCHAR(36)';
-    return super.columnType(kind, { ...o, unsigned: false });
+    return super.columnType(kind, { ...o, unsigned: false, nativeEnum: undefined });
   }
 
   /** uuid 存的是文字，不像 MySQL 那样换成字节 */

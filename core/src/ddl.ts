@@ -90,13 +90,15 @@ export function createStatements(
   schema: AnySchema,
   entities: readonly Entity[],
   ifNotExists: boolean,
+  /** 连同列用到的自定义类型（PG 枚举）一起建；planSync 自己按库里已有的类型算，传 false */
+  withTypes = true,
 ): string[] {
   const keyOf = (entity: Entity) =>
     Object.keys(schema.entities).find((k) => schema.entities[k] === entity);
   const fks = new Map(entities.map((e) => [e, keyOf(e) ? foreignKeysOf(schema, keyOf(e)!) : []]));
-  const out = entities.map((e) =>
-    dialect.createTable(e, ifNotExists, dialect.inlineForeignKeys ? fks.get(e)! : []),
-  );
+  const out = withTypes ? dialect.typeStatements(entities).statements : [];
+  for (const e of entities)
+    out.push(dialect.createTable(e, ifNotExists, dialect.inlineForeignKeys ? fks.get(e)! : []));
   for (const e of entities) {
     out.push(...dialect.commentStatements(e));
     for (const index of e.indexes ?? []) out.push(dialect.createIndex(e.table, index, ifNotExists));
@@ -119,9 +121,12 @@ export function planSync(
   schema: AnySchema,
   entities: readonly Entity[],
   tables: readonly DbTable[],
+  /** 库里已有的自定义类型（Dialect.introspectTypes） */
+  types: ReadonlyMap<string, readonly string[]> = new Map(),
 ): SyncPlan {
+  // 类型排在最前面：新表、新列可能用到它
+  const { statements: typeStatements, differences } = dialect.typeStatements(entities, types);
   const statements: string[] = [];
-  const differences: string[] = [];
   const created: Entity[] = [];
   for (const entity of entities) {
     let table = findTable(tables, entity.table);
@@ -137,7 +142,11 @@ export function planSync(
   }
   // 新表一起建：外键排在所有建表之后
   return {
-    statements: [...createStatements(dialect, schema, created, false), ...statements],
+    statements: [
+      ...typeStatements,
+      ...createStatements(dialect, schema, created, false, false),
+      ...statements,
+    ],
     differences,
   };
 }

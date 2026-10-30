@@ -34,7 +34,7 @@ describe('col.uuid', () => {
     assert.throws(() => col.string().unsigned(), /numeric columns/);
   });
 
-  it('eqts pull：uuid、uniqueidentifier 生成 col.uuid()，带 unsigned 的整数加 .unsigned()', () => {
+  it('eqts pull：uuid、uniqueidentifier 生成 col.uuid()，带 unsigned 的整数加 .unsigned()，MySQL 的 enum 生成原生枚举', () => {
     const source = entitySource([
       {
         name: 't_x',

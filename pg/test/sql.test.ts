@@ -61,10 +61,15 @@ describe('postgres: code-first DDL', () => {
     assert.deepEqual(s.params, ['a', ['a', 'b'], ['c'], 1]);
   });
 
-  it('stores uuids in the UUID type and ignores unsigned', () => {
+  it('stores uuids in the UUID type, ignores unsigned and creates native enum types first', () => {
     assert.equal(
       db.createTableSql(Token),
-      'CREATE TABLE IF NOT EXISTS "t_token" ("id" UUID NOT NULL, "owner" UUID, "hits" BIGINT NOT NULL, PRIMARY KEY ("id"))',
+      'CREATE TABLE IF NOT EXISTS "t_token" ("id" UUID NOT NULL, "owner" UUID, "hits" BIGINT NOT NULL, "level" "eqts_level" NOT NULL, PRIMARY KEY ("id"))',
+    );
+    // 原生枚举的类型排在建表前面，能重复执行
+    assert.equal(
+      db.createTablesSql(Token)[0],
+      `DO $$ BEGIN CREATE TYPE "eqts_level" AS ENUM ('low', 'mid', 'high'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
     );
   });
 

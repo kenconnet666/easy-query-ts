@@ -313,6 +313,10 @@ export abstract class Dialect {
         return 'BLOB';
       case 'uuid':
         return 'CHAR(36)';
+      case 'interval':
+        throw new Error(
+          `interval columns are only supported on PostgreSQL, not the ${this.name} dialect`,
+        );
       case 'array':
         throw new Error(
           `array columns are only supported on PostgreSQL, not the ${this.name} dialect; use col.json<T[]>() instead`,
@@ -448,9 +452,26 @@ export abstract class Dialect {
 
   /** 类型的规范写法：小写、去空格、同义词换成同一个；各方言补自己的写法 */
   protected normalizeType(type: string): string {
-    let t = type.toLowerCase().replace(/\s+/g, ' ').trim();
+    // 去掉引号：PG 的自定义类型声明时带引号（"mood"），库里读出来不带
+    let t = type.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
     for (const [pattern, to] of TYPE_SYNONYMS) t = t.replace(pattern, to);
     return t.replace(/\s+/g, '');
+  }
+
+  /**
+   * 列用到的库里的自定义类型（PG 的原生枚举）：建表前要先建。existing 是库里已有的（类型名 → 取值），
+   * 没给时（建表）用能重复执行的写法；给了时（同步）只建缺的、补缺的值，库里多出来的值写进 differences。没有自定义类型的方言什么都不做
+   */
+  typeStatements(
+    _entities: readonly Entity[],
+    _existing?: ReadonlyMap<string, readonly string[]>,
+  ): { statements: string[]; differences: string[] } {
+    return { statements: [], differences: [] };
+  }
+
+  /** 读库里已有的自定义类型（类型名 → 取值），planSync 用；没有自定义类型的方言返回空 */
+  introspectTypes(_run: QueryRunner): Promise<Map<string, string[]>> {
+    return Promise.resolve(new Map());
   }
 
   /** 读当前 schema 里的表结构（syncTables、tableExists、由表生成实体用）；各方言实现 */

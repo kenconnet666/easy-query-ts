@@ -88,10 +88,10 @@ describe('mysql: code-first DDL', () => {
     );
   });
 
-  it('stores uuids as BINARY(16) and binds them as 16 bytes; unsigned columns get UNSIGNED', () => {
+  it('stores uuids as BINARY(16) and binds them as 16 bytes; unsigned columns get UNSIGNED; native enums are ENUM(…)', () => {
     assert.equal(
       db.createTableSql(Token),
-      'CREATE TABLE IF NOT EXISTS `t_token` (`id` BINARY(16) NOT NULL, `owner` BINARY(16), `hits` BIGINT UNSIGNED NOT NULL, PRIMARY KEY (`id`))',
+      "CREATE TABLE IF NOT EXISTS `t_token` (`id` BINARY(16) NOT NULL, `owner` BINARY(16), `hits` BIGINT UNSIGNED NOT NULL, `level` ENUM('low', 'mid', 'high') NOT NULL, PRIMARY KEY (`id`))",
     );
     const { params } = db
       .queryable(Token)

@@ -1681,62 +1681,74 @@ export function liveSuite(
     });
   });
 
-  describe(`${name}: uuid and unsigned columns`, { skip: options.ddl === false }, () => {
-    it('stores uuids in the native type, finds and filters by them, and syncs to an empty plan', async () => {
-      const env = await seeded();
-      const db = createDb({ schema: defineSchema({ Token }), adapter: env.adapter });
-      await db.sql.execute`DROP TABLE ${db.sql.ident('t_token')}`.catch(() => undefined);
-      await db.createTables();
-      try {
-        const owner = '0192F3A4-1B2C-7D8E-9F01-23456789ABCD';
-        await db
-          .insert(Token)
-          .values([
-            { owner, hits: 4_000_000_000 },
-            { owner: null, hits: 0 },
-          ])
-          .execute();
-        // 不按 id 排序：SQL Server 的 UNIQUEIDENTIFIER 先比较最后 6 个字节，v7 在那里不是按时间有序的
-        const rows = await db
-          .queryable(Token)
-          .orderBy((t) => t.hits.desc())
-          .toList();
-        assert.equal(rows.length, 2);
-        // 写进去的是大写，读出来是小写的标准写法
-        assert.deepEqual(
-          rows.map((r) => [r.owner, r.hits]),
-          [
-            [owner.toLowerCase(), 4_000_000_000],
-            [null, 0],
-          ],
-        );
-        for (const r of rows)
-          assert.match(
-            r.id,
-            /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  describe(
+    `${name}: uuid, unsigned and native enum columns`,
+    { skip: options.ddl === false },
+    () => {
+      it('stores uuids and enums in the native types, finds and filters by them, and syncs to an empty plan', async () => {
+        const env = await seeded();
+        const db = createDb({ schema: defineSchema({ Token }), adapter: env.adapter });
+        await db.sql.execute`DROP TABLE ${db.sql.ident('t_token')}`.catch(() => undefined);
+        await db.createTables();
+        try {
+          const owner = '0192F3A4-1B2C-7D8E-9F01-23456789ABCD';
+          await db
+            .insert(Token)
+            .values([
+              { owner, hits: 4_000_000_000, level: 'high' },
+              { owner: null, hits: 0, level: 'low' },
+            ])
+            .execute();
+          // 不按 id 排序：SQL Server 的 UNIQUEIDENTIFIER 先比较最后 6 个字节，v7 在那里不是按时间有序的
+          const rows = await db
+            .queryable(Token)
+            .orderBy((t) => t.hits.desc())
+            .toList();
+          assert.equal(rows.length, 2);
+          // 写进去的是大写，读出来是小写的标准写法
+          assert.deepEqual(
+            rows.map((r) => [r.owner, r.hits]),
+            [
+              [owner.toLowerCase(), 4_000_000_000],
+              [null, 0],
+            ],
           );
-        const first = rows[0]!.id;
-        assert.equal((await db.queryable(Token).findOrThrow(first)).owner, owner.toLowerCase());
-        assert.equal(
-          await db
-            .queryable(Token)
-            .where((t) => t.owner.eq(owner))
-            .count(),
-          1,
-        );
-        assert.equal(
-          await db
-            .queryable(Token)
-            .where((t) => t.id.in([first, rows[1]!.id]))
-            .count(),
-          2,
-        );
-        assert.deepEqual((await db.planSync()).statements, []);
-      } finally {
-        await db.sql.execute`DROP TABLE ${db.sql.ident('t_token')}`;
-      }
-    });
-  });
+          for (const r of rows)
+            assert.match(
+              r.id,
+              /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+            );
+          const first = rows[0]!.id;
+          assert.equal((await db.queryable(Token).findOrThrow(first)).owner, owner.toLowerCase());
+          assert.equal(
+            await db
+              .queryable(Token)
+              .where((t) => t.owner.eq(owner))
+              .count(),
+            1,
+          );
+          assert.equal(
+            await db
+              .queryable(Token)
+              .where((t) => t.id.in([first, rows[1]!.id]))
+              .count(),
+            2,
+          );
+          assert.deepEqual(
+            await db
+              .queryable(Token)
+              .where((t) => t.level.in(['high', 'mid']))
+              .select((t) => t.level)
+              .toList(),
+            ['high'],
+          );
+          assert.deepEqual((await db.planSync()).statements, []);
+        } finally {
+          await db.sql.execute`DROP TABLE ${db.sql.ident('t_token')}`;
+        }
+      });
+    },
+  );
 
   describe(`${name}: code-first sync`, { skip: options.ddl === false }, () => {
     // 两张表：B 经 aId 引用 A（外键、级联删除），各带注释与索引

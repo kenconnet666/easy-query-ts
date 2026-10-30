@@ -7,11 +7,12 @@ import { memoryDb } from '../src/sqlite-env.ts';
 describe('col.array', () => {
   it('解码数组字面量：引号、反斜杠、逗号、NULL 与 "NULL" 文字', () => {
     const { codec } = col.array(col.string().nullable());
-    assert.deepEqual(codec.decode('{a,"b,c","x\\"y","back\\slash",NULL,"NULL"}'), [
+    // PG 输出的反斜杠是转义过的：库里的 back\slash 读出来是 "back\\slash"
+    assert.deepEqual(codec.decode('{a,"b,c","x\\"y","back\\\\slash",NULL,"NULL"}'), [
       'a',
       'b,c',
       'x"y',
-      'back\slash',
+      'back\\slash',
       null,
       'NULL',
     ]);

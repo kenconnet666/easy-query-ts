@@ -51,7 +51,14 @@ import type {
   WithCapabilities,
 } from './capabilities.ts';
 import { AggregateSaver, type SaveInclude, type SaveValue } from './save.ts';
-import { createStatements, findTable, planSync, type DbTable, type SyncPlan } from './ddl.ts';
+import {
+  createStatements,
+  findTable,
+  planSync,
+  type DbTable,
+  type QueryRunner,
+  type SyncPlan,
+} from './ddl.ts';
 import {
   assertWritable,
   execute,
@@ -426,10 +433,13 @@ export class Db<S extends AnySchema> {
 
   /** 读库里（当前 schema）的表结构：列、主键、索引、外键（syncTables、由表生成实体用） */
   introspect(): Promise<DbTable[]> {
+    return this.ctx.dialect.introspect(this.catalogRunner());
+  }
+
+  /** 读系统表的查询：走主库（从库可能落后） */
+  private catalogRunner(): QueryRunner {
     const ctx = primary(this.ctx);
-    return this.ctx.dialect.introspect((sql, params = []) =>
-      query(ctx, { sql, params: [...params] }),
-    );
+    return (sql, params = []) => query(ctx, { sql, params: [...params] });
   }
 
   async tableExists(entity: Entity): Promise<boolean> {
@@ -452,6 +462,7 @@ export class Db<S extends AnySchema> {
       this.ctx.schema,
       this.targets(entities),
       await this.introspect(),
+      await this.ctx.dialect.introspectTypes(this.catalogRunner()),
     );
   }
 

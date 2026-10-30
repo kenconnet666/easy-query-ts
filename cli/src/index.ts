@@ -145,6 +145,11 @@ function columnBuilder(column: DbColumn): { builder: string; note?: string } {
     return { builder: `col.string().dbType(${quote(raw)})` };
   if (t === 'tinyint(1)' || /^(boolean|bool|bit)$/.test(base)) return { builder: 'col.boolean()' };
   if (/^(uuid|uniqueidentifier)$/.test(base)) return { builder: 'col.uuid()' };
+  // MySQL 的 ENUM('a','b')：取值里的单引号写成两个
+  if (base === 'enum') {
+    const values = [...raw.matchAll(/'((?:[^']|'')*)'/g)].map((m) => m[1]!.replace(/''/g, "'"));
+    return { builder: `col.enum(${JSON.stringify(values)}).native()` };
+  }
   // MySQL 的 INT UNSIGNED 等
   const unsigned = /\bunsigned\b/.test(t) ? '.unsigned()' : '';
   if (/^(int|integer|int4|smallint|int2|mediumint|tinyint|serial)$/.test(base))

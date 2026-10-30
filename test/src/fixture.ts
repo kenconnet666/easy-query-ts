@@ -136,6 +136,8 @@ export const Token = entity('t_token', {
   id: col.uuid().primaryKey().$default(uuidv7),
   owner: col.uuid().nullable(),
   hits: col.bigint().unsigned(),
+  /** 原生枚举：PG 建成 eqts_level 类型，MySQL 建成 ENUM(…)，别的库是 VARCHAR */
+  level: col.enum(['low', 'mid', 'high']).native('eqts_level'),
 });
 
 export const schema = defineSchema(

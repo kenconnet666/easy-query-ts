@@ -3,8 +3,10 @@ import { pgFunctions } from './functions.ts';
 import {
   assembleTables,
   Dialect,
+  sqlString,
   type ColumnOptions,
   type DbTable,
+  type Entity,
   type FunctionRenderer,
   type Node,
   type QueryRunner,
@@ -22,7 +24,26 @@ export const TEXT_TYPE_OIDS: readonly number[] = [
   20, 1700,
   // 上面这些的数组：date[]、time[]、timetz[]、timestamp[]、timestamptz[]、int8[]、numeric[]
   1182, 1183, 1270, 1115, 1185, 1016, 1231,
+  // interval、interval[]（pg 默认解析成对象，这里保留 PG 输出的文字）
+  1186, 1187,
 ];
+
+/** 实体里用到的 PG 原生枚举：类型名 → 取值；同名的类型在不同的列上取值不一样时报错 */
+function nativeEnums(entities: readonly Entity[]): Map<string, readonly string[]> {
+  const enums = new Map<string, readonly string[]>();
+  for (const entity of entities)
+    for (const [prop, column] of Object.entries(entity.columns)) {
+      const { nativeEnum, enumValues } = column.options;
+      if (typeof nativeEnum !== 'string' || !enumValues) continue;
+      const seen = enums.get(nativeEnum);
+      if (seen && seen.join('\u0000') !== enumValues.join('\u0000'))
+        throw new Error(
+          `enum type '${nativeEnum}' is declared with different values (${entity.name}.${prop})`,
+        );
+      enums.set(nativeEnum, enumValues);
+    }
+  return enums;
+}
 
 export class PostgresDialect extends Dialect {
   readonly name: string = 'postgres';
@@ -64,9 +85,14 @@ export class PostgresDialect extends Dialect {
 
   override columnType(kind: string, o: ColumnOptions): string {
     if (o.dbType) return o.dbType;
+    if (o.nativeEnum === true)
+      throw new Error("a native enum on PostgreSQL needs a type name: .native('mood')");
+    if (o.nativeEnum) return this.quote(o.nativeEnum);
     switch (kind) {
       case 'uuid':
         return 'UUID';
+      case 'interval':
+        return 'INTERVAL';
       case 'array': {
         const element = o.element!;
         return `${this.columnType(element.codec.kind, element.options)}[]`;
@@ -80,6 +106,53 @@ export class PostgresDialect extends Dialect {
       default:
         return super.columnType(kind, o);
     }
+  }
+
+  /** 原生枚举（Column.native(typeName)）：建表前 CREATE TYPE，同步时 ALTER TYPE … ADD VALUE 补上新加的值 */
+  override typeStatements(
+    entities: readonly Entity[],
+    existing?: ReadonlyMap<string, readonly string[]>,
+  ): { statements: string[]; differences: string[] } {
+    const statements: string[] = [];
+    const differences: string[] = [];
+    for (const [name, values] of nativeEnums(entities)) {
+      const type = this.quote(name);
+      const list = values.map(sqlString).join(', ');
+      if (!existing) {
+        // 建表（createTables、createTablesSql）时不读库：类型已在就跳过
+        statements.push(
+          `DO $$ BEGIN CREATE TYPE ${type} AS ENUM (${list}); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+        );
+        continue;
+      }
+      const have = existing.get(name);
+      if (!have) {
+        statements.push(`CREATE TYPE ${type} AS ENUM (${list})`);
+        continue;
+      }
+      for (const v of values)
+        if (!have.includes(v)) statements.push(`ALTER TYPE ${type} ADD VALUE ${sqlString(v)}`);
+      const extra = have.filter((v) => !values.includes(v));
+      if (extra.length > 0)
+        differences.push(
+          `type ${name}: the database also has ${extra.map((v) => `'${v}'`).join(', ')} (PG cannot drop enum values)`,
+        );
+    }
+    return { statements, differences };
+  }
+
+  override async introspectTypes(run: QueryRunner): Promise<Map<string, string[]>> {
+    const rows = await run(
+      `SELECT t.typname AS name, e.enumlabel AS value FROM pg_type t
+       JOIN pg_enum e ON e.enumtypid = t.oid JOIN pg_namespace n ON n.oid = t.typnamespace
+       WHERE n.nspname = current_schema() ORDER BY t.typname, e.enumsortorder`,
+    );
+    const types = new Map<string, string[]>();
+    for (const r of rows) {
+      const name = String(r['name']);
+      types.set(name, [...(types.get(name) ?? []), String(r['value'])]);
+    }
+    return types;
   }
 
   override readonly nullSafeEquals = 'IS NOT DISTINCT FROM';
