@@ -105,8 +105,6 @@ export interface Guards {
   readonly reversePageAfter: number | undefined;
   /** db.readonly() 之后：写入、DDL、sql.execute 直接报错 */
   readonly readonly: boolean;
-  /** toList() 导航默认的取法（createDb 的 listStrategy） */
-  readonly listStrategy: 'queries' | 'json';
 }
 
 /** 写入前检查：只读的 Db 上报错（类型上已经没有写方法，这里兜住从 JS 调用、断言掉类型的情况） */

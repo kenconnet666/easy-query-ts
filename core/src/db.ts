@@ -131,11 +131,6 @@ export interface DbOptions<S extends AnySchema> {
    * 写入前后的回查）、事务里的一切、introspect 走主库。刚写完马上要读到时用 `db.usePrimary()`
    */
   readonly replicas?: readonly Adapter[];
-  /**
-   * toList() 导航默认的取法：'queries'（默认，父查询之后每个导航再发一条 IN 查询，各库都行）或
-   * 'json'（孩子在库里聚合成 JSON 放进父查询，整棵对象树一条语句；PG、MySQL 8.0.14+）。单条查询用 q.listStrategy(…) 改
-   */
-  readonly listStrategy?: 'queries' | 'json';
 }
 
 export class Db<S extends AnySchema> {
@@ -997,7 +992,6 @@ export function createDb<S extends AnySchema, C extends Capability = Capability>
       maxRows: options.maxRows,
       reversePageAfter: options.reversePageAfter,
       readonly: false,
-      listStrategy: options.listStrategy ?? 'queries',
     },
     // 列修饰器驱动的内置规则在前，用户的拦截器在后
     interceptors: new Interceptors([...columnRules(), ...(options.interceptors ?? [])]),

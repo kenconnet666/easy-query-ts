@@ -31,27 +31,18 @@ for (const url of urls) {
     await pool.end();
   });
 
-  const open = async (listStrategy: 'queries' | 'json' = 'queries'): Promise<TestEnv> => {
+  const open = async (): Promise<TestEnv> => {
     for (const statement of DDL) await pool.query(statement);
     const statements: Statement[] = [];
     const adapter = postgres(pool);
     return {
-      db: createDb({ schema, adapter, listStrategy, log: (s) => statements.push(s) }),
+      db: createDb({ schema, adapter, log: (s) => statements.push(s) }),
       statements,
       adapter,
     };
   };
 
-  liveSuite(`postgres ${new URL(url).port}`, () => open(), {
-    extensionTypes: true,
-    extraTables: true,
-  });
-  // toList() 一条语句的写法：同一套用例，结果要与两步写法一致
-  liveSuite(`postgres ${new URL(url).port} json lists`, () => open('json'), {
-    extensionTypes: true,
-    extraTables: true,
-    listStrategy: 'json',
-  });
+  liveSuite(`postgres ${new URL(url).port}`, open, { extensionTypes: true, extraTables: true });
   arraySuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
   enumSuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
 

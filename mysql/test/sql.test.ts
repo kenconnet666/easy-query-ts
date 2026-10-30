@@ -77,39 +77,6 @@ describe('mysql: SQL text', () => {
   });
 });
 
-describe('mysql: toList() in one statement', () => {
-  it('aggregates the children with JSON_ARRAYAGG, binary columns as hex; needs 8.0.14', () => {
-    const db = createDb({ schema, adapter: mysql({} as Pool) });
-    assert.equal(
-      db
-        .queryable(User)
-        .where((u) => u.id.eq(1))
-        .select((u) => ({
-          name: u.name,
-          posts: u.posts
-            .orderBy((p) => p.id.desc())
-            .limit(2)
-            .toList((p) => ({ title: p.title, amount: p.amount })),
-        }))
-        .listStrategy('json')
-        .toSQL().sql,
-      "SELECT t0.`name` AS `c0`, (SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT('c0', eq_l.`c0`, 'c1', eq_l.`c1`, 'eq_ord', eq_l.`eq_ord`)), JSON_ARRAY())" +
-        ' FROM (SELECT CAST(t1.`title` AS CHAR) AS `c0`, CAST(t1.`amount` AS CHAR) AS `c1`, ROW_NUMBER() OVER (ORDER BY t1.`id` DESC) AS `eq_ord`' +
-        ' FROM `t_post` t1 WHERE t1.`user_id` = t0.`id` ORDER BY t1.`id` DESC LIMIT 2) eq_l) AS `c1` FROM `t_user` t0 WHERE t0.`id` = ?',
-    );
-    const old = createDb({ schema, adapter: mysql({} as Pool, { version: '8.0.13' }) });
-    assert.throws(
-      () =>
-        old
-          .queryable(User)
-          .select((u) => ({ posts: u.posts.toList() }))
-          .listStrategy('json')
-          .toSQL(),
-      /8\.0\.14/,
-    );
-  });
-});
-
 describe('mysql: code-first DDL', () => {
   const db = createDb({ schema, adapter: mysql({ query: async () => [[]] } as unknown as Pool) });
 

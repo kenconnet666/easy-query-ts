@@ -162,24 +162,6 @@ export class MySqlDialect extends Dialect {
   }
 
   /** GROUP_CONCAT([DISTINCT] e ORDER BY … SEPARATOR '…') */
-  /**
-   * JSON_ARRAYAGG 不保证顺序：每一项带着 eq_ord，读出后按它排。派生表引用外层的列要 8.0.14+
-   */
-  protected override jsonList(q: SelectNode, w: SqlWriter): string {
-    this.requires("toList() in one statement (listStrategy('json'))", '8.0.14');
-    const pairs = q.columns.map((c) => `${sqlString(c.as)}, eq_l.${this.quote(c.as)}`).join(', ');
-    return `(SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(${pairs})), JSON_ARRAY()) FROM (${this.select(q, w)}) eq_l)`;
-  }
-
-  /** 二进制（含 BINARY(16) 的 uuid）写成十六进制，布尔、JSON 原样，别的转成文字 */
-  protected override jsonText(e: Node, kind: string | undefined, w: SqlWriter): string {
-    const sql = this.node(e, w);
-    if (kind === 'bytes' || kind === 'uuid') return `HEX(${sql})`;
-    return kind === undefined || kind === 'boolean' || kind === 'json'
-      ? sql
-      : `CAST(${sql} AS CHAR)`;
-  }
-
   protected override stringAgg(n: Extract<Node, { k: 'string_agg' }>, w: SqlWriter): string {
     return `GROUP_CONCAT(${n.distinct ? 'DISTINCT ' : ''}${this.node(n.e, w)}${this.aggOrder(n.order, w)} SEPARATOR ${sqlString(n.separator)})`;
   }

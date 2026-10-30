@@ -2,23 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { col, entity } from '@zerodep-dev/easy-query-ts';
-import { User } from '../src/fixture.ts';
 import { memoryDb } from '../src/sqlite-env.ts';
-
-describe("listStrategy('json')", () => {
-  it('没有 JSON 聚合写法的方言渲染时报不支持', async () => {
-    const { db } = await memoryDb();
-    assert.throws(
-      () =>
-        db
-          .queryable(User)
-          .select((u) => ({ posts: u.posts.toList() }))
-          .listStrategy('json')
-          .toSQL(),
-      /not supported by the sqlite dialect/,
-    );
-  });
-});
 
 describe('col.array', () => {
   it('解码数组字面量：引号、反斜杠、逗号、NULL 与 "NULL" 文字', () => {

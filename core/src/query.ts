@@ -112,15 +112,7 @@ interface State {
   readonly hint?: string;
   /** 排序全部反过来（深分页倒序取） */
   readonly reverse?: boolean;
-  /** toList() 导航怎么取；没给时用 createDb 的 listStrategy */
-  readonly lists?: ListStrategy;
 }
-
-/**
- * toList() 导航怎么取：'queries' 是父查询读完后每个导航再发一条 IN 查询（各库都行）；
- * 'json' 是孩子在库里聚合成 JSON 数组放进父查询的一列，整棵对象树一条语句（PG、MySQL 8.0.14+）
- */
-export type ListStrategy = 'queries' | 'json';
 
 /**
  * join 之后没写 select 时的结果类型：第一次 join 把主表的整行包成 `{ 主表: Row }`，之后每次加一张表。
@@ -355,14 +347,6 @@ abstract class Executable<Out> implements Subquery<Out> {
   offset(n: number): this {
     return this.with({ offset: n });
   }
-  /**
-   * toList() 导航的取法，见 ListStrategy：'json' 时整棵对象树一条语句，往返少、预编译查询也能带导航；
-   * 结果与 'queries' 一样（顺序、limit、拦截器、列的解码都一致）
-   */
-  listStrategy(strategy: ListStrategy): this {
-    return this.with({ lists: strategy });
-  }
-
   distinct(): this {
     return this.with({ distinct: true });
   }
@@ -376,7 +360,7 @@ abstract class Executable<Out> implements Subquery<Out> {
     const built = build(this.ctx, this.state);
     if (built.shape.lists.length > 0 || built.shape.fills.length > 0)
       throw new Error(
-        "stream() cannot be combined with fills or toList() navigations that run more queries; use listStrategy('json') or toList()",
+        'stream() cannot be combined with toList() navigations or fills; use toList() to build object trees',
       );
     for await (const batch of streamRows(
       this.ctx,
@@ -1306,7 +1290,7 @@ function build(ctx: Context, state: State, bare = false): Built {
   // 所有 lambda 按"主表、第一个 join 的表、……"的顺序收到这些表引用
   const { refs, filters } = joinTables(ctx, scope, root, state.joins);
   const where = [...conds(state.where.map((f) => f(...refs))), ...filters];
-  const shape = new ShapeCompiler(ctx, state.lists ?? ctx.guards.listStrategy);
+  const shape = new ShapeCompiler(ctx);
   let groupBy: Node[] = [];
   let having: Node[] = [];
   let orderBy: OrderNode[] = state.orderBy.flatMap((o) => orderNodes(o(...refs)));
@@ -1631,10 +1615,6 @@ class ShapeCompiler {
   readonly fills: PendingFill[] = [];
   /** first() 的数组在第二条查询填完后换成第一项或 null */
   readonly fixups: (() => void)[] = [];
-  /** listStrategy('json') 下孩子的形状：它们的 fill、first() 也要在读完之后补 */
-  readonly nested: ShapeCompiler[] = [];
-  /** 各列的种类（列的 codec.kind）：json 写法下按它把列转成文字再进 JSON */
-  readonly kinds = new Map<string, string | undefined>();
   read: Reader = () => undefined;
   /** 顶层 select 形状里"列名 → 输出别名与解码"，派生表（子查询 / CTE / union）靠它给外层查询提供列 */
   readonly named = new Map<
@@ -1645,11 +1625,9 @@ class ShapeCompiler {
   flat = true;
   private root: unknown;
   private readonly ctx: Context;
-  private readonly strategy: ListStrategy;
 
-  constructor(ctx: Context, strategy: ListStrategy = 'queries') {
+  constructor(ctx: Context) {
     this.ctx = ctx;
-    this.strategy = strategy;
   }
 
   compile(shape: unknown): void {
@@ -1660,10 +1638,9 @@ class ShapeCompiler {
   }
 
   /** 不出现在结果里、只给拼装用的列 */
-  hidden(e: Node, kind?: string): string {
+  hidden(e: Node): string {
     const as = `k${this.columns.length}`;
     this.columns.push({ e, as });
-    this.kinds.set(as, kind);
     return as;
   }
 
@@ -1703,34 +1680,7 @@ class ShapeCompiler {
   private expr(e: Expr<unknown>): Reader {
     const as = `c${this.columns.length}`;
     this.columns.push({ e: e.node, as });
-    this.kinds.set(as, e.codec?.kind);
     return decoder(as, e.codec);
-  }
-
-  /** listStrategy('json')：孩子在库里聚合成这一列的 JSON 数组，每一项按孩子的形状读；顺序按库里编的 eq_ord */
-  private jsonList(list: ListOf<unknown, boolean>): Reader {
-    const child = new ShapeCompiler(this.ctx, 'json');
-    this.nested.push(child);
-    const q = list.many.listSelect((root) => {
-      child.compile(list.shape ? list.shape(root) : root);
-      // 普通的列先转成文字再进 JSON（由列的 codec 解码）；孙子的 JSON 数组原样嵌进去
-      return child.columns.map(({ e, as }) =>
-        child.kinds.has(as)
-          ? { e: { k: 'json_text', e, kind: child.kinds.get(as) }, as }
-          : { e, as },
-      );
-    });
-    const as = `c${this.columns.length}`;
-    this.columns.push({ e: { k: 'json_list', q }, as });
-    return (row) => {
-      const raw = row[as];
-      const items = (
-        raw === null || raw === undefined ? [] : typeof raw === 'string' ? JSON.parse(raw) : raw
-      ) as Record<string, unknown>[];
-      return items
-        .toSorted((a, b) => Number(a['eq_ord']) - Number(b['eq_ord']))
-        .map((item) => child.read(item));
-    };
   }
 
   /** 导航到的整行；可空导航在主键（无主键时所有列）都为 NULL 时整体为 null */
@@ -1758,7 +1708,7 @@ class ShapeCompiler {
   }
 
   private fill(fill: Fill<unknown, boolean>): Reader {
-    const as = this.hidden(fill.from.node, fill.from.codec?.kind);
+    const as = this.hidden(fill.from.node);
     const pending: PendingFill = { fill, slots: new Map() };
     this.fills.push(pending);
     return (row) => {
@@ -1777,7 +1727,6 @@ class ShapeCompiler {
   }
 
   private list(list: ListOf<unknown, boolean>): Reader {
-    if (this.strategy === 'json') return this.jsonList(list);
     // 父行上关联键的每一列都要带出来（复合外键有多列）
     const keyAs = list.many.relation.from.map((c) =>
       this.hidden(columnNode(list.many.scope, list.many.parent[REF], c)),
@@ -1824,7 +1773,7 @@ function decoder(as: string, codec: Codec<any> | undefined): Reader {
  * const byName = db.prepare((p: { name: string }) => db.queryable(User).where((u) => u.name.eq(p.name)).select((u) => u.id))
  * await byName.toList({ name: 'alice' })
  * ```
- * 占位值只能当标量用（条件、set 里的值），不能参与构建时的判断或展开成 in 列表；带 fill 的查询不能预编译；toList 导航要用 listStrategy('json')（整棵树一条语句）
+ * 占位值只能当标量用（条件、set 里的值），不能参与构建时的判断或展开成 in 列表；要带出 toList 导航、fill 的查询不能预编译
  */
 export class PreparedQuery<P, Out> {
   /** 渲染好的 SQL */
@@ -1837,7 +1786,7 @@ export class PreparedQuery<P, Out> {
     const built = build(ctx, state);
     if (built.shape.lists.length > 0 || built.shape.fills.length > 0)
       throw new Error(
-        "prepare() cannot be used with fills or toList() navigations that run more queries; use listStrategy('json') for toList()",
+        'prepare() cannot be used with toList() navigations or fills (they run more queries)',
       );
     const statement = render(ctx, built.select);
     this.ctx = ctx;
@@ -1903,7 +1852,6 @@ async function complete(ctx: Context, shape: ShapeCompiler): Promise<void> {
         for (const array of slots.get(slotId([key]))?.arrays ?? []) array.push(row);
     }
   }
-  for (const child of shape.nested) await complete(ctx, child);
   shape.fixups.forEach((f) => f());
 }
 
