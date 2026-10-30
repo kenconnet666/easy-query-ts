@@ -30,7 +30,8 @@ export type {
   UpdateOf,
   ValueOf,
 } from './schema.ts';
-export { defineComputed, defineSchema } from './relations.ts';
+export { defineComputed, defineSchema, mergeSchemas } from './relations.ts';
+export type { MergedEntities, MergedSchema } from './relations.ts';
 export { assembleTables, bareName } from './ddl.ts';
 export { byDay, byMod, byMonth, byTime, byYear } from './sharding.ts';
 export { shardDatabases, ShardedDb, ShardedQuery } from './shards.ts';

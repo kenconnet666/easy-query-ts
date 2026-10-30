@@ -270,37 +270,168 @@ type ResolvedRelations<E extends Record<string, Entity>, R> = {
   [K in keyof E]: K extends keyof R ? R[K] : {};
 };
 
+/** 运行时看到的关系定义（类型已在调用处检查过） */
+type AnyRelationDefs = Record<string, ((r: never) => Record<string, Relation>) | undefined>;
+
+/** 每个实体的关系定义：拿到本实体专用的 RelationBuilder，返回导航；关系类型从返回值反推 */
+export type RelationDefs<E extends Record<string, Entity>, R> = {
+  [S in keyof R]: (r: RelationBuilder<E, S & keyof E>) => R[S];
+};
+
 /**
  * 汇总实体与关系。relations 的每个函数拿到本实体专用的 RelationBuilder；关系类型从返回值反推（反向映射类型推导），不用手写。
+ * 按模块各写一份、再合成一份见 mergeSchemas。
  */
 export function defineSchema<
   const E extends Record<string, Entity>,
   R extends { [S in keyof E]?: Record<string, Relation> } = {},
+>(entities: E, relations?: RelationDefs<E, R>): Schema<E, ResolvedRelations<E, R>> {
+  return {
+    entities,
+    relations: attachRelations(entities, {}, relations as AnyRelationDefs | undefined) as never,
+  };
+}
+
+/** 交叉类型摊平成一个对象类型（编辑器里悬停时看到的是合并后的样子） */
+type Flatten<T> = { [K in keyof T]: T[K] } & {};
+
+/** 几组 schema 的实体合在一起 */
+export type MergedEntities<L extends readonly AnySchema[]> = Extract<
+  Flatten<EntitiesOf<L>>,
+  Record<string, Entity>
+>;
+
+type EntitiesOf<L extends readonly AnySchema[]> = L extends readonly [
+  infer H extends AnySchema,
+  ...infer T extends readonly AnySchema[],
+]
+  ? H['entities'] & EntitiesOf<T>
+  : {};
+
+export type MergedRelations<L extends readonly AnySchema[]> = L extends readonly [
+  infer H extends AnySchema,
+  ...infer T extends readonly AnySchema[],
+]
+  ? H['relations'] & MergedRelations<T>
+  : {};
+
+/** 在不止一组里出现的实体键 */
+type DuplicateKeys<
+  L extends readonly AnySchema[],
+  Seen extends string = never,
+> = L extends readonly [infer H extends AnySchema, ...infer T extends readonly AnySchema[]]
+  ? (EntityKey<H> & Seen) | DuplicateKeys<T, Seen | EntityKey<H>>
+  : never;
+
+/** 实体键重名时参数的类型多出一个必填属性：调用处报错，错误信息里列出重名的键 */
+export type DistinctEntities<L extends readonly AnySchema[]> = [DuplicateKeys<L>] extends [never]
+  ? unknown
+  : { readonly 'error: these entity keys appear in more than one schema': DuplicateKeys<L> };
+
+/** 跨组关系的导航名与已有的导航、列重名：写成 '实体.导航' */
+type NavigationClash<E extends Record<string, Entity>, Base, R> = {
+  [S in keyof R & keyof E & string]: `${S}.${keyof R[S] &
+    (keyof (S extends keyof Base ? Base[S] : {}) | keyof E[S]['fields']) &
+    string}`;
+}[keyof R & keyof E & string];
+
+export type DistinctNavigations<E extends Record<string, Entity>, Base, R> = [
+  NavigationClash<E, Base, R>,
+] extends [never]
+  ? unknown
+  : { readonly 'error: these navigations already exist': NavigationClash<E, Base, R> };
+
+/** 合并后的 schema：各组的实体与关系，加上跨组关系 R */
+export type MergedSchema<L extends readonly AnySchema[], R = {}> = Schema<
+  MergedEntities<L>,
+  Extract<
+    {
+      [K in keyof MergedEntities<L>]: Flatten<
+        (K extends keyof MergedRelations<L> ? MergedRelations<L>[K] : {}) &
+          (K extends keyof R ? R[K] : {})
+      >;
+    },
+    Record<string, Record<string, Member>>
+  >
+>;
+
+/**
+ * 把按模块各写的几份 schema 合成一份，再交给 createDb；跨模块的关系写在第二个参数里，构造器能看到所有组的实体：
+ * ```ts
+ * const schema = mergeSchemas([crm, shop], {
+ *   Order: (r) => ({ customer: r.one('Customer', { from: 'customerId', to: 'id' }) }),
+ *   Customer: (r) => ({ orders: r.many('Order', { from: 'id', to: 'customerId' }) }),
+ * })
+ * ```
+ * 类型全部推出：实体键在几组里重名、新导航与已有的导航或列重名，在调用处就报错；直达关系可以经过别的组的导航。
+ * 已有的 Db 上再挂一组见 Db.mount。
+ */
+export function mergeSchemas<
+  const L extends readonly AnySchema[],
+  R extends { [S in keyof MergedEntities<L>]?: Record<string, Relation> } = {},
 >(
-  entities: E,
-  relations?: { [S in keyof R]: (r: RelationBuilder<E, S & keyof E>) => R[S] },
-): Schema<E, ResolvedRelations<E, R>> {
-  const defined: Record<string, Record<string, Relation>> = {};
-  for (const key of Object.keys(entities)) {
-    const define = (
-      relations as
-        | Record<string, ((r: RelationBuilder<E, string>) => Record<string, Relation>) | undefined>
-        | undefined
-    )?.[key];
-    defined[key] = define ? define(builderFor(entities, key)) : {};
-  }
-  // 直达关系要引用别的实体的导航：全部定义完再按名字找
-  const resolved: Record<string, Record<string, Relation>> = {};
-  for (const [key, own] of Object.entries(defined)) {
-    const relationsOfKey: Record<string, Relation> = {};
-    for (const [name, rel] of Object.entries(own)) {
-      const relation = rel.path ? resolvePath(defined, key, name, rel) : rel;
-      check(entities, key, name, relation);
-      relationsOfKey[name] = relation;
+  schemas: L & DistinctEntities<L>,
+  relations?: RelationDefs<MergedEntities<L>, R> &
+    DistinctNavigations<MergedEntities<L>, MergedRelations<L>, R>,
+): MergedSchema<L, R> {
+  const entities: Record<string, Entity> = {};
+  const members: Record<string, Record<string, Member>> = {};
+  const owners = new Map<Entity, string>();
+  for (const schema of schemas as readonly AnySchema[]) {
+    for (const [key, entity] of Object.entries(schema.entities)) {
+      if (key in entities)
+        throw new Error(`mergeSchemas: entity '${key}' appears in more than one schema`);
+      const other = owners.get(entity);
+      if (other !== undefined)
+        throw new Error(
+          `mergeSchemas: the same entity object is registered as both '${other}' and '${key}'`,
+        );
+      owners.set(entity, key);
+      entities[key] = entity;
+      members[key] = schema.relations[key] ?? {};
     }
-    resolved[key] = relationsOfKey;
   }
-  return { entities, relations: resolved as ResolvedRelations<E, R> };
+  return {
+    entities,
+    relations: attachRelations(entities, members, relations as AnyRelationDefs | undefined),
+  } as never;
+}
+
+/**
+ * 给实体加一批关系：先全部定义，再解析直达关系（可以经过 base 里已有的导航）、核对列；base 是已有的成员，新导航不能与它们重名
+ */
+function attachRelations(
+  entities: Record<string, Entity>,
+  base: Record<string, Record<string, Member>>,
+  defs: AnyRelationDefs | undefined,
+): Record<string, Record<string, Member>> {
+  const defined: Record<string, Record<string, Relation>> = {};
+  for (const [key, define] of Object.entries(
+    (defs ?? {}) as Record<
+      string,
+      ((r: RelationBuilder<Record<string, Entity>, string>) => Record<string, Relation>) | undefined
+    >,
+  )) {
+    if (!define) continue;
+    if (!(key in entities)) throw new Error(`relations for unknown entity '${key}'`);
+    defined[key] = define(builderFor(entities, key));
+  }
+  // 直达关系要引用别的实体（别的组）的导航：全部定义完再按名字找
+  const lookup: Record<string, Record<string, Relation>> = {};
+  for (const key of Object.keys(entities))
+    lookup[key] = { ...(base[key] as Record<string, Relation> | undefined), ...defined[key] };
+  const result: Record<string, Record<string, Member>> = {};
+  for (const key of Object.keys(entities)) result[key] = { ...base[key] };
+  for (const [key, own] of Object.entries(defined)) {
+    for (const [name, rel] of Object.entries(own)) {
+      if (base[key] && name in base[key])
+        throw new Error(`relation ${key}.${name}: ${key} already has a navigation named '${name}'`);
+      const relation = rel.path ? resolvePath(lookup, key, name, rel) : rel;
+      check(entities, key, name, relation);
+      result[key]![name] = relation;
+    }
+  }
+  return result;
 }
 
 /** 直达关系：按导航名一段段走到终点，核对终点与种类，补上 from / to 与各段 */

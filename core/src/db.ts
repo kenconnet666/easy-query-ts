@@ -23,7 +23,19 @@ import {
   type Query,
   type Queryable,
 } from './query.ts';
-import type { AnySchema, EntityKey, Schema } from './relations.ts';
+import {
+  mergeSchemas,
+  type AnySchema,
+  type DistinctEntities,
+  type DistinctNavigations,
+  type EntityKey,
+  type MergedEntities,
+  type MergedRelations,
+  type MergedSchema,
+  type Relation,
+  type RelationDefs,
+  type Schema,
+} from './relations.ts';
 import type { Expr } from './expr.ts';
 import type { Ref } from './ref.ts';
 import type { DerivedEntity, Entity, Row } from './schema.ts';
@@ -512,6 +524,32 @@ export class Db<S extends AnySchema> {
     const keys = new Map(this.keys);
     keys.set(entity, entity.name);
     return new Db({ ...this.ctx, schema }, this.adapter, keys, this.inTransaction);
+  }
+
+  /**
+   * 在这个 Db 上再挂一组 schema（插件、按需加载的模块）：返回同时认识两组实体的 Db，连接、拦截器、取消信号与事务都共用——
+   * 在事务里的 tx 上 mount，挂上的实体也在同一个事务里。跨组的关系写在第二个参数里，与 mergeSchemas 的写法一样：
+   * ```ts
+   * const sdb = db.mount(shop, { Order: (r) => ({ customer: r.one('Customer', { from: 'customerId', to: 'id' }) }) })
+   * await sdb.queryable(Order).where((o) => o.customer.name.eq('acme')).toList()
+   * ```
+   * 实体键与已挂的重名、新导航与已有的重名，在调用处就报错
+   */
+  mount<
+    T extends AnySchema,
+    R extends { [K in keyof MergedEntities<[S, T]>]?: Record<string, Relation> } = {},
+  >(
+    schema: T & DistinctEntities<[S, T]>,
+    relations?: RelationDefs<MergedEntities<[S, T]>, R> &
+      DistinctNavigations<MergedEntities<[S, T]>, MergedRelations<[S, T]>, R>,
+  ): Db<MergedSchema<[S, T], R>> {
+    const merged = (
+      mergeSchemas as (schemas: readonly AnySchema[], relations?: unknown) => AnySchema
+    )([this.ctx.schema, schema], relations);
+    const keys = new Map(this.keys);
+    for (const [key, entity] of Object.entries((schema as AnySchema).entities))
+      keys.set(entity, key);
+    return new Db({ ...this.ctx, schema: merged }, this.adapter, keys, this.inTransaction) as never;
   }
 
   /**
