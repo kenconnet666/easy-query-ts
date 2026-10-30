@@ -60,14 +60,25 @@ const cache = createCache({
 
 ## 失效通知
 
-`onEvict(keys)` 在失效之后收到删掉的键：写入时在事务提交后的那次删除之后（回滚不通知），`evict` 时在删除之后。多实例各用进程内缓存时，经 PG 的 NOTIFY 转给别的实例；也可以推给浏览器，让前端缓存跟着失效：
+`onEvict({ keys, tables })` 在失效之后收到删掉的键与改了的表：写入时在事务提交后的那次删除之后（回滚不通知），`evict` 时在删除之后。多实例各用进程内缓存时，经 PG 的 NOTIFY 转给别的实例：
 
 ```ts
 const cache = createCache({
   entities: [User],
-  onEvict: (keys) => db.notify('cache_evict', JSON.stringify(keys)),
+  onEvict: (event) => db.notify('cache_evict', JSON.stringify(event)),
 });
-await listen(pool, 'cache_evict', (payload) => store.delete(JSON.parse(payload))); // 每个实例
+await listen(pool, 'cache_evict', (payload) => store.delete(JSON.parse(payload).keys)); // 每个实例
+```
+
+`onEvict` 只管缓存了的实体。前端缓存依赖的表不一定在后端缓存里：`tableChanges(onChange)` 是单独的拦截器，经本库的每次写入在提交之后报出表名（回滚不报），交给 kit 的失效推送，前端缓存按表名标签失效：
+
+```ts
+const hub = createInvalidationHub(); // @zerodep-dev/vue-tsx-pro-kit/server
+const db = createDb({
+  schema,
+  adapter,
+  interceptors: [cache.interceptor, tableChanges((tables) => hub.publish(tables))],
+});
 ```
 
 ## 与官方的差异
@@ -76,4 +87,4 @@ await listen(pool, 'cache_evict', (payload) => store.delete(JSON.parse(payload))
 - 官方的多级缓存（Redis + Caffeine）可以写一个先查进程内、再查 Redis 的 `CacheStore` 组合实现。
 - kv 只支持单列主键（与官方相同）。
 
-SQLite 上测试（`cache.test.ts`）：命中、表达式更新与删除失效、只给缓存的实体多读、提交后再删、条件字段、findMany、all 分页与插入失效、过期、onEvict、以前端存储包的 cacheStore 为存储。
+SQLite 上测试（`cache.test.ts`）：命中、表达式更新与删除失效、只给缓存的实体多读、提交后再删、条件字段、findMany、all 分页与插入失效、过期、onEvict、tableChanges、以前端存储包的 cacheStore 为存储。

@@ -2,7 +2,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { createDb } from '@zerodep-dev/easy-query-ts';
-import { createCache, memoryStore, type CacheOptions } from '@zerodep-dev/easy-query-ts-cache';
+import {
+  createCache,
+  memoryStore,
+  tableChanges,
+  type CacheOptions,
+  type EvictEvent,
+} from '@zerodep-dev/easy-query-ts-cache';
 import { cacheStore, memoryDriver } from '@zerodep-dev/storage';
 import { Company, Post, schema, seed, User } from '../src/fixture.ts';
 import { memoryDb } from '../src/sqlite-env.ts';
@@ -140,9 +146,9 @@ describe('cache: kv and all modes', () => {
     assert.throws(() => cached.kv(Post), /list t_post in createCache/);
   });
 
-  it('onEvict 收到删掉的键：事务里的写入等提交之后，evict 在删除之后', async () => {
-    const evicted: (readonly string[])[] = [];
-    const { db, cache } = await setup(undefined, { onEvict: (keys) => evicted.push(keys) });
+  it('onEvict 收到删掉的键与改了的表：事务里的写入等提交之后，evict 在删除之后', async () => {
+    const evicted: EvictEvent[] = [];
+    const { db, cache } = await setup(undefined, { onEvict: (event) => evicted.push(event) });
     await db.transaction(async (tx) => {
       await tx
         .update(User)
@@ -151,9 +157,14 @@ describe('cache: kv and all modes', () => {
         .execute();
       assert.equal(evicted.length, 0);
     });
-    assert.deepEqual(evicted, [['CACHE:t_user:all', 'CACHE:t_user:1']]);
+    assert.deepEqual(evicted, [
+      { keys: ['CACHE:t_user:all', 'CACHE:t_user:1'], tables: ['t_user'] },
+    ]);
     await cache.evict(Company, [3]);
-    assert.deepEqual(evicted[1], ['CACHE:t_company:all', 'CACHE:t_company:3']);
+    assert.deepEqual(evicted[1], {
+      keys: ['CACHE:t_company:all', 'CACHE:t_company:3'],
+      tables: ['t_company'],
+    });
   });
 
   it('前端存储包的 cacheStore 当存储：驱动换成 IndexedDB 等用法不变', async () => {
@@ -168,5 +179,39 @@ describe('cache: kv and all modes', () => {
       .execute();
     assert.equal((await cached.kv(User).find(1))!.name, 'alice3');
     assert.equal(reads(), 3);
+  });
+
+  it('tableChanges：每次写入在提交之后报出表名，回滚的不报，不限于缓存的实体', async () => {
+    const env = await seed(await memoryDb());
+    const changed: (readonly string[])[] = [];
+    const db = createDb({
+      schema,
+      adapter: env.adapter,
+      interceptors: [tableChanges((tables) => changed.push(tables))],
+    });
+    await db
+      .update(Post)
+      .set({ title: 'x' })
+      .where((p) => p.id.eq(1))
+      .execute();
+    await assert.rejects(
+      db.transaction(async (tx) => {
+        await tx
+          .delete(User)
+          .where((u) => u.id.eq(2))
+          .execute();
+        throw new Error('rollback');
+      }),
+      /rollback/,
+    );
+    await db.transaction(async (tx) => {
+      await tx
+        .update(User)
+        .set({ name: 'z' })
+        .where((u) => u.id.eq(1))
+        .execute();
+      assert.equal(changed.length, 1);
+    });
+    assert.deepEqual(changed, [['t_post'], ['t_user']]);
   });
 });

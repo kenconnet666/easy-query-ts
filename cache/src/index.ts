@@ -15,7 +15,8 @@
  *   所以表达式更新也知道该删哪些键——官方要自己实现 CacheKeysProvider 按更新时间回查
  * - 写入时删一次，事务提交后再删一次（事务里别的请求可能把旧值读回缓存）；回滚了第二次也不删，第一次删掉的只是少命中一次
  * - 绕过本库的写入（直接改库、别的服务）不会失效，靠过期时间兜底，或接 CDC 调用 evict
- * - onEvict 在失效之后收到删掉的键：多实例各用进程内缓存时经 PG 的 NOTIFY 转给别的实例，或推给浏览器
+ * - onEvict 在失效之后收到删掉的键与改了的表：多实例各用进程内缓存时经 PG 的 NOTIFY 转给别的实例；
+ *   表名交给 kit 的失效推送送到浏览器，前端缓存（@zerodep-dev/storage）按表名标签失效
  *   （前端存储包 @zerodep-dev/storage 的 cacheStore 能把 IndexedDB 等驱动变成这里的 CacheStore）
  * 读写拦截器（租户等）照常生效，它们加的条件是缓存字段的一部分：不同租户各缓存各的。
  */
@@ -38,6 +39,8 @@ declare module '@zerodep-dev/easy-query-ts' {
   interface InterceptorNames {
     /** 二级缓存的失效（easy-query-ts-cache） */
     cache: true;
+    /** 表的变更通知（easy-query-ts-cache 的 tableChanges） */
+    tableChanges: true;
   }
 }
 
@@ -77,6 +80,12 @@ export function memoryStore(now: () => number = Date.now): CacheStore {
   };
 }
 
+/** onEvict 收到的：删掉的缓存键，与改了的表（前端缓存的标签） */
+export interface EvictEvent {
+  readonly keys: readonly string[];
+  readonly tables: readonly string[];
+}
+
 export interface CacheOptions {
   /** 要缓存的实体：写入它们时失效（只有列在这里的实体能用 kv / all） */
   readonly entities: readonly Entity[];
@@ -90,9 +99,10 @@ export interface CacheOptions {
   readonly keyPrefix?: string;
   /**
    * 失效之后通知删掉的键（写入时在提交后的那次删除之后，evict 时在删除之后）：
-   * `onEvict: (keys) => db.notify('cache_evict', JSON.stringify(keys))`，别的实例 listen 到后从自己的存储里删
+   * `onEvict: ({ keys, tables }) => db.notify('cache_evict', JSON.stringify({ keys, tables }))`，别的实例 listen 到后从自己的存储里删、
+   * 把 tables 推给浏览器（kit 的 createInvalidationHub().publish(tables)）
    */
-  readonly onEvict?: (keys: readonly string[]) => unknown;
+  readonly onEvict?: (event: EvictEvent) => unknown;
 }
 
 /** 键的类型：单列主键的值 */
@@ -109,7 +119,7 @@ export class EasyCache {
   private readonly ttlMs: number;
   private readonly nullTtlMs: number;
   private readonly prefix: string;
-  private readonly onEvict: ((keys: readonly string[]) => unknown) | undefined;
+  private readonly onEvict: ((event: EvictEvent) => unknown) | undefined;
 
   constructor(options: CacheOptions) {
     this.store = options.store ?? memoryStore();
@@ -127,7 +137,7 @@ export class EasyCache {
         const keys = [this.allKey(event.entity), ...this.keysOf(event.entity, rows)];
         // 延迟双删：现在删一次，提交后再删一次
         await this.store.delete(keys);
-        event.afterCommit(() => this.remove(keys));
+        event.afterCommit(() => this.remove(keys, [event.entity.table]));
       },
     };
   }
@@ -139,13 +149,16 @@ export class EasyCache {
 
   /** 手动失效（CDC、别的服务改了库）：给主键删这几行，不给删这个实体的全部 kv 之外的 all 缓存 */
   async evict(entity: Entity, keys: readonly KeyValue[] = []): Promise<void> {
-    await this.remove([this.allKey(entity), ...keys.map((k) => this.kvKey(entity, k))]);
+    await this.remove(
+      [this.allKey(entity), ...keys.map((k) => this.kvKey(entity, k))],
+      [entity.table],
+    );
   }
 
   /** 删掉这些键并通知 onEvict */
-  private async remove(keys: readonly string[]): Promise<void> {
+  private async remove(keys: readonly string[], tables: readonly string[]): Promise<void> {
     await this.store.delete(keys);
-    await this.onEvict?.(keys);
+    await this.onEvict?.({ keys, tables });
   }
 
   /** @internal 缓存里的值：undefined 是没缓存，null 是缓存了"库里没有" */
@@ -190,6 +203,22 @@ export class EasyCache {
       .filter((v): v is KeyValue => v !== undefined && v !== null)
       .map((v) => this.kvKey(entity, v));
   }
+}
+
+/**
+ * 表的变更通知：经本库的每次写入（不只是缓存的实体）在提交之后报出表名，交给 kit 的失效推送，前端缓存按表名标签失效。
+ * 事务里的写入等提交（回滚不报）；一个事务里写几次报几次（kit 的推送把同一轮里的合成一条）。
+ *
+ *   const hub = createInvalidationHub();   // @zerodep-dev/vue-tsx-pro-kit/server
+ *   const db = createDb({ schema, adapter, interceptors: [tableChanges((tables) => hub.publish(tables))] });
+ *
+ * 多实例部署时每个实例只看得到自己的写入：onChange 里改发 db.notify，各实例 listen 到后各自 publish
+ */
+export function tableChanges(onChange: (tables: readonly string[]) => unknown): Interceptor {
+  return {
+    name: 'tableChanges',
+    afterWrite: (event) => event.afterCommit(() => onChange([event.entity.table])),
+  };
 }
 
 /** 建一个缓存；它的 interceptor 要放进 createDb */
