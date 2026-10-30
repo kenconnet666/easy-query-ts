@@ -42,7 +42,11 @@ for (const url of urls) {
     };
   };
 
-  liveSuite(`postgres ${new URL(url).port}`, open, { extensionTypes: true, extraTables: true });
+  liveSuite(`postgres ${new URL(url).port}`, open, {
+    extensionTypes: true,
+    extraTables: true,
+    jsonEdits: true,
+  });
   arraySuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
   enumSuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
 
@@ -93,6 +97,21 @@ for (const url of urls) {
           .where((u) => Pg.jsonb(u.attrs).hasKey('tags'))
           .count(),
         3,
+      );
+      // JSONPath：过滤表达式、谓词
+      assert.equal(
+        await db
+          .queryable(User)
+          .where((u) => Pg.jsonb(u.attrs).pathExists('$.tags[*] ? (@ == "vip")'))
+          .count(),
+        1,
+      );
+      assert.equal(
+        await db
+          .queryable(User)
+          .where((u) => Pg.jsonb(u.attrs).pathMatch('$.tags.size() == 0'))
+          .count(),
+        2,
       );
       const tags = sql<string[]>`ARRAY['a', 'b']`;
       assert.equal(

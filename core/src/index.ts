@@ -177,7 +177,13 @@ export type {
   FunctionRenderer,
   Statement,
 } from './dialect.ts';
-export { coalesceEach, dateFormatParts, jsonPathParts, standardJsonPath } from './dialect.ts';
+export {
+  coalesceEach,
+  dateFormatParts,
+  jsonPathParts,
+  pgJsonPath,
+  standardJsonPath,
+} from './dialect.ts';
 export type {
   Adapter,
   Driver,

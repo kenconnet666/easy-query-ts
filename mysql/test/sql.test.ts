@@ -77,6 +77,31 @@ describe('mysql: SQL text', () => {
   });
 });
 
+describe('mysql: JSON edits and jsonSome', () => {
+  const db = createDb({ schema, adapter: mysql({} as Pool) });
+  type Order = { items: { sku: string; qty: number }[] };
+  const JOrder = entity('t_jorder', { id: col.int().primaryKey(), body: col.json<Order>() });
+
+  it('renders JSON_SET with a JSON parameter and counts JSON_TABLE rows instead of EXISTS', () => {
+    const s = db
+      .update(JOrder)
+      .set((o) => ({ body: o.body.jsonSet(['items', 0, 'qty'], 2) }))
+      .where((o) =>
+        o.body.jsonSome(['items'], { sku: col.string(), qty: col.int() }, (it) => [
+          it.sku.eq('A1'),
+          it.qty.gt(2),
+        ]),
+      )
+      .toSQL();
+    assert.equal(
+      s.sql,
+      'UPDATE `t_jorder` AS t0 SET `body` = JSON_SET(t0.`body`, \'$."items"[0]."qty"\', CAST(? AS JSON))' +
+        ' WHERE ((SELECT COUNT(*) FROM JSON_TABLE(t0.`body`, \'$."items"[*]\' COLUMNS (`sku` VARCHAR(255) PATH \'$."sku"\', `qty` INT PATH \'$."qty"\')) eq_j' +
+        ' WHERE eq_j.`sku` = ? AND eq_j.`qty` > ?) > 0)',
+    );
+  });
+});
+
 describe('mysql: code-first DDL', () => {
   const db = createDb({ schema, adapter: mysql({ query: async () => [[]] } as unknown as Pool) });
 

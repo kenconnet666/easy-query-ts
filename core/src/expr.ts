@@ -3,7 +3,7 @@
  * 只适用于某些类型的方法用 `this` 参数限定（例如 like 只能在字符串上调用），用错在编译期报错。
  */
 import type { AggregateFn, BinaryOp, Node, OrderNode, SelectNode } from './ast.ts';
-import { col, type Codec, type DateText, type DecimalText } from './schema.ts';
+import { col, type Codec, type Column, type DateText, type DecimalText } from './schema.ts';
 import { Placeholder } from './placeholder.ts';
 
 export const codecs = {
@@ -600,6 +600,96 @@ export class Expr<T> {
     return new Expr(this.jsonNode('json_length', path), codecs.int);
   }
 
+  // ---- JSON 的更新写法（ROADMAP 19.4）：结果是改过的整个文档，写进 set：`set((u) => ({ attrs: u.attrs.jsonSet(['profile', 'name'], 'x') }))`
+  // PG、MySQL、SQLite 有；别的方言渲染时报不支持。文档是 NULL 时结果也是 NULL
+
+  /** 把路径处的值换成 value（路径上缺的最后一层会补上）：PG jsonb_set、MySQL / SQLite JSON_SET */
+  jsonSet<D extends object | null, P extends JsonPath<NonNullable<D>>>(
+    this: Expr<D>,
+    path: P,
+    value: JsonAt<NonNullable<D>, P>,
+  ): Expr<D> {
+    return jsonEdit(this, 'json_set', path, [jsonParam(value)]);
+  }
+
+  /** 删掉路径处的键或数组元素：PG `#-`、MySQL / SQLite JSON_REMOVE */
+  jsonRemove<D extends object | null, P extends JsonPath<NonNullable<D>>>(
+    this: Expr<D>,
+    ...path: P
+  ): Expr<D> {
+    if (path.length === 0) throw new TypeError('jsonRemove needs a path');
+    return jsonEdit(this, 'json_remove', path, []);
+  }
+
+  /** 浅合并：给出的顶层键整个换掉，别的键不动（PG `||`；MySQL、SQLite 逐键 JSON_SET） */
+  jsonMerge<D extends object | null>(this: Expr<D>, patch: Partial<NonNullable<D>>): Expr<D> {
+    const keys = Object.keys(patch);
+    if (keys.length === 0) throw new TypeError('jsonMerge needs at least one key');
+    const args = keys.flatMap((key): Node[] => [
+      { k: 'lit', sql: sqlString(JSON.stringify([key])) },
+      jsonParam((patch as Record<string, unknown>)[key]),
+    ]);
+    return new Expr(
+      { k: 'fn', name: 'json_merge', args: [this.node, jsonParam(patch), ...args] },
+      this.codec,
+    );
+  }
+
+  /** 往路径处的数组末尾加一项：PG jsonb_insert(…, true)、MySQL JSON_ARRAY_APPEND、SQLite json_insert(…[#]) */
+  jsonAppend<
+    D extends object | null,
+    P extends JsonLeafPath<NonNullable<D>, readonly unknown[]> | [],
+  >(
+    this: Expr<D>,
+    path: P,
+    value: JsonAt<NonNullable<D>, P> extends readonly (infer E)[] ? E : unknown,
+  ): Expr<D> {
+    return jsonEdit(this, 'json_append', path, [jsonParam(value)]);
+  }
+
+  /**
+   * JSON 数组里有满足条件的元素（ROADMAP 19.4）：数组在库里展开成行（PG jsonb_to_recordset、MySQL JSON_TABLE、SQLite json_each），
+   * columns 声明用到的元素字段与类型（只能是元素上有的键），条件里按列写：
+   * ```ts
+   * o.payload.jsonSome(['items'], { sku: col.string(), qty: col.int() }, (it) => [it.sku.eq('A1'), it.qty.gt(2)])
+   * ```
+   * 数组不在（NULL、路径不存在）时为假
+   */
+  jsonSome<
+    D extends object | null,
+    P extends JsonLeafPath<NonNullable<D>, readonly object[]> | [],
+    C extends Record<string, Column<any, boolean, boolean>>,
+  >(
+    this: Expr<D>,
+    path: P,
+    columns: C & Record<Exclude<keyof C, keyof JsonElement<NonNullable<D>, P>>, never>,
+    predicate: (item: JsonItem<C>) => Cond,
+  ): Pred {
+    for (const part of path)
+      if (typeof part === 'number' && (!Number.isSafeInteger(part) || part < 0))
+        throw new RangeError(`json array index must be a non-negative integer, got ${part}`);
+    const entries = Object.entries(columns as Record<string, Column<any, boolean, boolean>>);
+    if (entries.length === 0) throw new TypeError('jsonSome needs at least one column');
+    const item: Record<string, Expr<unknown>> = {};
+    for (const [name, column] of entries)
+      item[name] = new Expr(
+        { k: 'fn', name: 'json_field', args: [{ k: 'lit', sql: sqlString(name) }] },
+        column.codec,
+      );
+    const cond = condNode(predicate(item as JsonItem<C>)) ?? { k: 'lit', sql: '1 = 1' };
+    return pred({
+      k: 'json_some',
+      doc: this.node,
+      path: sqlString(JSON.stringify(path)),
+      columns: entries.map(([name, column]) => ({
+        name,
+        kind: column.codec.kind,
+        options: column.options,
+      })),
+      cond,
+    });
+  }
+
   /**
    * 类型转换（CAST）。decimal 要给精度与小数位：`x.cast('decimal', 12, 2)`。
    * 各库的类型名不同（MySQL 的整数是 SIGNED、字符串是 CHAR），由方言函数表翻译。
@@ -755,6 +845,29 @@ const DATE_UNITS: readonly DateUnit[] = [
 ];
 
 /** JSON 元素的解码：各库都按 JSON 文字返回（取元素时转成文字），解析成对象、数组或标量 */
+/** JSON 更新函数的节点：文档、路径字面量（各库翻成自己的路径写法）、其余参数；结果仍按这一列解码 */
+function jsonEdit<D>(
+  doc: Expr<D>,
+  name: string,
+  path: readonly (string | number)[],
+  rest: Node[],
+): Expr<D> {
+  for (const part of path)
+    if (typeof part === 'number' && (!Number.isSafeInteger(part) || part < 0))
+      throw new RangeError(`json array index must be a non-negative integer, got ${part}`);
+  const lit: Node = { k: 'lit', sql: sqlString(JSON.stringify(path)) };
+  return new Expr({ k: 'fn', name, args: [doc.node, lit, ...rest] }, doc.codec);
+}
+
+/**
+ * JSON 更新里写进去的值：先序列化成 JSON 文字再绑定，方言转成 JSON（PG CAST(? AS JSONB)、MySQL CAST(? AS JSON)、SQLite json(?)），
+ * 字符串、数字、对象、数组、null 都按 JSON 写进去
+ */
+function jsonParam(value: unknown): Node {
+  if (value === undefined) throw new TypeError('a JSON value cannot be undefined; use null');
+  return { k: 'param', value: JSON.stringify(value), codec: undefined };
+}
+
 const jsonCodec: Codec<any> = {
   kind: 'json',
   decode: (raw) => (typeof raw === 'string' ? JSON.parse(raw) : raw),
@@ -795,6 +908,14 @@ export type JsonLeafPath<T, V, D extends number = 5> = unknown extends T
               | [K, ...JsonLeafPath<NonNullable<T[K]>, V, JsonDepth[D]>];
           }[keyof T & string]
         : never;
+
+/** 路径 P 处数组的元素类型 */
+export type JsonElement<T, P> = JsonAt<T, P> extends readonly (infer E)[] ? E : never;
+
+/** jsonSome 的条件里元素的字段：按声明的列类型，可能缺所以可空 */
+export type JsonItem<C> = {
+  readonly [K in keyof C]: C[K] extends Column<infer V, boolean, boolean> ? Expr<V | null> : never;
+};
 
 /** 路径 P 处的值的类型 */
 export type JsonAt<T, P> = P extends readonly [infer K, ...infer Rest]

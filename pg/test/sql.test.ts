@@ -28,6 +28,32 @@ describe('postgres: SQL text', () => {
   });
 });
 
+describe('postgres: JSON edits and jsonSome', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+  type Order = { items: { sku: string; qty: number }[] };
+  const JOrder = entity('t_jorder', { id: col.int().primaryKey(), body: col.json<Order>() });
+
+  it('renders jsonb_set with a JSONB parameter and jsonb_to_recordset for array elements', () => {
+    const s = db
+      .update(JOrder)
+      .set((o) => ({ body: o.body.jsonSet(['items', 0, 'qty'], 2) }))
+      .where((o) =>
+        o.body.jsonSome(['items'], { sku: col.string(), qty: col.int() }, (it) => [
+          it.sku.eq('A1'),
+          it.qty.gt(2),
+        ]),
+      )
+      .toSQL();
+    assert.equal(
+      s.sql,
+      'UPDATE "t_jorder" AS t0 SET "body" = jsonb_set(CAST(t0."body" AS JSONB), \'{"items","0","qty"}\', CAST($1 AS JSONB))' +
+        ' WHERE EXISTS (SELECT 1 FROM jsonb_to_recordset(CAST(t0."body" AS JSONB) #> \'{"items"}\') AS eq_j("sku" VARCHAR(255), "qty" INTEGER)' +
+        ' WHERE eq_j."sku" = $2 AND eq_j."qty" > $3)',
+    );
+    assert.deepEqual(s.params, ['2', 'A1', 2]);
+  });
+});
+
 describe('postgres: code-first DDL', () => {
   const db = createDb({
     schema,

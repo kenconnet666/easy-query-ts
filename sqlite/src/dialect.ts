@@ -208,6 +208,20 @@ export class SqliteDialect extends Dialect {
       json_boolean: (a) => `json_extract(${a[0]}, ${standardJsonPath(a[1]!)})`,
       json_has: (a) => `(json_type(${a[0]}, ${standardJsonPath(a[1]!)}) IS NOT NULL)`,
       json_length: (a) => `json_array_length(${a[0]}, ${standardJsonPath(a[1]!)})`,
+      // jsonSome 的元素字段：json_each 的 value 里取
+      json_field: (a) =>
+        `json_extract(eq_j.value, ${standardJsonPath(sqlString(JSON.stringify([unquoteSql(a[0]!)])))})`,
+      // JSON 的更新写法：值是 JSON 文字的参数；数组末尾用 [#]
+      json_set: (a) => `json_set(${a[0]}, ${standardJsonPath(a[1]!)}, json(${a[2]}))`,
+      json_remove: (a) => `json_remove(${a[0]}, ${standardJsonPath(a[1]!)})`,
+      json_merge: (a) => {
+        const pairs: string[] = [];
+        for (let i = 2; i < a.length; i += 2)
+          pairs.push(`${standardJsonPath(a[i]!)}, json(${a[i + 1]})`);
+        return `json_set(${a[0]}, ${pairs.join(', ')})`;
+      },
+      json_append: (a) =>
+        `json_insert(${a[0]}, ${standardJsonPath(a[1]!).replace(/'$/, "[#]'")}, json(${a[2]}))`,
       // 没有 LPAD / RPAD：比 length 长时截断，否则补足（参数可以重复，见 Dialect.node 的 fn）
       pad_start: (a) => pad(a, true),
       pad_end: (a) => pad(a, false),
@@ -258,6 +272,11 @@ export class SqliteDialect extends Dialect {
       return `GROUP_CONCAT(DISTINCT ${this.node(n.e, w)}${this.aggOrder(n.order, w)})`;
     }
     return `GROUP_CONCAT(${this.node(n.e, w)}, ${sqlString(n.separator)}${this.aggOrder(n.order, w)})`;
+  }
+
+  /** json_each 展开数组；元素字段在条件里是 json_extract(eq_j.value, …) */
+  protected override jsonSome(n: Extract<Node, { k: 'json_some' }>, w: SqlWriter): string {
+    return `EXISTS (SELECT 1 FROM json_each(${this.node(n.doc, w)}, ${standardJsonPath(n.path)}) eq_j WHERE ${this.condition(n.cond, w)})`;
   }
 
   /** SQLite 没有行锁，事务本身锁库 */

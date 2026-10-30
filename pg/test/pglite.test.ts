@@ -24,7 +24,12 @@ const open = async (): Promise<TestEnv> => {
 };
 
 // 只有一条连接：两个事务互相等锁（NOWAIT、SKIP LOCKED）的用例会卡住
-liveSuite('pglite', open, { extensionTypes: true, extraTables: true, rowLocks: false });
+liveSuite('pglite', open, {
+  extensionTypes: true,
+  extraTables: true,
+  rowLocks: false,
+  jsonEdits: true,
+});
 
 arraySuite('pglite', async () => pglite(database));
 enumSuite('pglite', async () => pglite(database));

@@ -1,7 +1,7 @@
 /**
  * SQL 语法树。查询构建器产出它，方言（Dialect）把它渲染成 SQL 文本；与具体数据库无关。
  */
-import type { Codec } from './schema.ts';
+import type { Codec, ColumnOptions } from './schema.ts';
 
 export type Node =
   | { readonly k: 'col'; readonly alias: string; readonly name: string }
@@ -47,6 +47,21 @@ export type Node =
     }
   /** 标量子查询 */
   | { readonly k: 'sub'; readonly q: SelectNode }
+  /**
+   * JSON 数组里有满足 cond 的元素（Expr.jsonSome）：path 是数组所在的路径（JSON 数组的 SQL 文字，同 JSON 函数的路径参数），columns 是用到的元素字段与类型；
+   * cond 里的字段是 json_field 函数节点（参数是字段名的字面量），各方言按自己的展开写法渲染
+   */
+  | {
+      readonly k: 'json_some';
+      readonly doc: Node;
+      readonly path: string;
+      readonly columns: readonly {
+        readonly name: string;
+        readonly kind: string;
+        readonly options: ColumnOptions;
+      }[];
+      readonly cond: Node;
+    }
   /** 字符串聚合（joining）：GROUP_CONCAT / STRING_AGG，分隔符是受信任的字面量 */
   | {
       readonly k: 'string_agg';
@@ -234,6 +249,10 @@ export function checkAliases(
       case 'exists':
       case 'sub':
         checkAliases(n.q, declared);
+        return;
+      case 'json_some':
+        visit(n.doc);
+        visit(n.cond);
         return;
       case 'string_agg':
         visit(n.e);

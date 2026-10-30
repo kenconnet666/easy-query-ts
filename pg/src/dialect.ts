@@ -3,6 +3,7 @@ import { pgFunctions } from './functions.ts';
 import {
   assembleTables,
   Dialect,
+  pgJsonPath,
   sqlString,
   type ColumnOptions,
   type DbTable,
@@ -203,6 +204,15 @@ export class PostgresDialect extends Dialect {
   }
 
   /** CASE 分支里的字符串 / 数字 / 布尔参数 PG 推断不出类型（"could not determine data type of parameter"），加显式转换 */
+  /** jsonb_to_recordset 按声明的列把数组的对象展开成行；路径是空数组时就是文档本身 */
+  protected override jsonSome(n: Extract<Node, { k: 'json_some' }>, w: SqlWriter): string {
+    const doc = `CAST(${this.node(n.doc, w)} AS JSONB) #> ${pgJsonPath(n.path)}`;
+    const columns = n.columns
+      .map((c) => `${this.quote(c.name)} ${this.columnType(c.kind, c.options)}`)
+      .join(', ');
+    return `EXISTS (SELECT 1 FROM jsonb_to_recordset(${doc}) AS eq_j(${columns}) WHERE ${this.condition(n.cond, w)})`;
+  }
+
   protected override caseValue(n: Node, w: SqlWriter): string {
     const sql = this.node(n, w);
     if (n.k !== 'param') return sql;

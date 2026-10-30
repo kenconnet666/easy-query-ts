@@ -3,6 +3,7 @@ import {
   assembleTables,
   Dialect,
   sqlString,
+  standardJsonPath,
   SqlWriter,
   type ColumnOptions,
   type ConflictNode,
@@ -162,6 +163,22 @@ export class MySqlDialect extends Dialect {
   }
 
   /** GROUP_CONCAT([DISTINCT] e ORDER BY … SEPARATOR '…') */
+  /**
+   * JSON_TABLE（8.0.4+）按声明的列把数组展开成行。不用 EXISTS：MySQL 把关联 JSON_TABLE 的 EXISTS 改写成不带关联条件的连接，
+   * 结果错（8.4.11 实测，EXPLAIN 是 Inner hash join (no condition)）；数个数再比较结果正确，JSON 数组通常很小
+   */
+  protected override jsonSome(n: Extract<Node, { k: 'json_some' }>, w: SqlWriter): string {
+    this.requires('JSON_TABLE (jsonSome)', '8.0.4');
+    const rows = standardJsonPath(n.path).replace(/'$/, "[*]'");
+    const columns = n.columns
+      .map(
+        (c) =>
+          `${this.quote(c.name)} ${this.columnType(c.kind, c.options)} PATH ${standardJsonPath(sqlString(JSON.stringify([c.name])))}`,
+      )
+      .join(', ');
+    return `((SELECT COUNT(*) FROM JSON_TABLE(${this.node(n.doc, w)}, ${rows} COLUMNS (${columns})) eq_j WHERE ${this.condition(n.cond, w)}) > 0)`;
+  }
+
   protected override stringAgg(n: Extract<Node, { k: 'string_agg' }>, w: SqlWriter): string {
     return `GROUP_CONCAT(${n.distinct ? 'DISTINCT ' : ''}${this.node(n.e, w)}${this.aggOrder(n.order, w)} SEPARATOR ${sqlString(n.separator)})`;
   }

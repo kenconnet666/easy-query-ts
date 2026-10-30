@@ -58,6 +58,14 @@ export const MySQL = {
   }),
 };
 
+/** 浅合并的"路径, 值"对：args 是交替的路径字面量与值 */
+function jsonPairs(args: readonly string[], value: (v: string) => string): string {
+  const pairs: string[] = [];
+  for (let i = 0; i < args.length; i += 2)
+    pairs.push(`${standardJsonPath(args[i]!)}, ${value(args[i + 1]!)}`);
+  return pairs.join(', ');
+}
+
 function nonEmpty<T>(items: T[]): T[] {
   if (items.length === 0) throw new Error('at least one argument is required');
   return items;
@@ -117,6 +125,14 @@ export const mysqlFunctions: Record<string, FunctionRenderer> = {
   json_boolean: (a) => `(JSON_EXTRACT(${a[0]}, ${standardJsonPath(a[1]!)}) = TRUE)`,
   json_has: (a) => `JSON_CONTAINS_PATH(${a[0]}, 'one', ${standardJsonPath(a[1]!)})`,
   json_length: (a) => `JSON_LENGTH(${a[0]}, ${standardJsonPath(a[1]!)})`,
+  // jsonSome 的元素字段：JSON_TABLE 展开出来的列
+  json_field: (a) => `eq_j.\`${unquoteSql(a[0]!).replace(/`/g, '``')}\``,
+  // JSON 的更新写法：值是 JSON 文字的参数；浅合并逐键 JSON_SET（JSON_MERGE_PATCH 是递归的，语义不同）
+  json_set: (a) => `JSON_SET(${a[0]}, ${standardJsonPath(a[1]!)}, CAST(${a[2]} AS JSON))`,
+  json_remove: (a) => `JSON_REMOVE(${a[0]}, ${standardJsonPath(a[1]!)})`,
+  json_merge: (a) => `JSON_SET(${a[0]}, ${jsonPairs(a.slice(2), (v) => `CAST(${v} AS JSON)`)})`,
+  json_append: (a) =>
+    `JSON_ARRAY_APPEND(${a[0]}, ${standardJsonPath(a[1]!)}, CAST(${a[2]} AS JSON))`,
   cast_string: (a) => `CAST(${a[0]} AS CHAR)`,
   cast_int: (a) => `CAST(${a[0]} AS SIGNED)`,
   cast_bigint: (a) => `CAST(${a[0]} AS SIGNED)`,

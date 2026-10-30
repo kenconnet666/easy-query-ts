@@ -108,6 +108,35 @@ const Account = entity('t_account', {
 - 只写泛型的 `col.json<Tags>()` 仍然可用，不做运行时校验。
 - 用 zod 4.6.7 验证过（zod 只是测试的开发依赖）。
 
+## JSON 的更新写法与按元素过滤
+
+```ts
+// 一条 UPDATE 里改 JSON 的某一处，不用读出来改完再整个写回
+await db
+  .update(Account)
+  .set((a) => ({ profile: a.profile.jsonSet(['level'], 2) }))
+  .where((a) => a.id.eq(id))
+  .execute();
+a.profile.jsonRemove('nickname'); // 删掉键或数组元素
+a.profile.jsonMerge({ level: 3, tags: [] }); // 浅合并：给出的顶层键整个换掉
+a.profile.jsonAppend(['tags'], 'vip'); // 数组末尾加一项（数组不在时 PG 当成空数组）
+
+// JSON 数组里有满足条件的元素：同一个元素同时满足所有条件
+db.queryable(Order).where((o) =>
+  o.payload.jsonSome(['items'], { sku: col.string(), qty: col.int() }, (it) => [
+    it.sku.eq('A1'),
+    it.qty.gt(2),
+  ]),
+);
+```
+
+- 路径与值的类型按 JSON 列的 TS 类型检查（`jsonSet(['level'], 'x')` 在 level 是数字时报错）；值按 JSON 写进去，字符串不会变成带引号的文字。
+- `jsonSome` 的 columns 只能写元素上有的键；数组不在（NULL、路径不存在）时为假。
+- PG：`jsonb_set`、`#-`、`||`、`jsonb_insert` 一类与 `jsonb_to_recordset`；MySQL：`JSON_SET`、`JSON_REMOVE`、`JSON_ARRAY_APPEND` 与 `JSON_TABLE`
+  （8.0.4+；不用 EXISTS 而是数个数：MySQL 把关联 JSON_TABLE 的 EXISTS 改写成不带关联条件的连接，结果错，8.4.11 实测）；
+  SQLite：`json_set`、`json_remove`、`json_insert` 与 `json_each`。别的方言渲染时报不支持。
+- PG 另有 JSONPath：`Pg.jsonb(col).pathExists('$.items[*] ? (@.qty > 2)')`、`pathMatch('$.level > 2')`。
+
 ## date 列的类型
 
 `col.date()` 在 JS 里是 `DateText`（`` `${number}-${number}-${number}` ``，即 `'2026-01-02'` 这种形状的文字）：字面量可以直接写入和比较，**普通字符串列不能调用 `year() / month() / day() / addDays() / dateTrunc()`**，写成 `'not a date'` 也会编译不过。要对象形式用 `@zerodep-dev/easy-query-ts-date` 的 `calendarDate()`。

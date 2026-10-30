@@ -39,6 +39,7 @@ const open = async (): Promise<TestEnv> => {
 
 // 名字以 sqlite 开头：套件按名字认出 SQLite（没有注释）
 liveSuite('sqlite (libsql)', open, {
+  jsonEdits: true,
   extensionTypes: true,
   extraTables: true,
   rollup: false,

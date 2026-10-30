@@ -225,6 +225,14 @@ export abstract class Dialect {
     return `TO_CHAR(${value}, ${sqlString(format)})`;
   }
 
+  /**
+   * JSON 数组里有满足条件的元素（Expr.jsonSome）：EXISTS (把数组展开成行 … WHERE 条件)。
+   * 元素字段在条件里是 json_field(字段名)，方言把它渲染成展开出来的列。PG、MySQL 8.0.4+、SQLite 实现
+   */
+  protected jsonSome(_n: Extract<Node, { k: 'json_some' }>, _w: SqlWriter): string {
+    throw new Error(`jsonSome() is not supported by the ${this.name} dialect`);
+  }
+
   /** 字符串聚合：基类是 STRING_AGG(e, 分隔符 ORDER BY …)（PG、HANA、SQL Server） */
   protected stringAgg(n: Extract<Node, { k: 'string_agg' }>, w: SqlWriter): string {
     return `STRING_AGG(${n.distinct ? 'DISTINCT ' : ''}${this.node(n.e, w)}, ${sqlString(n.separator)}${this.aggOrder(n.order, w)})`;
@@ -796,6 +804,8 @@ export abstract class Dialect {
       }
       case 'sub':
         return `(${this.select(n.q, w)})`;
+      case 'json_some':
+        return this.jsonSome(n, w);
       case 'string_agg':
         return this.stringAgg(n, w);
     }
@@ -836,7 +846,7 @@ export function standardJsonPath(literal: string): string {
 }
 
 /** PG 的路径：'{key,0}'（文字数组），每段加引号 */
-function pgJsonPath(literal: string): string {
+export function pgJsonPath(literal: string): string {
   const parts = jsonPathParts(literal).map((p) => quoteJsonKey(String(p)));
   return sqlString(`{${parts.join(',')}}`);
 }

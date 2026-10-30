@@ -22,6 +22,7 @@ import {
   or,
   touch,
   win,
+  type Cond,
   type Expr,
   type ExecutionEvent,
   type Interceptor,
@@ -88,6 +89,8 @@ export interface LiveSuiteOptions {
   readonly noWait?: boolean;
   /** jsonLength（Db2 的 JSON_TABLE 只能从根展开，数不了数组长度） */
   readonly jsonLength?: boolean;
+  /** JSON 的更新写法（jsonSet / jsonRemove / jsonMerge / jsonAppend）：PG、MySQL、SQLite 有，传 true 才测 */
+  readonly jsonEdits?: boolean;
 }
 
 export function liveSuite(
@@ -684,6 +687,127 @@ export function liveSuite(
         { name: 'bob', latest: { title: 'hello' }, top: [{ title: 'hello' }] },
         { name: 'carol', latest: null, top: [] },
       ]);
+    });
+  });
+
+  describe(`${name}: JSON edits`, { skip: !options.jsonEdits }, () => {
+    type Settings = { theme: string; profile?: { name?: string; level?: number }; tags: string[] };
+    const Pref = entity('t_jpref', {
+      id: col.int().primaryKey(),
+      settings: col.json<Settings>(),
+    });
+
+    it('sets, removes, merges and appends inside a JSON column in one UPDATE', async () => {
+      const env = await seeded();
+      const db = createDb({ schema: defineSchema({ Pref }), adapter: env.adapter });
+      await db.sql.execute`DROP TABLE ${db.sql.ident('t_jpref')}`.catch(() => undefined);
+      await db.createTables();
+      try {
+        await db
+          .insert(Pref)
+          .values({
+            id: 1,
+            settings: { theme: 'light', profile: { name: 'a', level: 1 }, tags: ['x'] },
+          })
+          .execute();
+        const settings = async () => (await db.queryable(Pref).findOrThrow(1)).settings;
+        // 改 settings 这一列：fn 拿到列，返回改过的整个文档
+        const edit = (fn: (settings: Expr<Settings>) => Expr<Settings>) =>
+          db
+            .update(Pref)
+            .set((p) => ({ settings: fn(p.settings) }))
+            .where((p) => p.id.eq(1))
+            .execute();
+
+        // 嵌套路径上换值：字符串、数字、对象都按 JSON 写进去（不是带引号的文字）
+        await edit((s) => s.jsonSet(['profile', 'level'], 2));
+        await edit((s) => s.jsonSet(['profile', 'name'], 'it\'s "b"'));
+        assert.deepEqual((await settings()).profile, { name: 'it\'s "b"', level: 2 });
+
+        await edit((s) => s.jsonAppend(['tags'], 'y'));
+        assert.deepEqual((await settings()).tags, ['x', 'y']);
+
+        await edit((s) => s.jsonRemove('profile', 'level'));
+        assert.deepEqual((await settings()).profile, { name: 'it\'s "b"' });
+
+        // 浅合并：给出的顶层键整个换掉
+        await edit((s) => s.jsonMerge({ theme: 'dark', tags: [] }));
+        assert.deepEqual(await settings(), {
+          theme: 'dark',
+          profile: { name: 'it\'s "b"' },
+          tags: [],
+        });
+
+        await edit((s) => s.jsonRemove('profile'));
+        assert.deepEqual(await settings(), { theme: 'dark', tags: [] });
+      } finally {
+        await db.sql.execute`DROP TABLE ${db.sql.ident('t_jpref')}`;
+      }
+    });
+
+    it('filters by the elements of a JSON array with jsonSome', async () => {
+      type Order = { items: { sku: string; qty: number }[]; meta?: { lines?: { sku: string }[] } };
+      const JOrder = entity('t_jorder', { id: col.int().primaryKey(), body: col.json<Order>() });
+      const env = await seeded();
+      const db = createDb({ schema: defineSchema({ JOrder }), adapter: env.adapter });
+      await db.sql.execute`DROP TABLE ${db.sql.ident('t_jorder')}`.catch(() => undefined);
+      await db.createTables();
+      try {
+        await db
+          .insert(JOrder)
+          .values([
+            {
+              id: 1,
+              body: {
+                items: [
+                  { sku: 'A1', qty: 1 },
+                  { sku: 'B2', qty: 5 },
+                ],
+              },
+            },
+            { id: 2, body: { items: [{ sku: 'A1', qty: 3 }], meta: { lines: [{ sku: 'Z9' }] } } },
+            { id: 3, body: { items: [] } },
+          ])
+          .execute();
+        const ids = async (cond: (o: { body: Expr<Order> }) => Cond) =>
+          (
+            await db
+              .queryable(JOrder)
+              .where((o) => cond(o))
+              .orderBy((o) => o.id)
+              .select((o) => o.id)
+              .toList()
+          ).map(Number);
+        // 同一个元素同时满足两个条件（不是"有 A1、另有 qty > 2"）
+        assert.deepEqual(
+          await ids((o) =>
+            o.body.jsonSome(['items'], { sku: col.string(), qty: col.int() }, (it) => [
+              it.sku.eq('A1'),
+              it.qty.gt(2),
+            ]),
+          ),
+          [2],
+        );
+        assert.deepEqual(
+          await ids((o) => o.body.jsonSome(['items'], { qty: col.int() }, (it) => it.qty.ge(1))),
+          [1, 2],
+        );
+        // 嵌套路径；路径不存在的行为假
+        assert.deepEqual(
+          await ids((o) =>
+            o.body.jsonSome(['meta', 'lines'], { sku: col.string() }, (it) => it.sku.eq('Z9')),
+          ),
+          [2],
+        );
+        if (Math.random() > 2) {
+          db.queryable(JOrder).where((o) =>
+            // @ts-expect-error 元素上没有 price
+            o.body.jsonSome(['items'], { price: col.int() }, () => []),
+          );
+        }
+      } finally {
+        await db.sql.execute`DROP TABLE ${db.sql.ident('t_jorder')}`;
+      }
     });
   });
 

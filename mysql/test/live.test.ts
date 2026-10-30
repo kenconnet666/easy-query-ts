@@ -73,6 +73,7 @@ for (const url of urls) {
     extraTables: true,
     cube: false,
     returning: false,
+    jsonEdits: true,
   });
 
   describe(`mysql ${new URL(url).port}: server-side cancellation`, () => {

@@ -11,6 +11,8 @@ import {
   codecs,
   dialectFn,
   or,
+  pgJsonPath,
+  unquoteSql,
   type Expr,
   type FunctionRenderer,
   type Node,
@@ -34,6 +36,10 @@ export const Pg = {
     containedBy: (document: string) => pred('pg.jsonb_contained_by', [column, document]),
     /** 顶层有这个键：{@code jsonb_exists(col::jsonb, ?)}（不用 ? 运算符，避免与占位符混淆） */
     hasKey: (key: string) => pred('pg.jsonb_exists', [column, key]),
+    /** JSONPath 找得到值：{@code jsonb_path_exists(col::jsonb, ?::jsonpath)}，如 {@code '$.items[*] ? (@.qty > 2)'} */
+    pathExists: (path: string) => pred('pg.jsonb_path_exists', [column, path]),
+    /** JSONPath 谓词为真：{@code col::jsonb @@ ?::jsonpath}，如 {@code '$.level > 2'} */
+    pathMatch: (path: string) => pred('pg.jsonb_path_match', [column, path]),
   }),
   /** 任意数组表达式（原生 SQL 片段等）；col.array 的列直接用列上的 has / hasAll / hasAny / arrayLength */
   array: (column: Expr<unknown>) => {
@@ -61,6 +67,20 @@ export const pgFunctions: Record<string, FunctionRenderer> = {
   'pg.jsonb_contains': (a) => `(${a[0]})::jsonb @> (${a[1]})::jsonb`,
   'pg.jsonb_contained_by': (a) => `(${a[0]})::jsonb <@ (${a[1]})::jsonb`,
   'pg.jsonb_exists': (a) => `jsonb_exists((${a[0]})::jsonb, ${a[1]})`,
+  'pg.jsonb_path_exists': (a) => `jsonb_path_exists((${a[0]})::jsonb, CAST(${a[1]} AS jsonpath))`,
+  'pg.jsonb_path_match': (a) => `((${a[0]})::jsonb @@ CAST(${a[1]} AS jsonpath))`,
+  // JSON 的更新写法（Expr.jsonSet / jsonRemove / jsonMerge / jsonAppend）：值是 JSON 文字的参数
+  json_set: (a) =>
+    `jsonb_set(CAST(${a[0]} AS JSONB), ${pgJsonPath(a[1]!)}, CAST(${a[2]} AS JSONB))`,
+  json_remove: (a) => `(CAST(${a[0]} AS JSONB) #- ${pgJsonPath(a[1]!)})`,
+  json_merge: (a) => `(CAST(${a[0]} AS JSONB) || CAST(${a[1]} AS JSONB))`,
+  // 路径处还没有数组时当成空数组
+  json_append: (a) =>
+    a[1] === "'[]'"
+      ? `(CAST(${a[0]} AS JSONB) || jsonb_build_array(CAST(${a[2]} AS JSONB)))`
+      : `jsonb_set(CAST(${a[0]} AS JSONB), ${pgJsonPath(a[1]!)}, coalesce(CAST(${a[0]} AS JSONB) #> ${pgJsonPath(a[1]!)}, '[]'::jsonb) || jsonb_build_array(CAST(${a[2]} AS JSONB)))`,
+  // jsonSome 的元素字段：jsonb_to_recordset 展开出来的列
+  json_field: (a) => `eq_j."${unquoteSql(a[0]!).replace(/"/g, '""')}"`,
   // 数组（col.array 的列方法与 Pg.array 共用）
   array_has: (a) => `${a[1]} = ANY(${a[0]})`,
   array_contains: (a) => `${a[0]} @> ${a[1]}`,
