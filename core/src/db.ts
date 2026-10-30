@@ -98,8 +98,11 @@ export interface DbOptions<S extends AnySchema> {
   readonly adapter: Adapter;
   /** 每条语句执行前调用，最简单的日志 */
   readonly log?: (statement: Statement) => void;
-  /** 每条语句执行后调用（成功与失败都会），带耗时与行数；用来记慢 SQL、指标、链路追踪。钩子里抛错会让这条语句失败 */
-  readonly onExecute?: (event: ExecutionEvent) => void;
+  /**
+   * 每条语句执行后调用（成功与失败都会），带耗时与行数；用来记慢 SQL、指标、链路追踪。钩子里抛错会让这条语句失败。
+   * 几个钩子写成数组，按顺序调用：`[statementSpans(tracer), watch.onExecute]`
+   */
+  readonly onExecute?: OnExecute | readonly OnExecute[];
   /** 谓词与写入拦截器，见 tenant()、touch() */
   readonly interceptors?: readonly Interceptor[];
   /**
@@ -926,6 +929,17 @@ export class Transaction<S extends AnySchema> extends Db<S> {
   }
 }
 
+type OnExecute = (event: ExecutionEvent) => void;
+
+/** 几个 onExecute 钩子合成一个 */
+function chain(hooks: OnExecute | readonly OnExecute[] | undefined): OnExecute | undefined {
+  if (typeof hooks === 'function' || !hooks) return hooks;
+  if (hooks.length <= 1) return hooks[0];
+  return (event) => {
+    for (const hook of hooks) hook(event);
+  };
+}
+
 /** 写入用的上下文：只读的 Db 报错，写入走主库 */
 function writable(ctx: Context): Context {
   assertWritable(ctx);
@@ -958,7 +972,7 @@ export function createDb<S extends AnySchema, C extends Capability = Capability>
     dialect: options.adapter.dialect,
     session: options.adapter.driver,
     log: options.log,
-    onExecute: options.onExecute,
+    onExecute: chain(options.onExecute),
     signal: undefined,
     hooks: undefined,
     replicas: replicaSet(options),

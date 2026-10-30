@@ -30,6 +30,11 @@
       "@vue-tsx-pro/source": "./src/context.ts",
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
+    },
+    "./observe": {
+      "@vue-tsx-pro/source": "./src/observe.ts",
+      "types": "./dist/observe.d.ts",
+      "default": "./dist/observe.js"
     }
   },
   "files": [

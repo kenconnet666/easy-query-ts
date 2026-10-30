@@ -202,6 +202,7 @@ export type {
   FilterOp,
 } from './table.ts';
 export type { TreeNode } from './tree.ts';
+export { statementSpans, type SpanTracer } from './tracing.ts';
 
 export type {
   Capability,

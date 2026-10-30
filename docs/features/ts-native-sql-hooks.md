@@ -32,9 +32,9 @@ const db = createDb({
 });
 ```
 
-`ExecutionEvent`：`statement`、`kind`（`query` 读 / `execute` 写）、`durationMs`、`rows`（读返回的行数 / 写影响的行数，失败为 0）、`error`（失败时的错误，错误仍会照常抛给调用方）。构建器、`db.sql`、事务里的语句都经过同一个钩子。钩子里抛错会让这条语句失败（不吞错）。
+`ExecutionEvent`：`statement`、`dialect`（方言名）、`kind`（`query` 读 / `execute` 写）、`durationMs`、`rows`（读返回的行数 / 写影响的行数，失败为 0）、`error`（失败时的错误，错误仍会照常抛给调用方）。构建器、`db.sql`、事务里的语句都经过同一个钩子。钩子里抛错会让这条语句失败（不吞错）。
 
-对应 Java 的 `JdbcExecutorListener`；链路追踪（OpenTelemetry）可以在这里接，不需要核心依赖它。
+对应 Java 的 `JdbcExecutorListener`。几个钩子写成数组按顺序调用；现成的 OpenTelemetry span 与 N+1、慢查询检测见 ts-observability.md。
 
 ## 验证
 

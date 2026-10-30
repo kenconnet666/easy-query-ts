@@ -50,6 +50,8 @@ export interface Adapter<C extends Capability = Capability> extends Capable<C> {
 /** 一条语句执行完（成功或失败）后交给 onExecute 的信息，对应 Java 版的 JdbcExecutorListener */
 export interface ExecutionEvent {
   readonly statement: Statement;
+  /** 方言名（Dialect.name）：'postgres'、'mysql'…… */
+  readonly dialect: string;
   /** query 是读（返回行），execute 是写（返回影响的行数） */
   readonly kind: 'query' | 'execute';
   /** 驱动执行耗时，毫秒 */
@@ -174,11 +176,19 @@ async function observe<T>(
   try {
     result = await abortable(ctx.signal, run);
   } catch (error) {
-    ctx.onExecute?.({ statement, kind, durationMs: performance.now() - started, rows: 0, error });
+    ctx.onExecute?.({
+      statement,
+      dialect: ctx.dialect.name,
+      kind,
+      durationMs: performance.now() - started,
+      rows: 0,
+      error,
+    });
     throw error;
   }
   ctx.onExecute?.({
     statement,
+    dialect: ctx.dialect.name,
     kind,
     durationMs: performance.now() - started,
     rows: count(result),
@@ -242,6 +252,7 @@ export async function* streamRows(
   } finally {
     ctx.onExecute?.({
       statement,
+      dialect: ctx.dialect.name,
       kind: 'query',
       durationMs: performance.now() - started,
       rows,
