@@ -60,8 +60,18 @@ export type Temporal = Date | DateText | TemporalExtensions[keyof TemporalExtens
  * 十进制文字列和第三方数值类型（如 decimal.js 的 Decimal）额外接受 number，写 `amount.times(2)` 更顺手；
  * bigint 列只接受 bigint，避免把浮点数混进 64 位整数运算。
  */
+/** 去掉品牌（Branded）的基础类型：带品牌的主键 + 1 照常能写 */
+type Unbranded<T> = T extends number
+  ? number
+  : T extends bigint
+    ? bigint
+    : T extends string
+      ? string
+      : T;
+
 export type Arith<T> =
   | Operand<T>
+  | Operand<Unbranded<T>>
   | (NonNullable<T> extends DecimalText | NumericExtensions[keyof NumericExtensions]
       ? number
       : never);

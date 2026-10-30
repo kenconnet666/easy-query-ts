@@ -15,6 +15,8 @@ export type {
   ColumnKind,
   ColumnOptions,
   DateText,
+  Branded,
+  BrandOf,
   DecimalText,
   Encryption,
   Entity,

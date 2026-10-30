@@ -16,7 +16,7 @@
 import type { Cond, Expr } from './expr.ts';
 import type { InterceptorToggle } from './interceptor.ts';
 import type { ColumnRefs, Ref } from './ref.ts';
-import type { Column, Embedded, Entity } from './schema.ts';
+import type { BrandOf, Column, Embedded, Entity } from './schema.ts';
 
 /** 关系上固定的条件（对应 Java 版导航的 extraFilter）：拿到目标表各列的表达式，返回条件；每次用到这个导航都带上 */
 export type RelationFilter<E extends Entity = Entity> = (target: ColumnRefs<E['fields']>) => Cond;
@@ -116,6 +116,34 @@ type ColumnKey<E extends Entity> = {
   [K in keyof E['fields']]: E['fields'][K] extends Embedded<any> ? never : K;
 }[keyof E['fields']] &
   string;
+/** 列值类型上的品牌（没有品牌时 never） */
+type ColumnBrand<E extends Entity, K> = K extends keyof E['fields']
+  ? E['fields'][K] extends Column<infer V, any, any>
+    ? BrandOf<V>
+    : never
+  : never;
+
+/** 联合类型是不是只有一个成员（单列外键才核对品牌） */
+type IsSingle<F> = [F] extends [infer One]
+  ? (One extends unknown ? (x: One) => void : never) extends (x: infer I) => void
+    ? [F] extends [I]
+      ? true
+      : false
+    : false
+  : false;
+
+/** 关系的 to 能选的列：单列外键时只能选与 from 品牌相同的列（都没有品牌也算），复合外键不限 */
+type TargetKey<Self extends Entity, F, Target extends Entity> =
+  IsSingle<F> extends true
+    ? {
+        [K in ColumnKey<Target>]: [ColumnBrand<Target, K>] extends [ColumnBrand<Self, F>]
+          ? [ColumnBrand<Self, F>] extends [ColumnBrand<Target, K>]
+            ? K
+            : never
+          : never;
+      }[ColumnKey<Target>]
+    : ColumnKey<Target>;
+
 /** 一个列名，或复合外键的列名数组 */
 type OneOrMany<K extends string> = K | readonly K[];
 /** 任何一个 from 列可空，导航的目标就可能不存在 */
@@ -138,7 +166,7 @@ export interface RelationBuilder<E extends Record<string, Entity>, S extends key
     Req extends boolean = false,
   >(
     target: T,
-    on: { from: OneOrMany<F>; to: OneOrMany<ColumnKey<E[T]>> },
+    on: { from: OneOrMany<F>; to: OneOrMany<TargetKey<E[S], F, E[T]>> },
     options?: RelationOptions<E[T]> & {
       optional?: O;
       required?: Req;
@@ -147,9 +175,9 @@ export interface RelationBuilder<E extends Record<string, Entity>, S extends key
     },
   ): One<T, Req extends true ? false : O extends true ? true : AnyNullable<E[S], F>>;
   /** 一对多；options.where 是固定的条件（例如只算有效的子项：`{ where: (p) => p.deleted.eq(false) }`） */
-  many<T extends keyof E & string>(
+  many<T extends keyof E & string, F extends ColumnKey<E[S]>>(
     target: T,
-    on: { from: OneOrMany<ColumnKey<E[S]>>; to: OneOrMany<ColumnKey<E[T]>> },
+    on: { from: OneOrMany<F>; to: OneOrMany<TargetKey<E[S], F, E[T]>> },
     options?: RelationOptions<E[T]>,
   ): Many<T>;
   /**

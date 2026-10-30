@@ -200,6 +200,15 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
     return new Column(this.codec, { ...this.options, version });
   }
 
+  /**
+   * 给值类型打上品牌（只在类型里）：`id: col.bigint().primaryKey().brand<'UserId'>()`。
+   * UserId 与 OrderId 不能混传；关系的 from / to 品牌对不上在定义处就报错；`find(id)`、条件、结果里的值都带品牌。
+   * 品牌值从查询结果里来，手写的值用 `1 as Row<typeof User>['id']`
+   */
+  brand<B extends string>(): Column<Branded<T, B>, N, O> {
+    return this as unknown as Column<Branded<T, B>, N, O>;
+  }
+
   /** 只在插入时写入，更新永远不碰；在 set 里给它赋值会报错 */
   insertOnly(): Column<T, N, O> {
     return new Column(this.codec, { ...this.options, insertOnly: true });
@@ -666,6 +675,14 @@ function checkSharding(
 }
 
 /** 一列（或值对象）读出来的类型 */
+declare const brandKey: unique symbol;
+
+/** 带品牌的值类型：运行时就是 T，类型上与别的品牌互不相容 */
+export type Branded<T, B extends string> = T & { readonly [brandKey]: B };
+
+/** 值类型上的品牌；没有品牌时是 never */
+export type BrandOf<T> = T extends { readonly [brandKey]: infer B } ? B : never;
+
 export type ValueOf<C> =
   C extends Embedded<infer F>
     ? RowOf<F>
