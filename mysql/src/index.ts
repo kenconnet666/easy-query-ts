@@ -18,11 +18,13 @@ import {
 } from '@zerodep-dev/easy-query-ts';
 import { MySqlDialect, type MySqlVersion } from './dialect.ts';
 import { DorisDialect, type DorisOptions } from './doris.ts';
+import { MariaDbDialect, type MariaDbOptions } from './mariadb.ts';
 
 export { MySQL } from './functions.ts';
 export type { MatchMode } from './functions.ts';
 export { MySqlDialect, type MySqlVersion } from './dialect.ts';
 export { DorisDialect, type DorisOptions } from './doris.ts';
+export { MariaDbDialect, type MariaDbOptions } from './mariadb.ts';
 
 const AS_TEXT = new Set([
   'DATE',
@@ -236,16 +238,26 @@ export function mysql(pool: Pool, options: MySqlOptions = {}): Adapter<Without<'
 
 /**
  * 连上库读出服务器版本再建 adapter：同一份代码部署到 8.0.18 还是 8.4 都自动选对写法，不用手配 version。
- * MariaDB 按 8.0 渲染（有窗口函数、CTE，upsert 用 VALUES()）。
+ * 连上的是 MariaDB 时用 MariaDB 的方言（见 mariadb()）。
  */
 mysql.detect = async (pool: Pool): Promise<Adapter<Without<'returning'>>> => {
   const [rows] = await pool.query('SELECT VERSION() AS v, @@max_allowed_packet AS p');
   const row = (rows as { v: string; p: unknown }[])[0];
   const text = String(row?.v ?? '');
-  const version = /mariadb/i.test(text) ? '8.0' : /^\d+(\.\d+)*/.exec(text)?.[0];
   const maxPacket = Number(row?.p) || undefined;
+  if (/mariadb/i.test(text))
+    return { dialect: new MariaDbDialect({ maxPacket }), driver: new MySqlDriver(pool) };
+  const version = /^\d+(\.\d+)*/.exec(text)?.[0];
   return { dialect: new MySqlDialect({ version, maxPacket }), driver: new MySqlDriver(pool) };
 };
+
+/**
+ * MariaDB（驱动同样是 mysql2）：`createDb({ schema, adapter: mariadb(pool) })`，或用 mysql.detect 按服务器自动选。
+ * 与 MySQL 的差异见 MariaDbDialect；没有 RETURNING（UPDATE 没有，统一按没有处理）
+ */
+export function mariadb(pool: Pool, options: MariaDbOptions = {}): Adapter<Without<'returning'>> {
+  return { dialect: new MariaDbDialect(options), driver: new MySqlDriver(pool) };
+}
 
 /** Doris 的事务不能回滚：语句依次执行，不开事务 */
 class DorisDriver extends MySqlDriver {

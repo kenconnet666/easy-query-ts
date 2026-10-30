@@ -10,7 +10,7 @@ import {
   Token,
   User,
 } from '@zerodep-dev/easy-query-ts-test/fixture';
-import { MySQL, mysql } from '../src/index.ts';
+import { mariadb, MySQL, mysql } from '../src/index.ts';
 
 describe('mysql: SQL text', () => {
   // 只渲染不执行，不需要真的连接池
@@ -294,6 +294,45 @@ describe('mysql: rendering by server version', () => {
           .select((u) => ({ n: win.rowNumber((w) => w.orderBy(u.id)) }))
           .toSQL(),
       /window functions needs mysql 8\.0 or later/,
+    );
+  });
+});
+
+describe('mariadb: SQL text', () => {
+  const db = createDb({ schema, adapter: mariadb({} as Pool) });
+
+  it('deletes without a table alias, binds uuids as text, and uses REGEXP and LOCK IN SHARE MODE', () => {
+    assert.equal(
+      db
+        .delete(Post)
+        .where((p) => p.userId.eq(1))
+        .toSQL().sql,
+      'DELETE t0 FROM `t_post` AS t0 WHERE t0.`user_id` = ?',
+    );
+    assert.equal(
+      db
+        .delete(Post)
+        .where((p) => p.userId.eq(1))
+        .orderBy((p) => p.id)
+        .limit(10)
+        .toSQL().sql,
+      'DELETE FROM `t_post` WHERE `id` IN (SELECT k FROM (SELECT t0.`id` AS `k` FROM `t_post` t0 WHERE t0.`user_id` = ? ORDER BY t0.`id` ASC LIMIT 10) eq_b)',
+    );
+    assert.match(db.createTableSql(Token), /`id` UUID NOT NULL/);
+    assert.deepEqual(
+      db
+        .queryable(Token)
+        .where((t) => t.id.eq('0192f3a4-1b2c-7d8e-9f01-23456789abcd'))
+        .toSQL().params,
+      ['0192f3a4-1b2c-7d8e-9f01-23456789abcd'],
+    );
+    assert.match(
+      db
+        .queryable(Post)
+        .where((p) => p.title.matches('^o'))
+        .forShare()
+        .toSQL().sql,
+      /\(CAST\(t0\.`title` AS BINARY\) REGEXP \?\) LOCK IN SHARE MODE$/,
     );
   });
 });
