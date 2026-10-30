@@ -5,13 +5,16 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll } from 'vitest';
+import { afterAll, vi } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { createDb, type Statement } from '@zerodep-dev/easy-query-ts';
 import { schema, type TestEnv } from '../src/fixture.ts';
 import { SQLITE_DDL } from '../src/sqlite-env.ts';
 import { liveSuite } from '../src/suite.ts';
 import { libsql } from '@zerodep-dev/easy-query-ts-sqlite';
+
+// 每个用例一个新的文件库：Windows 的 CI 上文件读写慢，单个用例会超过默认的 5 秒
+vi.setConfig({ testTimeout: 30_000 });
 
 const dir = mkdtempSync(join(tmpdir(), 'eqts-libsql-'));
 const clients: Client[] = [];
