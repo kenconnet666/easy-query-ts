@@ -8,10 +8,10 @@ import { join } from 'node:path';
 import { afterAll } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { createDb, type Statement } from '@zerodep-dev/easy-query-ts';
-import { schema, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
-import { SQLITE_DDL } from '@zerodep-dev/easy-query-ts-test/sqlite-env';
-import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
-import { libsql } from '../src/index.ts';
+import { schema, type TestEnv } from '../src/fixture.ts';
+import { SQLITE_DDL } from '../src/sqlite-env.ts';
+import { liveSuite } from '../src/suite.ts';
+import { libsql } from '@zerodep-dev/easy-query-ts-sqlite';
 
 const dir = mkdtempSync(join(tmpdir(), 'eqts-libsql-'));
 const clients: Client[] = [];

@@ -46,5 +46,5 @@ const db = createDb({ schema, adapter: pglite(new PGlite()) });
 ## 测试
 
 PGlite 跑 PostgreSQL 的完整共用套件，libSQL 跑 SQLite 的完整共用套件，CI 与本地都跑，不要容器
-（`pg/test/pglite.test.ts`、`sqlite/test/libsql.test.ts`）。D1 用 node:sqlite 搭的替身验证绑定值与能力类型
-（`sqlite/test/d1.test.ts`）；bun:sqlite 在本机用 Bun 跑过冒烟（增删改查、事务回滚、流式读、只读事务）。
+（`pg/test/pglite.test.ts`、`test/test/sqlite.libsql.test.ts`）。D1 用 node:sqlite 搭的替身验证绑定值与能力类型
+（`test/test/sqlite.d1.test.ts`）；bun:sqlite 在本机用 Bun 跑过冒烟（增删改查、事务回滚、流式读、只读事务）。

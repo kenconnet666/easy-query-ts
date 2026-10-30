@@ -20,6 +20,7 @@
     "vitest": "catalog:"
   },
   "devDependencies": {
+    "@libsql/client": "catalog:",
     "decimal.js": "catalog:",
     "@internationalized/date": "catalog:",
     "zod": "catalog:",

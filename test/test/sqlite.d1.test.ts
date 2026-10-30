@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { describe, it } from 'vitest';
 import { col, createDb, defineSchema, entity } from '@zerodep-dev/easy-query-ts';
-import { d1, type D1Binding } from '../src/index.ts';
+import { d1, type D1Binding } from '@zerodep-dev/easy-query-ts-sqlite';
 
 /** D1 的替身：bind 时拒绝 D1 不认的值（bigint、Uint8Array、undefined），与真 D1 一样 */
 function fakeD1(database: DatabaseSync): D1Binding {
