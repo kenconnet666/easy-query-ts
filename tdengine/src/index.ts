@@ -60,8 +60,8 @@ export class TdengineDialect extends Dialect {
     throw new Error(`the tdengine dialect cannot write ${typeof value} values into SQL`);
   }
 
-  override encodeParam(value: unknown): unknown {
-    return typeof value === 'boolean' ? value : super.encodeParam(value);
+  override encodeParam(value: unknown, kind?: string): unknown {
+    return typeof value === 'boolean' ? value : super.encodeParam(value, kind);
   }
 
   override likeEscape(): string {

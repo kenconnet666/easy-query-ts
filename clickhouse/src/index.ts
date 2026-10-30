@@ -70,8 +70,8 @@ export class ClickHouseDialect extends Dialect {
   }
 
   /** 有 Bool 类型，不转 1 / 0 */
-  override encodeParam(value: unknown): unknown {
-    return typeof value === 'boolean' ? value : super.encodeParam(value);
+  override encodeParam(value: unknown, kind?: string): unknown {
+    return typeof value === 'boolean' ? value : super.encodeParam(value, kind);
   }
 
   override node(n: Node, w: SqlWriter): string {
@@ -199,6 +199,8 @@ export class ClickHouseDialect extends Dialect {
   override columnType(kind: string, o: ColumnOptions): string {
     if (o.dbType) return o.dbType;
     switch (kind) {
+      case 'uuid':
+        return 'UUID';
       case 'string':
       case 'json':
       case 'time':

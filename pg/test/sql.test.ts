@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import type { Pool } from 'pg';
 import { createDb } from '@zerodep-dev/easy-query-ts';
-import { ddlSchema, Gadget, schema, User } from '@zerodep-dev/easy-query-ts-test/fixture';
+import { ddlSchema, Gadget, schema, Token, User } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { postgres } from '../src/index.ts';
 
 describe('postgres: SQL text', () => {
@@ -32,6 +32,13 @@ describe('postgres: code-first DDL', () => {
   const db = createDb({
     schema,
     adapter: postgres({ query: async () => ({ rows: [] }) } as unknown as Pool),
+  });
+
+  it('stores uuids in the UUID type and ignores unsigned', () => {
+    assert.equal(
+      db.createTableSql(Token),
+      'CREATE TABLE IF NOT EXISTS "t_token" ("id" UUID NOT NULL, "owner" UUID, "hits" BIGINT NOT NULL, PRIMARY KEY ("id"))',
+    );
   });
 
   it('renders CREATE TABLE with PG types and an identity column', () => {

@@ -144,9 +144,12 @@ function columnBuilder(column: DbColumn): { builder: string; note?: string } {
   if (/^(text|mediumtext|longtext|tinytext|n?clob)$/.test(base))
     return { builder: `col.string().dbType(${quote(raw)})` };
   if (t === 'tinyint(1)' || /^(boolean|bool|bit)$/.test(base)) return { builder: 'col.boolean()' };
+  if (/^(uuid|uniqueidentifier)$/.test(base)) return { builder: 'col.uuid()' };
+  // MySQL 的 INT UNSIGNED 等
+  const unsigned = /\bunsigned\b/.test(t) ? '.unsigned()' : '';
   if (/^(int|integer|int4|smallint|int2|mediumint|tinyint|serial)$/.test(base))
-    return { builder: 'col.int()' };
-  if (/^(bigint|int8|bigserial)$/.test(base)) return { builder: 'col.bigint()' };
+    return { builder: `col.int()${unsigned}` };
+  if (/^(bigint|int8|bigserial)$/.test(base)) return { builder: `col.bigint()${unsigned}` };
   // Oracle 的整数是 NUMBER(p)：按精度分成 int / bigint，再大的按 decimal
   if (base === 'number' && args && (args.length === 1 || args[1] === 0)) {
     const precision = args[0]!;
@@ -167,6 +170,12 @@ function columnBuilder(column: DbColumn): { builder: string; note?: string } {
   if (/^(datetime|timestamp|seconddate)$/.test(base)) return { builder: 'col.datetime()' };
   if (/^(json|jsonb)$/.test(base))
     return { builder: 'col.json<unknown>()', note: '补上 JSON 的类型' };
+  // MySQL 的 BINARY(16) 多半是 uuid（col.uuid() 存的就是它），但也可能是别的定长二进制：留给人判断
+  if (base === 'binary' && args?.[0] === 16)
+    return {
+      builder: 'col.bytes().dbType("binary(16)")',
+      note: 'BINARY(16) 存的是 uuid 时改成 col.uuid()',
+    };
   if (/^(blob|bytea|varbinary|binary|longblob|mediumblob)$/.test(base))
     return { builder: 'col.bytes()' };
   return {

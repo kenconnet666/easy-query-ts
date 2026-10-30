@@ -1812,7 +1812,10 @@ export class PreparedQuery<P, Out> {
     if (given === undefined) throw new Error(`prepared query: no value for '${name}'`);
     const value = given === null || !transform ? given : transform(given);
     if (value === null) return null;
-    return this.ctx.dialect.encodeParam(param.codec ? param.codec.encode(value as never) : value);
+    return this.ctx.dialect.encodeParam(
+      param.codec ? param.codec.encode(value as never) : value,
+      param.codec?.kind,
+    );
   }
 }
 

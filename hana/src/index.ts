@@ -171,8 +171,8 @@ export class HanaDialect extends Dialect {
    * hdb 按服务器推断的参数类型校验 JS 类型；{@code SELECT ? FROM DUMMY}（多行插入、MERGE 的来源）里的参数被推成 NVARCHAR，只收字符串。
    * 数值类型的参数也接受字符串，所以数一律转成字符串传。
    */
-  override encodeParam(value: unknown): unknown {
-    const v = super.encodeParam(value);
+  override encodeParam(value: unknown, kind?: string): unknown {
+    const v = super.encodeParam(value, kind);
     return typeof v === 'number' || typeof v === 'bigint' ? String(v) : v;
   }
 

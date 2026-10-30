@@ -27,15 +27,16 @@ export const Order = entity('t_order', {
 
 这些类型正好是 json-wire（zerodep 的 typed JSON 库，Java 与 TypeScript 两边同一套写法）的种类表在 TypeScript 一侧的类型，也是 vue-tsx-pro 日期组件接受的值类型，所以**查询结果可以直接 `stringifyWire(row)` 发给前端，前端 `parseWireJson` 还原后能原样写回**，中间不需要转换：
 
-| 列                                      | JS 类型                 | json-wire 种类 | 库里                            |
-| --------------------------------------- | ----------------------- | -------------- | ------------------------------- |
-| `col.bigint({ mode: 'bigint' })`        | `bigint`                | `bigint`       | BIGINT / DECIMAL(p,0)           |
-| `decimalJs()`                           | `Decimal`               | `decimal`      | DECIMAL / NUMERIC               |
-| `calendarDate()`                        | `CalendarDate`          | `date`         | DATE                            |
-| `timeOfDay()`                           | `Time`                  | `time`         | TIME                            |
-| `calendarDateTime()`                    | `CalendarDateTime`      | `timestamp`    | DATETIME / TIMESTAMP（无时区）  |
-| `zonedDateTime(zone)`、`col.datetime()` | `ZonedDateTime`、`Date` | `timestamptz`  | DATETIME / TIMESTAMP，按 UTC 存 |
-| `col.bytes()`                           | `Uint8Array`            | `bytes`        | BLOB / BYTEA                    |
+| 列                                      | JS 类型                 | json-wire 种类 | 库里                                            |
+| --------------------------------------- | ----------------------- | -------------- | ----------------------------------------------- |
+| `col.bigint({ mode: 'bigint' })`        | `bigint`                | `bigint`       | BIGINT / DECIMAL(p,0)                           |
+| `decimalJs()`                           | `Decimal`               | `decimal`      | DECIMAL / NUMERIC                               |
+| `calendarDate()`                        | `CalendarDate`          | `date`         | DATE                                            |
+| `timeOfDay()`                           | `Time`                  | `time`         | TIME                                            |
+| `calendarDateTime()`                    | `CalendarDateTime`      | `timestamp`    | DATETIME / TIMESTAMP（无时区）                  |
+| `zonedDateTime(zone)`、`col.datetime()` | `ZonedDateTime`、`Date` | `timestamptz`  | DATETIME / TIMESTAMP，按 UTC 存                 |
+| `col.bytes()`                           | `Uint8Array`            | `bytes`        | BLOB / BYTEA                                    |
+| `col.uuid()`                            | `string`（小写）        | —              | UUID / BINARY(16) / UNIQUEIDENTIFIER / CHAR(36) |
 
 已用 json-wire 的 TypeScript 包做过一次端到端检查：数据库行 → `stringifyWire`（`$types` 自动标出 `decimal / bigint / date / timestamp / timestamptz / time / bytes`）→ `parseWireJson` → 写回数据库，两边的行一致。注意 json-wire 用 `instanceof` 判断类型，应用里 `decimal.js` 与 `@internationalized/date` 必须只有一份（peer 依赖正常安装就是这样）。
 
@@ -45,6 +46,12 @@ export const Order = entity('t_order', {
 - **Decimal**：读写都走文字（`toFixed()`，不会写成 `1e+21`），不依赖驱动把 DECIMAL 读成 number 还是 string；`sum / avg` 保持 Decimal。
 - **日期**：`calendarDate` 不经过时区；`calendarDateTime` 原样存取墙上时间；`zonedDateTime(zone)` 存时刻（UTC），读出换算到指定时区，所以不同机器、不同会话时区读出的结果一致。三者都可以用 `year() / month() / day() / addDays() / diffDays()`。
 - **二进制**：读出的是普通 `Uint8Array`（不是 Buffer）。
+- **uuid**：JS 里是小写的标准写法文字，写入时检查格式（大写也收）。PG、DuckDB、ClickHouse 存 UUID，SQL Server 存 UNIQUEIDENTIFIER，
+  MySQL 存 BINARY(16)（绑定时换成 16 个字节，读出再换回来；比 CHAR(36) 省一半多，比较更快），Doris 与其它库存文字。
+  主键用 `col.uuid().primaryKey().$default(uuidv7)`：v7 按时间有序（同一进程里同一毫秒也单调递增），新行插在索引末尾。
+  SQL Server 的 UNIQUEIDENTIFIER 排序先比较最后 6 个字节，按它排序不是按时间。
+- **无符号**：`col.int().unsigned()`、`col.bigint().unsigned()` 在 MySQL 建成 `INT UNSIGNED` 等；别的库没有无符号类型，建表时忽略。
+  `eqts pull` 认得 `uuid`、`uniqueidentifier` 与 `unsigned`。
 
 ## 加自己的类型（扩展点）
 

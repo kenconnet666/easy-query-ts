@@ -42,6 +42,7 @@ export type ColumnKind =
   | 'datetime'
   | 'json'
   | 'bytes'
+  | 'uuid'
   | (string & {});
 
 /** 逻辑删除：active 是"未删除"时的值（null 表示 IS NULL），deleted 是删除时写入的值（可以是函数，如当前时间） */
@@ -83,6 +84,8 @@ export interface ColumnOptions {
   readonly unique?: boolean | undefined;
   /** 列注释：MySQL 写进列定义的 COMMENT，PG / HANA 用 COMMENT ON COLUMN，SQLite 没有 */
   readonly comment?: string | undefined;
+  /** 无符号（MySQL 的 INT UNSIGNED 等）；没有无符号类型的库忽略 */
+  readonly unsigned?: boolean | undefined;
   /** 库里原来的列名：syncTables 发现新列名不在、旧列名在时改名而不是加列（对应 Java 版的 @Column(renameFrom)） */
   readonly renamedFrom?: string | undefined;
 }
@@ -207,6 +210,13 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
    */
   brand<B extends string>(): Column<Branded<T, B>, N, O> {
     return this as unknown as Column<Branded<T, B>, N, O>;
+  }
+
+  /** 无符号（数值列）：MySQL 建成 INT UNSIGNED 等，取值范围翻倍；别的库没有无符号类型，建表时忽略 */
+  unsigned(): Column<T, N, O> {
+    if (!['int', 'bigint', 'decimal', 'double'].includes(this.codec.kind))
+      throw new TypeError(`unsigned() is for numeric columns, not '${this.codec.kind}'`);
+    return new Column(this.codec, { ...this.options, unsigned: true });
   }
 
   /** 只在插入时写入，更新永远不碰；在 set 里给它赋值会报错 */
@@ -360,6 +370,59 @@ function hexToBytes(text: string): Uint8Array {
   return Uint8Array.from(hex.match(/../g) ?? [], (b) => parseInt(b, 16));
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** 驱动读出的 uuid → 小写的标准写法：PG、DuckDB 给文字，SQL Server 给大写文字，MySQL 的 BINARY(16) 给 16 个字节 */
+function toUuid(raw: unknown): string {
+  if (typeof raw !== 'string') {
+    const bytes = new Uint8Array(raw as ArrayLike<number>);
+    if (bytes.length !== 16) throw new TypeError(`a uuid has 16 bytes, got ${bytes.length}`);
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return checkUuid(raw);
+}
+
+function checkUuid(value: string): string {
+  const text = value.toLowerCase();
+  if (!UUID.test(text)) throw new TypeError(`not a uuid: '${value}'`);
+  return text;
+}
+
+/**
+ * 按时间有序的 UUID（RFC 9562 的 v7）：前 48 位是毫秒时间戳，其余随机。做主键时新行总插在索引末尾，不像 v4 那样把 B 树写散；
+ * 同一毫秒里生成的按 12 位计数递增（RFC 9562 §6.2 方法 1），同一进程里先生成的一定排在前面（时钟回拨时沿用上一次的时间）。
+ * 用法：`col.uuid().primaryKey().$default(uuidv7)`
+ */
+export function uuidv7(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let ms = Date.now();
+  if (ms > v7.ms) {
+    v7.ms = ms;
+    // 计数从随机的低半区开始：既不可猜，又给同一毫秒留够递增的余地
+    v7.seq = ((bytes[6]! << 8) | bytes[7]!) & 0x7ff;
+  } else if (v7.seq < 0xfff) {
+    v7.seq += 1;
+    ms = v7.ms;
+  } else {
+    // 一毫秒里用完了 4096 个：借下一毫秒
+    ms = v7.ms += 1;
+    v7.seq = 0;
+  }
+  bytes[6] = v7.seq >> 8;
+  bytes[7] = v7.seq & 0xff;
+  for (let i = 5; i >= 0; i--) {
+    bytes[i] = ms % 256;
+    ms = Math.floor(ms / 256);
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  return toUuid(bytes);
+}
+
+/** uuidv7 上一次用的毫秒与计数 */
+const v7 = { ms: 0, seq: 0 };
+
 function base<T>(c: Codec<T>, extra: Partial<ColumnOptions> = {}): Column<T, false, false> {
   return new Column(c, {
     nullable: false,
@@ -476,6 +539,12 @@ export const col = {
    * 校验器必须是同步的。
    */
   json: jsonColumn,
+  /**
+   * UUID：JS 里是小写的标准写法文字。PG、DuckDB、ClickHouse 存 UUID，SQL Server 存 UNIQUEIDENTIFIER，MySQL 存 BINARY(16)
+   * （16 个字节，比 CHAR(36) 省一半多、比较更快），其它库存 CHAR(36)。客户端生成：`.$default(uuidv7)`（按时间有序）或
+   * `.$default(() => crypto.randomUUID())`
+   */
+  uuid: () => base(codec<string>('uuid', toUuid, checkUuid)),
   /** 字符串枚举：写入和读出都校验在列表里，TS 类型是这些字面量的并集 */
   enum: <const V extends string>(values: readonly V[]) => {
     const check = (v: unknown): V => {

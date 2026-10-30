@@ -52,6 +52,8 @@ export class PostgresDialect extends Dialect {
   override columnType(kind: string, o: ColumnOptions): string {
     if (o.dbType) return o.dbType;
     switch (kind) {
+      case 'uuid':
+        return 'UUID';
       case 'decimal':
         return `NUMERIC(${o.precision ?? 38}, ${o.scale ?? 10})`;
       case 'json':
@@ -126,7 +128,7 @@ export class PostgresDialect extends Dialect {
   }
 
   /** PG 有布尔类型，不转 1 / 0 */
-  override encodeParam(value: unknown): unknown {
-    return typeof value === 'boolean' ? value : super.encodeParam(value);
+  override encodeParam(value: unknown, kind?: string): unknown {
+    return typeof value === 'boolean' ? value : super.encodeParam(value, kind);
   }
 }

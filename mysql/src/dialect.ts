@@ -58,6 +58,13 @@ export class MySqlDialect extends Dialect {
    * mysql2 的 query 在客户端把参数插进 SQL：bigint 会被写成带引号的字符串，`BIGINT + '1'` 在 MySQL 里按 DOUBLE 运算，
    * 超过 2^53 的值就丢精度。bigint 只含数字和负号，直接写成整数字面量；二进制统一成 Buffer（mysql2 只认 Buffer）。
    */
+  /** uuid 列存 BINARY(16)：标准写法的文字换成 16 个字节 */
+  override encodeParam(value: unknown, kind?: string): unknown {
+    if (kind === 'uuid' && typeof value === 'string')
+      return Buffer.from(value.replace(/-/g, ''), 'hex');
+    return super.encodeParam(value, kind);
+  }
+
   override bindParam(value: unknown, w: SqlWriter): string {
     if (typeof value === 'bigint') return value.toString();
     return super.bindParam(
@@ -68,7 +75,17 @@ export class MySqlDialect extends Dialect {
 
   override columnType(kind: string, o: ColumnOptions): string {
     if (o.dbType) return o.dbType;
+    const type = this.baseColumnType(kind, o);
+    return o.unsigned && /^(TINYINT|SMALLINT|INT|BIGINT|DECIMAL|DOUBLE)\b/.test(type)
+      ? `${type} UNSIGNED`
+      : type;
+  }
+
+  private baseColumnType(kind: string, o: ColumnOptions): string {
     switch (kind) {
+      // 16 个字节：比 CHAR(36) 省一半多，比较也快；绑定时把文字换成字节（encodeParam）
+      case 'uuid':
+        return 'BINARY(16)';
       case 'int':
         return 'INT';
       case 'double':

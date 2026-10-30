@@ -81,8 +81,8 @@ export class DuckDbDialect extends Dialect {
   }
 
   /** DuckDB 有布尔类型 */
-  override encodeParam(value: unknown): unknown {
-    return typeof value === 'boolean' ? value : super.encodeParam(value);
+  override encodeParam(value: unknown, kind?: string): unknown {
+    return typeof value === 'boolean' ? value : super.encodeParam(value, kind);
   }
 
   protected override functions(): Record<string, FunctionRenderer> {
@@ -120,6 +120,8 @@ export class DuckDbDialect extends Dialect {
   override columnType(kind: string, o: ColumnOptions): string {
     if (o.dbType) return o.dbType;
     switch (kind) {
+      case 'uuid':
+        return 'UUID';
       // VARCHAR 不限长度（写了长度也不检查），读库结构时也没有长度：不写
       case 'string':
         return 'VARCHAR';

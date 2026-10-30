@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import type { Pool } from 'mysql2/promise';
 import { col, createDb, Dialect, entity, win, type Driver } from '@zerodep-dev/easy-query-ts';
-import { ddlSchema, Gadget, schema, User } from '@zerodep-dev/easy-query-ts-test/fixture';
+import { ddlSchema, Gadget, schema, Token, User } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { MySQL, mysql } from '../src/index.ts';
 
 describe('mysql: SQL text', () => {
@@ -86,6 +86,18 @@ describe('mysql: code-first DDL', () => {
       'CREATE TABLE IF NOT EXISTS `t_gadget` (`id` BIGINT AUTO_INCREMENT NOT NULL, `name` VARCHAR(50) NOT NULL, `price` DECIMAL(10, 2) NOT NULL,' +
         ' `qty` INT NOT NULL DEFAULT 0, `active` BOOLEAN NOT NULL, `born` DATE, `seen_at` DATETIME(3) NOT NULL, `tags` JSON NOT NULL, `photo` BLOB, PRIMARY KEY (`id`), UNIQUE (`name`))',
     );
+  });
+
+  it('stores uuids as BINARY(16) and binds them as 16 bytes; unsigned columns get UNSIGNED', () => {
+    assert.equal(
+      db.createTableSql(Token),
+      'CREATE TABLE IF NOT EXISTS `t_token` (`id` BINARY(16) NOT NULL, `owner` BINARY(16), `hits` BIGINT UNSIGNED NOT NULL, PRIMARY KEY (`id`))',
+    );
+    const { params } = db
+      .queryable(Token)
+      .where((t) => t.owner.eq('0192F3A4-1B2C-7D8E-9F01-23456789ABCD'))
+      .toSQL();
+    assert.deepEqual(params, [Buffer.from('0192f3a41b2c7d8e9f0123456789abcd', 'hex')]);
   });
 
   it('asks for an explicit dbType when the kind has no database type', () => {

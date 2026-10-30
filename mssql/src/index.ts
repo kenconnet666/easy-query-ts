@@ -354,6 +354,8 @@ export class MsSqlDialect extends Dialect {
   override columnType(kind: string, o: ColumnOptions): string {
     if (o.dbType) return o.dbType;
     switch (kind) {
+      case 'uuid':
+        return 'UNIQUEIDENTIFIER';
       case 'string':
         return `NVARCHAR(${o.length ?? 255})`;
       case 'int':

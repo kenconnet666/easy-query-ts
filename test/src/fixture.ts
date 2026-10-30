@@ -5,6 +5,7 @@ import {
   col,
   defineSchema,
   entity,
+  uuidv7,
   type Adapter,
   type Db,
   type Statement,
@@ -128,6 +129,13 @@ export const Gadget = entity('t_gadget', {
   seenAt: col.datetime(),
   tags: col.json<string[]>(),
   photo: col.bytes().nullable(),
+});
+
+/** uuid 主键（客户端按时间有序生成）、uuid 外键与无符号整数：建表与往返的用例（ROADMAP 19.1） */
+export const Token = entity('t_token', {
+  id: col.uuid().primaryKey().$default(uuidv7),
+  owner: col.uuid().nullable(),
+  hits: col.bigint().unsigned(),
 });
 
 export const schema = defineSchema(

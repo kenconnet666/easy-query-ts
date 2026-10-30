@@ -311,6 +311,8 @@ export abstract class Dialect {
         return 'TEXT';
       case 'bytes':
         return 'BLOB';
+      case 'uuid':
+        return 'CHAR(36)';
       default:
         throw new Error(
           `no database type for a '${kind}' column on the ${this.name} dialect; give one with .dbType('…')`,
@@ -493,7 +495,8 @@ export abstract class Dialect {
   }
 
   /** 没有列编码时，JS 值 → 驱动接受的参数 */
-  encodeParam(value: unknown): unknown {
+  /** 绑定前的转换；kind 是参数对应的列的种类（没有列时 undefined），方言按它换成库里的存法（MySQL 的 uuid 存成 16 字节） */
+  encodeParam(value: unknown, _kind?: string): unknown {
     if (value instanceof Date) return utcText(value);
     if (typeof value === 'boolean') return value ? 1 : 0;
     return value;
@@ -697,7 +700,9 @@ export abstract class Dialect {
         if (n.value instanceof Placeholder)
           return this.bindParam(new PreparedParam(n.value, n.codec as never), w);
         return this.bindParam(
-          n.value == null ? null : this.encodeParam(n.codec ? n.codec.encode(n.value) : n.value),
+          n.value == null
+            ? null
+            : this.encodeParam(n.codec ? n.codec.encode(n.value) : n.value, n.codec?.kind),
           w,
         );
       case 'lit':

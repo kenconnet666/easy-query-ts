@@ -87,9 +87,9 @@ export class OracleDialect extends Dialect {
   }
 
   /** 没有 SQL 的 BOOLEAN 时（23ai 之前）布尔写成 1 / 0 */
-  override encodeParam(value: unknown): unknown {
+  override encodeParam(value: unknown, kind?: string): unknown {
     if (typeof value === 'boolean') return this.booleanValues ? value : value ? 1 : 0;
-    return super.encodeParam(value);
+    return super.encodeParam(value, kind);
   }
 
   // ---- 查询 ----
