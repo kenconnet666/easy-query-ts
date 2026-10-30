@@ -20,14 +20,13 @@ import {
   type TransactionOptions,
 } from '@zerodep-dev/easy-query-ts';
 import { KingbaseDialect, OpenGaussDialect } from './compatible.ts';
-import { PostgresDialect } from './dialect.ts';
+import { PostgresDialect, TEXT_TYPE_OIDS } from './dialect.ts';
 
 export { Pg } from './functions.ts';
 export { PostgresDialect } from './dialect.ts';
 export { KingbaseDialect, OpenGaussDialect } from './compatible.ts';
 
-/** date、time、timetz、timestamp、timestamptz 的 OID：按文字读 */
-const AS_TEXT = new Set([1082, 1083, 1266, 1114, 1184]);
+const AS_TEXT = new Set(TEXT_TYPE_OIDS);
 
 const types = {
   getTypeParser: ((oid: number) =>

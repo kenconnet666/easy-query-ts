@@ -10,6 +10,7 @@ import { createDb, sql, type Statement } from '@zerodep-dev/easy-query-ts';
 import { Post, schema, seed, User, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
 import { Pg, postgres } from '../src/index.ts';
+import { arraySuite } from './arrays.ts';
 import { DDL } from './ddl.ts';
 
 const urls = (process.env['EQTS_PG_URLS'] ?? '')
@@ -41,6 +42,7 @@ for (const url of urls) {
   };
 
   liveSuite(`postgres ${new URL(url).port}`, open, { extensionTypes: true, extraTables: true });
+  arraySuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
 
   describe(`postgres ${new URL(url).port}: Pg.* functions`, () => {
     it('jsonb, arrays and full-text search', async () => {

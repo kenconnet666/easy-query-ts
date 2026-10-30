@@ -137,6 +137,9 @@ export class SqliteDialect extends Dialect {
         return 'REAL';
       case 'bytes':
         return 'BLOB';
+      // 数组列不能悄悄存成文字：报不支持
+      case 'array':
+        return super.columnType(kind, o);
       default:
         return 'TEXT';
     }

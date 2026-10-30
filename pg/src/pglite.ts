@@ -5,7 +5,7 @@
  * import { pglite } from '@zerodep-dev/easy-query-ts-pg/pglite'
  * const db = createDb({ schema, adapter: pglite(new PGlite()) })
  * ```
- * 单独一个入口：不用装 pg。方言与 postgres() 相同；日期时间、int8、numeric 按文字读，再由列的 codec 解码（与 pg 驱动一致）。
+ * 单独一个入口：不用装 pg。方言与 postgres() 相同；日期时间、int8、numeric（及其数组）按文字读，再由列的 codec 解码（与 pg 驱动一致）。
  * PGlite 只有一条连接：事务进行中其它异步代码发出的语句会排在事务之后（PGlite 自己排队）
  */
 import type {
@@ -15,11 +15,9 @@ import type {
   Session,
   TransactionOptions,
 } from '@zerodep-dev/easy-query-ts';
-import { PostgresDialect } from './dialect.ts';
+import { PostgresDialect, TEXT_TYPE_OIDS } from './dialect.ts';
 
-/** date、time、timetz、timestamp、timestamptz、int8、numeric 的 OID：按文字读 */
-const AS_TEXT = [1082, 1083, 1266, 1114, 1184, 20, 1700];
-const parsers = Object.fromEntries(AS_TEXT.map((oid) => [oid, (value: string) => value]));
+const parsers = Object.fromEntries(TEXT_TYPE_OIDS.map((oid) => [oid, (value: string) => value]));
 
 interface PgliteResult {
   readonly rows: Record<string, unknown>[];

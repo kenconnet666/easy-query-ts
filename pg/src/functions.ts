@@ -35,15 +35,16 @@ export const Pg = {
     /** 顶层有这个键：{@code jsonb_exists(col::jsonb, ?)}（不用 ? 运算符，避免与占位符混淆） */
     hasKey: (key: string) => pred('pg.jsonb_exists', [column, key]),
   }),
+  /** 任意数组表达式（原生 SQL 片段等）；col.array 的列直接用列上的 has / hasAll / hasAny / arrayLength */
   array: (column: Expr<unknown>) => {
-    const has = (value: unknown) => pred('pg.any', [value, column]);
+    const has = (value: unknown) => pred('array_has', [column, value]);
     return {
       /** 含有 value：{@code ? = ANY(col)} */
       has,
       hasAll: (...values: unknown[]) => and(...values.map(has)),
       hasAny: (...values: unknown[]) => or(...values.map(has)),
       /** 元素个数：{@code cardinality(col)} */
-      length: () => dialectFn<number | null>('pg.cardinality', [column], codecs.int),
+      length: () => dialectFn<number | null>('array_length', [column], codecs.int),
     };
   },
   /** 全文检索；config 默认 'simple'（只按空白与标点分词），英文可用 'english' */
@@ -60,8 +61,11 @@ export const pgFunctions: Record<string, FunctionRenderer> = {
   'pg.jsonb_contains': (a) => `(${a[0]})::jsonb @> (${a[1]})::jsonb`,
   'pg.jsonb_contained_by': (a) => `(${a[0]})::jsonb <@ (${a[1]})::jsonb`,
   'pg.jsonb_exists': (a) => `jsonb_exists((${a[0]})::jsonb, ${a[1]})`,
-  'pg.any': (a) => `${a[0]} = ANY(${a[1]})`,
-  'pg.cardinality': (a) => `cardinality(${a[0]})`,
+  // 数组（col.array 的列方法与 Pg.array 共用）
+  array_has: (a) => `${a[1]} = ANY(${a[0]})`,
+  array_contains: (a) => `${a[0]} @> ${a[1]}`,
+  array_overlaps: (a) => `${a[0]} && ${a[1]}`,
+  array_length: (a) => `cardinality(${a[0]})`,
   'pg.ts_match': (a) => `to_tsvector(${a[0]}, ${a[1]}) @@ websearch_to_tsquery(${a[0]}, ${a[2]})`,
   'pg.ts_rank': (a) =>
     `ts_rank(to_tsvector(${a[0]}, ${a[1]}), websearch_to_tsquery(${a[0]}, ${a[2]}))`,

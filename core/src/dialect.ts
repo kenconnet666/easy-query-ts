@@ -313,6 +313,10 @@ export abstract class Dialect {
         return 'BLOB';
       case 'uuid':
         return 'CHAR(36)';
+      case 'array':
+        throw new Error(
+          `array columns are only supported on PostgreSQL, not the ${this.name} dialect; use col.json<T[]>() instead`,
+        );
       default:
         throw new Error(
           `no database type for a '${kind}' column on the ${this.name} dialect; give one with .dbType('…')`,

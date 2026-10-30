@@ -3690,22 +3690,27 @@ export function liveSuite(
       );
     });
 
-    it('inserts many rows, splitting them into statements below the parameter limit', async () => {
-      const { db } = await seeded();
-      // 3 列 × 12000 行 = 36000 个参数，超过 SQLite 的 32766，必须分块；其它库一次也能装下，结果一致
-      const rows = Array.from({ length: 12000 }, (_, i) => ({
-        userId: 1,
-        title: `bulk ${i}`,
-        amount: '1.00' as const,
-      }));
-      assert.equal(await db.insert(Post).values(rows).execute(), 12000);
-      assert.equal(
-        await db
-          .queryable(Post)
-          .where((p) => p.title.startsWith('bulk '))
-          .count(),
-        12000,
-      );
-    });
+    // 12000 行：单独跑一两秒，全量并发（PGlite 等也在跑）时会超过默认的 5 秒
+    it(
+      'inserts many rows, splitting them into statements below the parameter limit',
+      { timeout: 30_000 },
+      async () => {
+        const { db } = await seeded();
+        // 3 列 × 12000 行 = 36000 个参数，超过 SQLite 的 32766，必须分块；其它库一次也能装下，结果一致
+        const rows = Array.from({ length: 12000 }, (_, i) => ({
+          userId: 1,
+          title: `bulk ${i}`,
+          amount: '1.00' as const,
+        }));
+        assert.equal(await db.insert(Post).values(rows).execute(), 12000);
+        assert.equal(
+          await db
+            .queryable(Post)
+            .where((p) => p.title.startsWith('bulk '))
+            .count(),
+          12000,
+        );
+      },
+    );
   });
 }

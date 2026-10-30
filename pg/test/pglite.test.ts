@@ -8,6 +8,7 @@ import { createDb, type Statement } from '@zerodep-dev/easy-query-ts';
 import { schema, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
 import { pglite } from '../src/pglite.ts';
+import { arraySuite } from './arrays.ts';
 import { DDL } from './ddl.ts';
 
 const database = new PGlite();
@@ -23,3 +24,5 @@ const open = async (): Promise<TestEnv> => {
 
 // 只有一条连接：两个事务互相等锁（NOWAIT、SKIP LOCKED）的用例会卡住
 liveSuite('pglite', open, { extensionTypes: true, extraTables: true, rowLocks: false });
+
+arraySuite('pglite', async () => pglite(database));

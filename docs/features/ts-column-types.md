@@ -37,6 +37,7 @@ export const Order = entity('t_order', {
 | `zonedDateTime(zone)`、`col.datetime()` | `ZonedDateTime`、`Date` | `timestamptz`  | DATETIME / TIMESTAMP，按 UTC 存                 |
 | `col.bytes()`                           | `Uint8Array`            | `bytes`        | BLOB / BYTEA                                    |
 | `col.uuid()`                            | `string`（小写）        | —              | UUID / BINARY(16) / UNIQUEIDENTIFIER / CHAR(36) |
+| `col.array(元素列)`                     | `元素[]`                | —              | PG 的 `元素类型[]`（只支持 PG）                 |
 
 已用 json-wire 的 TypeScript 包做过一次端到端检查：数据库行 → `stringifyWire`（`$types` 自动标出 `decimal / bigint / date / timestamp / timestamptz / time / bytes`）→ `parseWireJson` → 写回数据库，两边的行一致。注意 json-wire 用 `instanceof` 判断类型，应用里 `decimal.js` 与 `@internationalized/date` 必须只有一份（peer 依赖正常安装就是这样）。
 
@@ -50,6 +51,9 @@ export const Order = entity('t_order', {
   MySQL 存 BINARY(16)（绑定时换成 16 个字节，读出再换回来；比 CHAR(36) 省一半多，比较更快），Doris 与其它库存文字。
   主键用 `col.uuid().primaryKey().$default(uuidv7)`：v7 按时间有序（同一进程里同一毫秒也单调递增），新行插在索引末尾。
   SQL Server 的 UNIQUEIDENTIFIER 排序先比较最后 6 个字节，按它排序不是按时间。
+- **数组（PG）**：`col.array(col.string(30))` 建成 `VARCHAR(30)[]`，元素逐个经过元素列的 codec（日期时间、bigint、decimal 的数组按文字读，
+  不经过驱动按本地时区解析）；元素可空写 `col.array(col.int().nullable())`。条件：`has(v)`（`? = ANY(col)`）、`hasAll([…])`（`@>`）、
+  `hasAny([…])`（`&&`）、`arrayLength()`（`cardinality`）。只支持一维；别的库建表时报不支持，改用 `col.json<T[]>()`。
 - **无符号**：`col.int().unsigned()`、`col.bigint().unsigned()` 在 MySQL 建成 `INT UNSIGNED` 等；别的库没有无符号类型，建表时忽略。
   `eqts pull` 认得 `uuid`、`uniqueidentifier` 与 `unsigned`。
 

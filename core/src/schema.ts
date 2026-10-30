@@ -22,6 +22,8 @@ export interface Codec<T> {
   encode(value: T): unknown;
   /** 透明加密的列带着它的加密策略：like 据此加密搜索词，或在策略不支持时报错 */
   readonly encryption?: Encryption | undefined;
+  /** 数组列的元素：数组的条件（has）按它编码单个值 */
+  readonly element?: Codec<any> | undefined;
 }
 
 /**
@@ -43,6 +45,7 @@ export type ColumnKind =
   | 'json'
   | 'bytes'
   | 'uuid'
+  | 'array'
   | (string & {});
 
 /** 逻辑删除：active 是"未删除"时的值（null 表示 IS NULL），deleted 是删除时写入的值（可以是函数，如当前时间） */
@@ -86,6 +89,8 @@ export interface ColumnOptions {
   readonly comment?: string | undefined;
   /** 无符号（MySQL 的 INT UNSIGNED 等）；没有无符号类型的库忽略 */
   readonly unsigned?: boolean | undefined;
+  /** 数组列的元素列（建表时取它的类型，如 VARCHAR(50)[]） */
+  readonly element?: Column<unknown, boolean, boolean> | undefined;
   /** 库里原来的列名：syncTables 发现新列名不在、旧列名在时改名而不是加列（对应 Java 版的 @Column(renameFrom)） */
   readonly renamedFrom?: string | undefined;
 }
@@ -370,6 +375,52 @@ function hexToBytes(text: string): Uint8Array {
   return Uint8Array.from(hex.match(/../g) ?? [], (b) => parseInt(b, 16));
 }
 
+/**
+ * PG 的一维数组字面量 → 元素文字：`{a,"b c",NULL,"x\"y"}` → ['a', 'b c', null, 'x"y']。
+ * 日期时间的数组按文字读出（不经过驱动按本地时区解析），由元素的 codec 解码
+ */
+export function parsePgArray(text: string): (string | null)[] {
+  if (!text.startsWith('{') || !text.endsWith('}'))
+    throw new TypeError(`not an array literal: ${text.slice(0, 40)}`);
+  const items: (string | null)[] = [];
+  let i = 1;
+  while (i < text.length - 1) {
+    if (text[i] === '"') {
+      let item = '';
+      for (i++; text[i] !== '"'; i++) item += text[i] === '\\' ? text[++i] : text[i];
+      items.push(item);
+      i++;
+    } else {
+      const end = text.indexOf(',', i);
+      const item = text.slice(i, end === -1 ? text.length - 1 : end);
+      if (item.startsWith('{')) throw new TypeError('multi-dimensional arrays are not supported');
+      items.push(item === 'NULL' ? null : item);
+      i += item.length;
+    }
+    // 跳过分隔的逗号
+    i++;
+  }
+  return items;
+}
+
+/** 元素列 → 数组里元素的类型（可空的元素列带上 null） */
+export type ElementOf<C> =
+  C extends Column<infer T, infer N, boolean> ? (N extends true ? T | null : T) : never;
+
+/** 数组列：元素逐个经过元素列的 codec；驱动给 JS 数组或 PG 的数组字面量都认 */
+function arrayColumn<C extends Column<any, boolean, boolean>>(
+  element: C,
+): Column<ElementOf<C>[], false, false> {
+  const inner = element.codec;
+  const decode = (raw: unknown): ElementOf<C>[] => {
+    const items = typeof raw === 'string' ? parsePgArray(raw) : (raw as unknown[]);
+    return items.map((v) => (v === null ? null : inner.decode(v))) as ElementOf<C>[];
+  };
+  const encode = (values: ElementOf<C>[]): unknown =>
+    values.map((v) => (v === null ? null : inner.encode(v)));
+  return base({ kind: 'array', decode, encode, element: inner }, { element });
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** 驱动读出的 uuid → 小写的标准写法：PG、DuckDB 给文字，SQL Server 给大写文字，MySQL 的 BINARY(16) 给 16 个字节 */
@@ -545,6 +596,11 @@ export const col = {
    * `.$default(() => crypto.randomUUID())`
    */
   uuid: () => base(codec<string>('uuid', toUuid, checkUuid)),
+  /**
+   * 数组列（PostgreSQL）：`col.array(col.string(50))` 建成 VARCHAR(50)[]，JS 里是 string[]；元素可空时写 `col.array(col.int().nullable())`。
+   * 条件用 `has(v)`、`hasAll([…])`、`hasAny([…])`、`arrayLength()`。只支持一维；别的库没有数组类型，改用 `col.json<T[]>()`
+   */
+  array: arrayColumn,
   /** 字符串枚举：写入和读出都校验在列表里，TS 类型是这些字面量的并集 */
   enum: <const V extends string>(values: readonly V[]) => {
     const check = (v: unknown): V => {

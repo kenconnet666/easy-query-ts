@@ -11,6 +11,19 @@ import {
   type SqlWriter,
 } from '@zerodep-dev/easy-query-ts';
 
+/**
+ * 按文字读的类型 OID：日期时间（不经过驱动按本地时区解析）、int8 与 numeric（不丢精度），以及它们的数组
+ * （数组字面量由 col.array 的 codec 解析）。各个 PG 驱动（pg、PGlite）共用
+ */
+export const TEXT_TYPE_OIDS: readonly number[] = [
+  // date、time、timetz、timestamp、timestamptz
+  1082, 1083, 1266, 1114, 1184,
+  // int8、numeric
+  20, 1700,
+  // 上面这些的数组：date[]、time[]、timetz[]、timestamp[]、timestamptz[]、int8[]、numeric[]
+  1182, 1183, 1270, 1115, 1185, 1016, 1231,
+];
+
 export class PostgresDialect extends Dialect {
   readonly name: string = 'postgres';
   /** PG 协议里参数个数是 16 位整数，最多 65535 */
@@ -54,6 +67,10 @@ export class PostgresDialect extends Dialect {
     switch (kind) {
       case 'uuid':
         return 'UUID';
+      case 'array': {
+        const element = o.element!;
+        return `${this.columnType(element.codec.kind, element.options)}[]`;
+      }
       case 'decimal':
         return `NUMERIC(${o.precision ?? 38}, ${o.scale ?? 10})`;
       case 'json':

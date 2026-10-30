@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import type { Pool } from 'pg';
-import { createDb } from '@zerodep-dev/easy-query-ts';
+import { col, createDb, entity } from '@zerodep-dev/easy-query-ts';
 import { ddlSchema, Gadget, schema, Token, User } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { postgres } from '../src/index.ts';
 
@@ -32,6 +32,33 @@ describe('postgres: code-first DDL', () => {
   const db = createDb({
     schema,
     adapter: postgres({ query: async () => ({ rows: [] }) } as unknown as Pool),
+  });
+
+  it('renders array columns as element type plus [] and array conditions with ANY, @> and &&', () => {
+    const Tagged = entity('t_tagged', {
+      id: col.int().primaryKey(),
+      tags: col.array(col.string(30)),
+      scores: col.array(col.int().nullable()).nullable(),
+    });
+    assert.equal(
+      db.createTableSql(Tagged),
+      'CREATE TABLE IF NOT EXISTS "t_tagged" ("id" INTEGER NOT NULL, "tags" VARCHAR(30)[] NOT NULL, "scores" INTEGER[], PRIMARY KEY ("id"))',
+    );
+    const s = db
+      .queryable(Tagged)
+      .where((t) => [
+        t.tags.has('a'),
+        t.tags.hasAll(['a', 'b']),
+        t.tags.hasAny(['c']),
+        t.scores.arrayLength().gt(1),
+      ])
+      .select((t) => t.id)
+      .toSQL();
+    assert.equal(
+      s.sql,
+      'SELECT t0."id" AS "c0" FROM "t_tagged" t0 WHERE $1 = ANY(t0."tags") AND t0."tags" @> $2 AND t0."tags" && $3 AND cardinality(t0."scores") > $4',
+    );
+    assert.deepEqual(s.params, ['a', ['a', 'b'], ['c'], 1]);
   });
 
   it('stores uuids in the UUID type and ignores unsigned', () => {

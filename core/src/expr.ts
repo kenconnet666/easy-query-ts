@@ -623,6 +623,34 @@ export class Expr<T> {
     return toNode(value, this.codec);
   }
 
+  // ---- 数组列（col.array，PostgreSQL）；别的方言渲染时报不支持 ----
+
+  /** 数组里有这个值：`? = ANY(col)` */
+  has<E>(this: Expr<readonly E[] | null>, value: E | Expr<E>): Pred {
+    const node =
+      value instanceof Expr
+        ? value.node
+        : { k: 'param' as const, value, codec: this.codec?.element };
+    return pred({ k: 'fn', name: 'array_has', args: [this.node, node] });
+  }
+  /** 这些值都在数组里：`col @> ?` */
+  hasAll<E>(this: Expr<readonly E[] | null>, values: readonly E[]): Pred {
+    return pred({ k: 'fn', name: 'array_contains', args: [this.node, this.arrayParam(values)] });
+  }
+  /** 至少一个值在数组里（有交集）：`col && ?` */
+  hasAny<E>(this: Expr<readonly E[] | null>, values: readonly E[]): Pred {
+    return pred({ k: 'fn', name: 'array_overlaps', args: [this.node, this.arrayParam(values)] });
+  }
+  /** 元素个数：`cardinality(col)`；空数组是 0，NULL 是 NULL */
+  arrayLength(this: Expr<readonly unknown[] | null>): Expr<Keep<T, number>> {
+    return new Expr({ k: 'fn', name: 'array_length', args: [this.node] }, codecs.int);
+  }
+
+  private arrayParam(values: readonly unknown[]): Node {
+    if (values.length === 0) throw new TypeError('give at least one value');
+    return { k: 'param', value: values, codec: this.codec };
+  }
+
   private op(op: BinaryOp, value: unknown): Pred {
     if (value === null || value === undefined)
       throw new TypeError(`cannot compare with ${String(value)}; use isNull() / isNotNull()`);
