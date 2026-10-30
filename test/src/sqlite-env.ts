@@ -3,7 +3,8 @@ import { createDb, type Statement } from '@zerodep-dev/easy-query-ts';
 import { schema, type TestEnv } from './fixture.ts';
 import { sqlite } from '@zerodep-dev/easy-query-ts-sqlite';
 
-const DDL = `
+/** 共用套件的表（SQLite 的各个驱动共用：node:sqlite、libSQL） */
+export const SQLITE_DDL = `
 CREATE TABLE t_company (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
 CREATE TABLE t_user (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, age INTEGER, company_id INTEGER,
   attrs TEXT NOT NULL DEFAULT '{"tags":[]}', created_at TEXT NOT NULL);
@@ -24,7 +25,7 @@ CREATE TABLE t_dept (id INTEGER PRIMARY KEY, parent_id INTEGER, name TEXT NOT NU
 /** 建好表的内存库 */
 export async function memoryDb(): Promise<TestEnv> {
   const database = new DatabaseSync(':memory:');
-  database.exec(DDL);
+  database.exec(SQLITE_DDL);
   const statements: Statement[] = [];
   // bigInts：整数列按 bigint 读出，64 位整数（雪花 id）才不丢精度
   const adapter = sqlite(database, { bigInts: true });

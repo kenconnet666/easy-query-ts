@@ -3,12 +3,15 @@
  * ```ts
  * import pg from 'pg'
  * const db = createDb({ schema, adapter: postgres(new pg.Pool({ connectionString })) })
+ *
+ * import { Pool } from '@neondatabase/serverless'   // Neon serverless（WebSocket），与 pg.Pool 兼容
+ * const db = createDb({ schema, adapter: postgres(new Pool({ connectionString })) })
  * ```
  * 日期、时间、时间戳每条查询都按文字读出，再由列的 codec 解码（不受驱动按本地时区解析的影响）；int8、numeric 本来就是文字。
  * 自增主键用 INSERT … RETURNING 取回。
  */
 import pg from 'pg';
-import type { Pool, PoolClient, QueryConfig, QueryResult } from 'pg';
+import type { QueryConfig, QueryResult } from 'pg';
 import {
   type Adapter,
   type Driver,
@@ -33,7 +36,20 @@ const types = {
       : pg.types.getTypeParser(oid)) as typeof pg.types.getTypeParser,
 };
 
-type Target = Pick<Pool, 'query'> | PoolClient;
+/** 能执行语句的对象：连接池或从池里借出的连接 */
+interface Target {
+  query(config: QueryConfig): Promise<QueryResult>;
+}
+
+/** 从池里借出的连接 */
+interface PgPoolClient extends Target {
+  release(): void;
+}
+
+/** 用到的连接池的部分：pg.Pool、Neon serverless 的 Pool（WebSocket）都满足 */
+export interface PgPool extends Target {
+  connect(): Promise<PgPoolClient>;
+}
 
 /** 游标名的序号：同一个事务里可以同时开几个游标 */
 let cursors = 0;
@@ -46,9 +62,9 @@ function run(target: Target, sql: string, params: readonly unknown[]): Promise<Q
 class PostgresSession implements Session {
   protected readonly target: Target;
   /** 连接池（事务里的会话没有）：流式读取时用它借一条连接开临时事务 */
-  protected readonly pool: Pool | undefined;
+  protected readonly pool: PgPool | undefined;
 
-  constructor(target: Target, pool?: Pool) {
+  constructor(target: Target, pool?: PgPool) {
     this.target = target;
     this.pool = pool;
   }
@@ -102,9 +118,9 @@ const ISOLATION = {
 } as const;
 
 class PostgresDriver extends PostgresSession implements Driver {
-  private readonly source: Pool;
+  private readonly source: PgPool;
 
-  constructor(pool: Pool) {
+  constructor(pool: PgPool) {
     super(pool, pool);
     this.source = pool;
   }
@@ -115,15 +131,17 @@ class PostgresDriver extends PostgresSession implements Driver {
   ): Promise<T> {
     const client = await this.source.connect();
     try {
-      await client.query(
+      await run(
+        client,
         `BEGIN${options?.isolation ? ` ISOLATION LEVEL ${ISOLATION[options.isolation]}` : ''}${options?.readOnly ? ' READ ONLY' : ''}`,
+        [],
       );
       try {
         const result = await work(new PostgresSession(client));
-        await client.query('COMMIT');
+        await run(client, 'COMMIT', []);
         return result;
       } catch (error) {
-        await client.query('ROLLBACK');
+        await run(client, 'ROLLBACK', []);
         throw error;
       }
     } finally {
@@ -132,16 +150,16 @@ class PostgresDriver extends PostgresSession implements Driver {
   }
 }
 
-export function postgres(pool: Pool): Adapter {
+export function postgres(pool: PgPool): Adapter {
   return { dialect: new PostgresDialect(), driver: new PostgresDriver(pool) };
 }
 
 /** openGauss / GaussDB（PG 协议，驱动同样是 pg） */
-export function opengauss(pool: Pool): Adapter {
+export function opengauss(pool: PgPool): Adapter {
   return { dialect: new OpenGaussDialect(), driver: new PostgresDriver(pool) };
 }
 
 /** 人大金仓 KingbaseES（PG 模式，驱动同样是 pg） */
-export function kingbase(pool: Pool): Adapter {
+export function kingbase(pool: PgPool): Adapter {
   return { dialect: new KingbaseDialect(), driver: new PostgresDriver(pool) };
 }

@@ -211,7 +211,10 @@ export class SqliteDialect extends Dialect {
       // 多参数的 MAX / MIN 就是 GREATEST / LEAST
       greatest: (a) => `MAX(${coalesceEach(a)})`,
       least: (a) => `MIN(${coalesceEach(a)})`,
-      truncate: (a) => `(TRUNC((${a[0]}) * POWER(10, ${a[1]})) / POWER(10, ${a[1]}))`,
+      // 两个参数的 LOG 在 libSQL 自带的 SQLite 里没有：换底公式
+      log: (a) => `(LN(${a[0]}) / LN(${a[1]}))`,
+      // CAST AS INTEGER 向零截断：trunc() 要 SQLite 3.46+（libSQL、较老的系统库没有）
+      truncate: (a) => `(CAST((${a[0]}) * POWER(10, ${a[1]}) AS INTEGER) / POWER(10, ${a[1]}))`,
       cast_string: (a) => `CAST(${a[0]} AS TEXT)`,
       cast_double: (a) => `CAST(${a[0]} AS REAL)`,
       cast_decimal: (a) => `CAST(${a[0]} AS NUMERIC)`,

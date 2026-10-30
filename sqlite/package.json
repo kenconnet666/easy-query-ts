@@ -37,7 +37,9 @@
     "@zerodep-dev/easy-query-ts": "workspace:^"
   },
   "devDependencies": {
-    "@zerodep-dev/easy-query-ts": "workspace:*"
+    "@libsql/client": "catalog:",
+    "@zerodep-dev/easy-query-ts": "workspace:*",
+    "@zerodep-dev/easy-query-ts-test": "workspace:*"
   },
   "sideEffects": false,
   "scripts": {

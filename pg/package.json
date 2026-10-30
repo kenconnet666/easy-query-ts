@@ -24,6 +24,11 @@
       "@vue-tsx-pro/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./pglite": {
+      "@vue-tsx-pro/source": "./src/pglite.ts",
+      "types": "./dist/pglite.d.ts",
+      "default": "./dist/pglite.js"
     }
   },
   "files": [
@@ -38,6 +43,8 @@
     "pg": "^8.11.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "catalog:",
+    "@neondatabase/serverless": "catalog:",
     "@zerodep-dev/easy-query-ts": "workspace:*",
     "@zerodep-dev/easy-query-ts-test": "workspace:*",
     "@types/pg": "catalog:",

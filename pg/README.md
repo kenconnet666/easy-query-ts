@@ -1,6 +1,6 @@
 # @zerodep-dev/easy-query-ts-pg
 
-PostgreSQL 适配器（`pg`，peer 依赖），PG 12+；含 jsonb、数组、全文检索等专属函数。
+PostgreSQL 适配器（`pg`，peer 依赖），PG 12+；含 jsonb、数组、全文检索等专属函数。`@zerodep-dev/easy-query-ts-pg/pglite` 接 PGlite（WASM 版 PG，不用装 `pg`）；Neon serverless 的 `Pool` 与 `pg.Pool` 兼容，直接传给 `postgres()`。
 
 easy-query 的 TypeScript 版（[kenconnet666/easy-query](https://github.com/kenconnet666/easy-query) 的 `ts/`）：实体 + 导航、lambda 里写条件、隐式 join 与子查询、对象树结果，结果类型全由 TS 推导，不需要代码生成。
 
