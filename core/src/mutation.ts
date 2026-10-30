@@ -9,6 +9,7 @@ import {
   type UpdateNode,
 } from './ast.ts';
 import { SqlWriter, type Statement } from './dialect.ts';
+import { Placeholder } from './placeholder.ts';
 import { and, condNode, Expr, or, orderNodes, toNode, type Cond, type OrderItem } from './expr.ts';
 import { newQueryable, type Built, type Query } from './query.ts';
 import { makeRef, REF, refColumn, Scope, type Ref } from './ref.ts';
@@ -705,18 +706,29 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
           Math.floor(this.ctx.dialect.maxBindParams / props.length),
         ),
       );
+      const cells = rows.map((r) => props.map((p) => columnValue(this.entity.columns[p]!, r[p])));
+      const columns = props.map((p) => this.entity.columns[p]!);
+      // 每列一个数组参数的批量插入（PG 的 unnest）：行数够多、值都是参数、没有数组列（数组的数组会被 unnest 摊平）
+      const from = this.ctx.dialect.arrayInsertFrom;
+      const arrayInsert =
+        from !== undefined &&
+        rows.length >= from &&
+        columns.every((c) => c.codec.kind !== 'array') &&
+        cells.every((r) => r.every((n) => n.k === 'param' && !(n.value instanceof Placeholder)));
       const statements: Statement[] = [];
-      for (let from = 0; from < rows.length; from += perStatement) {
+      const step = arrayInsert ? rows.length : perStatement;
+      for (const [start, end] of chunkRows(cells, step, this.ctx.dialect.maxStatementBytes)) {
         const w = new SqlWriter();
         const sql = this.ctx.dialect.insert(
           {
             table,
             columns: props.map((p) => this.entity.columnNames[p]!),
-            rows: rows
-              .slice(from, from + perStatement)
-              .map((r) => props.map((p) => columnValue(this.entity.columns[p]!, r[p]))),
+            rows: cells.slice(start, end),
             conflict: this.conflict,
-            identityInsert: props.some((p) => this.entity.columns[p]!.options.generated),
+            identityInsert: columns.some((c) => c.options.generated),
+            arrayColumns: arrayInsert
+              ? columns.map((c) => ({ kind: c.codec.kind, options: c.options }))
+              : undefined,
           },
           w,
         );
@@ -725,6 +737,42 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
       return statements;
     });
   }
+}
+
+/**
+ * 插入的行怎么分成语句：每条最多 step 行；有语句大小上限时（MySQL 的 max_allowed_packet）再按估计的字节数切，
+ * 每条至少一行。返回 [起, 止) 的区间
+ */
+function chunkRows(
+  cells: readonly (readonly Node[])[],
+  step: number,
+  maxBytes: number | undefined,
+): [number, number][] {
+  const chunks: [number, number][] = [];
+  let start = 0;
+  let bytes = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const size = maxBytes === undefined ? 0 : cells[i]!.reduce((n, c) => n + cellBytes(c), 0);
+    if (i > start && (i - start >= step || (maxBytes !== undefined && bytes + size > maxBytes))) {
+      chunks.push([start, i]);
+      start = i;
+      bytes = 0;
+    }
+    bytes += size;
+  }
+  if (start < cells.length) chunks.push([start, cells.length]);
+  return chunks;
+}
+
+/** 一个值写进 SQL 文本后最多占多少字节：文字按每个字符 3 字节（UTF-8 加转义的上界），二进制写成十六进制 */
+function cellBytes(n: Node): number {
+  if (n.k !== 'param') return 64;
+  const v = n.value;
+  if (v === null || v === undefined) return 4;
+  if (typeof v === 'string') return v.length * 3 + 2;
+  if (v instanceof Uint8Array) return v.length * 2 + 3;
+  if (typeof v === 'object' && !(v instanceof Date)) return JSON.stringify(v).length * 3 + 2;
+  return 32;
 }
 
 function positiveCount(n: number): number {

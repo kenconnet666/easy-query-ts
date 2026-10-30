@@ -1,6 +1,6 @@
 /**
  * PG 协议的国产库：驱动同样用 node-postgres，方言继承 PG 方言后覆盖差异。
- * - openGauss / GaussDB：没有 IDENTITY 列（用 BIGSERIAL）、没有 ON CONFLICT（upsert 写成 ON DUPLICATE KEY UPDATE）
+ * - openGauss / GaussDB：没有 IDENTITY 列（用 BIGSERIAL）、没有 ON CONFLICT（upsert 写成 ON DUPLICATE KEY UPDATE）、没有多参数的 unnest
  * - 人大金仓 KingbaseES（PG 模式初始化）：语法与 PG 一致，IDENTITY、ON CONFLICT 都有
  */
 import type { ColumnOptions, ConflictNode } from '@zerodep-dev/easy-query-ts';
@@ -18,6 +18,9 @@ export class OpenGaussDialect extends PostgresDialect {
   override identity(): string {
     return '';
   }
+
+  /** 没有多参数的 unnest（function unnest(bigint[], …) does not exist）：批量插入照旧是 VALUES */
+  override readonly arrayInsertFrom: number | undefined = undefined;
 
   /** ON DUPLICATE KEY UPDATE 不能带条件 */
   override readonly conditionalUpsert = false;

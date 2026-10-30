@@ -9,6 +9,7 @@ import { schema, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
 import { pglite } from '../src/pglite.ts';
 import { arraySuite } from './arrays.ts';
+import { bulkSuite } from './bulk.ts';
 import { enumSuite } from './enums.ts';
 import { DDL } from './ddl.ts';
 
@@ -32,4 +33,5 @@ liveSuite('pglite', open, {
 });
 
 arraySuite('pglite', async () => pglite(database));
+bulkSuite('pglite', async () => pglite(database));
 enumSuite('pglite', async () => pglite(database));

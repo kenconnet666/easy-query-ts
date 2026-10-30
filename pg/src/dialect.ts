@@ -9,9 +9,10 @@ import {
   type DbTable,
   type Entity,
   type FunctionRenderer,
+  type InsertNode,
   type Node,
   type QueryRunner,
-  type SqlWriter,
+  SqlWriter,
 } from '@zerodep-dev/easy-query-ts';
 
 /**
@@ -28,6 +29,27 @@ export const TEXT_TYPE_OIDS: readonly number[] = [
   // interval、interval[]（pg 默认解析成对象，这里保留 PG 输出的文字）
   1186, 1187,
 ];
+
+/**
+ * 一列的值 → PG 一维数组字面量的文字（unnest 批量插入用）：NULL 不加引号，别的一律加双引号、转义 \ 与 "；
+ * 二进制写成 \x 十六进制（bytea 的文字写法），布尔写成 t / f
+ */
+function arrayLiteral(values: readonly unknown[]): string {
+  const items = values.map((v) => {
+    if (v === null || v === undefined) return 'NULL';
+    const text =
+      v instanceof Uint8Array
+        ? `\\x${Buffer.from(v).toString('hex')}`
+        : typeof v === 'boolean'
+          ? v
+            ? 't'
+            : 'f'
+          : // 编码之后只剩文字、数字、bigint
+            String(v as string | number | bigint);
+    return `"${text.replace(/["\\]/g, (c) => `\\${c}`)}"`;
+  });
+  return `{${items.join(',')}}`;
+}
 
 /** 实体里用到的 PG 原生枚举：类型名 → 取值；同名的类型在不同的列上取值不一样时报错 */
 function nativeEnums(entities: readonly Entity[]): Map<string, readonly string[]> {
@@ -205,6 +227,22 @@ export class PostgresDialect extends Dialect {
   }
 
   /** CASE 分支里的字符串 / 数字 / 布尔参数 PG 推断不出类型（"could not determine data type of parameter"），加显式转换 */
+  /** 一次插入 100 行起、值都是参数时用 unnest：每列一个数组参数，一条语句插完 */
+  override readonly arrayInsertFrom: number | undefined = 100;
+
+  /** INSERT … SELECT * FROM unnest(CAST($1 AS 类型[]), …)：数组参数按列的建表类型加类型 */
+  override insert(q: InsertNode, w: SqlWriter = new SqlWriter()): string {
+    if (!q.arrayColumns || q.source) return super.insert(q, w);
+    const arrays = q.arrayColumns.map((c, i) => {
+      // 自己拼成数组字面量的文字：不依赖驱动怎么序列化数组（PGlite 对不认识的数组类型直接 String() 了）
+      const literal = arrayLiteral(q.rows.map((row) => this.paramValue(row[i]!)));
+      return `CAST(${this.bindParam(literal, w)} AS ${this.columnType(c.kind, c.options)}[])`;
+    });
+    const alias = q.conflict?.where ? ` AS ${q.conflict.where.alias}` : '';
+    const columns = q.columns.map((c) => this.quote(c)).join(', ');
+    return `INSERT INTO ${this.table(q.table)}${alias} (${columns}) SELECT * FROM unnest(${arrays.join(', ')})${q.conflict ? this.onConflict(q.conflict, w) : ''}`;
+  }
+
   /** jsonb_to_recordset 按声明的列把数组的对象展开成行；路径是空数组时就是文档本身 */
   protected override jsonSome(n: Extract<Node, { k: 'json_some' }>, w: SqlWriter): string {
     const doc = `CAST(${this.node(n.doc, w)} AS JSONB) #> ${pgJsonPath(n.path)}`;

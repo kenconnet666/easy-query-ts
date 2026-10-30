@@ -76,6 +76,15 @@ for (const url of urls) {
     jsonEdits: true,
   });
 
+  describe(`mysql ${new URL(url).port}: detect`, () => {
+    it('reads the server version and max_allowed_packet', async () => {
+      const adapter = await mysql.detect(await pool());
+      assert.ok(adapter.dialect.version);
+      // 8.0 起默认 64 MiB；按它的四分之三切语句
+      assert.ok(adapter.dialect.maxStatementBytes! >= 3 * 1024 * 1024);
+    });
+  });
+
   describe(`mysql ${new URL(url).port}: server-side cancellation`, () => {
     const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     it('kills the statement on the server when the timeout fires or the signal aborts, also inside a transaction', async () => {

@@ -223,10 +223,15 @@ class MySqlDriver extends MySqlSession implements Driver {
 export interface MySqlOptions {
   /** 服务器版本：按它选写法（如 8.0.18 的 upsert 用 VALUES()），用到更高版本的特性时报错；默认最新 */
   readonly version?: MySqlVersion;
+  /** 服务器的 max_allowed_packet（字节）：批量插入按它切分语句；不给按 4 MiB，mysql.detect 自动读 */
+  readonly maxPacket?: number;
 }
 
 export function mysql(pool: Pool, options: MySqlOptions = {}): Adapter<Without<'returning'>> {
-  return { dialect: new MySqlDialect({ version: options.version }), driver: new MySqlDriver(pool) };
+  return {
+    dialect: new MySqlDialect({ version: options.version, maxPacket: options.maxPacket }),
+    driver: new MySqlDriver(pool),
+  };
 }
 
 /**
@@ -234,10 +239,12 @@ export function mysql(pool: Pool, options: MySqlOptions = {}): Adapter<Without<'
  * MariaDB 按 8.0 渲染（有窗口函数、CTE，upsert 用 VALUES()）。
  */
 mysql.detect = async (pool: Pool): Promise<Adapter<Without<'returning'>>> => {
-  const [rows] = await pool.query('SELECT VERSION() AS v');
-  const text = String((rows as { v: string }[])[0]?.v ?? '');
+  const [rows] = await pool.query('SELECT VERSION() AS v, @@max_allowed_packet AS p');
+  const row = (rows as { v: string; p: unknown }[])[0];
+  const text = String(row?.v ?? '');
   const version = /mariadb/i.test(text) ? '8.0' : /^\d+(\.\d+)*/.exec(text)?.[0];
-  return { dialect: new MySqlDialect({ version }), driver: new MySqlDriver(pool) };
+  const maxPacket = Number(row?.p) || undefined;
+  return { dialect: new MySqlDialect({ version, maxPacket }), driver: new MySqlDriver(pool) };
 };
 
 /** Doris 的事务不能回滚：语句依次执行，不开事务 */

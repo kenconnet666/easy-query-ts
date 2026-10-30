@@ -112,6 +112,21 @@ describe('mysql: JSON edits and jsonSome', () => {
 describe('mysql: batched writes', () => {
   const db = createDb({ schema, adapter: mysql({} as Pool) });
 
+  it('splits a bulk insert by the server max_allowed_packet', () => {
+    const small = createDb({ schema, adapter: mysql({} as Pool, { maxPacket: 8000 }) });
+    const rows = Array.from({ length: 10 }, (_, i) => ({
+      userId: 1,
+      title: `${i}`.padEnd(800, 'x'),
+      amount: '1.00' as const,
+    }));
+    const statements = small.insert(Post).values(rows).toSQL();
+    // 预算 6000 字节、每行估计 2400 多：两行一条
+    assert.equal(statements.length, 5);
+    for (const s of statements) assert.ok(s.sql.length + s.params.join('').length < 8000);
+    // 默认按 4 MiB：一条
+    assert.equal(db.insert(Post).values(rows).toSQL().length, 1);
+  });
+
   it('writes orderBy().limit(n) on a delete as ORDER BY … LIMIT', () => {
     assert.equal(
       db

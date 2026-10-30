@@ -9,6 +9,7 @@ import {
   type ConflictNode,
   type DatePart,
   type DbTable,
+  type DialectOptions,
   type DeleteNode,
   type Entity,
   type FunctionRenderer,
@@ -24,6 +25,14 @@ const NO_LIMIT = '18446744073709551615';
 
 /** MySQL 的版本：'8.0.18'（PolarDB 基线）、'8.4'、'9.1' …；5.7 也能用，只是窗口函数、CTE 渲染时报错 */
 export type MySqlVersion = `${5 | 8 | 9}.${number}` | `${5 | 8 | 9}.${number}.${number}`;
+
+/** 方言选项：版本与服务器的 max_allowed_packet（字节） */
+export interface MySqlDialectOptions extends DialectOptions {
+  readonly maxPacket?: number | undefined;
+}
+
+/** 没给 max_allowed_packet 时按 4 MiB（5.7 的默认值；8.0 默认 64 MiB，mysql.detect 读服务器的实际值） */
+const DEFAULT_PACKET = 4 * 1024 * 1024;
 
 /** 专属函数的最低版本 */
 const MYSQL_MINIMUM: Record<string, string> = {
@@ -65,6 +74,13 @@ export class MySqlDialect extends Dialect {
   }
 
   readonly name: string = 'mysql';
+  /** 一条语句的大小上限：max_allowed_packet 的四分之三（估计的字节数有误差，留余量） */
+  override readonly maxStatementBytes: number | undefined;
+
+  constructor(options: MySqlDialectOptions = {}) {
+    super(options);
+    this.maxStatementBytes = Math.floor((options.maxPacket ?? DEFAULT_PACKET) * 0.75);
+  }
   /** MySQL 预处理语句最多 65535 个占位符 */
   override readonly maxBindParams = 65535;
 

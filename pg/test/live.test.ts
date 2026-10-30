@@ -11,6 +11,7 @@ import { Post, schema, seed, User, type TestEnv } from '@zerodep-dev/easy-query-
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
 import { Pg, postgres } from '../src/index.ts';
 import { arraySuite } from './arrays.ts';
+import { bulkSuite } from './bulk.ts';
 import { enumSuite } from './enums.ts';
 import { DDL } from './ddl.ts';
 
@@ -48,6 +49,7 @@ for (const url of urls) {
     jsonEdits: true,
   });
   arraySuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
+  bulkSuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
   enumSuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
 
   describe(`postgres ${new URL(url).port}: server-side cancellation`, () => {

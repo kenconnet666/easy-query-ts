@@ -137,6 +137,12 @@ export interface InsertNode {
   readonly source?: SelectNode | undefined;
   /** 给自增列写了值（SQL Server 要先 SET IDENTITY_INSERT … ON） */
   readonly identityInsert?: boolean | undefined;
+  /**
+   * 每列一个数组参数的批量插入（Dialect.arrayInsertFrom）：各列的种类与选项，方言按它给数组参数加类型。
+   * 只在行数够多、所有值都是参数时给出
+   */
+  readonly arrayColumns?:
+    readonly { readonly kind: string; readonly options: ColumnOptions }[] | undefined;
 }
 
 /** upsert：target 列冲突时，update 为空表示忽略这一行，否则用新值更新这些列 */

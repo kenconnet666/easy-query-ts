@@ -290,6 +290,13 @@ export abstract class Dialect {
 
   /** 一条 INSERT 最多写几行（Oracle 的多行写法对自增列只生成一次值，只能一行一条） */
   readonly maxInsertRows: number = Number.POSITIVE_INFINITY;
+  /**
+   * 一次插入达到这么多行、且所有值都是参数时，每列绑一个数组参数（PG 的 unnest）：一条语句插完，不受参数个数上限的限制、
+   * 也只解析一次。undefined 表示不用这种写法
+   */
+  readonly arrayInsertFrom: number | undefined = undefined;
+  /** 一条语句最多多少字节（MySQL 的 max_allowed_packet）：批量插入按估计的大小再切；undefined 表示不限 */
+  readonly maxStatementBytes: number | undefined = undefined;
 
   // ---- 建表（代码优先）。基类写标准 SQL，各库覆盖类型与自增的写法 ----
 
@@ -654,6 +661,15 @@ export abstract class Dialect {
     // 带条件的 upsert：条件里用别名引用现有的行
     const alias = q.conflict?.where ? ` AS ${q.conflict.where.alias}` : '';
     return `INSERT INTO ${this.table(q.table)}${alias} (${q.columns.map((c) => this.quote(c)).join(', ')}) VALUES ${rows}${q.conflict ? this.onConflict(q.conflict, w) : ''}`;
+  }
+
+  /** 一个参数节点绑定前的值：与 node() 里渲染参数的转换一样（列的编码、方言的转换） */
+  protected paramValue(n: Node): unknown {
+    if (n.k !== 'param' || n.value instanceof Placeholder)
+      throw new Error('array insert needs plain parameter values');
+    return n.value == null
+      ? null
+      : this.encodeParam(n.codec ? n.codec.encode(n.value) : n.value, n.codec?.kind);
   }
 
   /** upsert 子句；默认是 SQLite / PG 的 ON CONFLICT 写法 */

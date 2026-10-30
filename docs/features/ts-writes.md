@@ -62,6 +62,36 @@ WHERE (id = ? AND version = ?) OR (id = ? AND version = ?)
 
 官方靠 JDBC 的批量接口（同一条 SQL 多组参数）；Node 的驱动没有统一的等价物，所以直接合成一条，各库都是一次往返，按方言的绑定参数上限切块。带版本列时逐行带版本条件，改到的行数不足就抛 `optimistic lock failed: n of m`。`ELSE 原列` 不会走到（条件只选中这些行），是给 PG 推断 CASE 类型用的。插入本来就是多行 `VALUES` 一条语句。
 
+## 大批量写入（ROADMAP 19.5）
+
+```ts
+await db.insert(Event).values(rows).execute(); // PG：100 行起一条 unnest 语句插完
+await db
+  .insert(Doc)
+  .values(row)
+  .onConflict((d) => d.id)
+  .merge(undefined, { onlyIf: (current, incoming) => current.version.lt(incoming.version) }); // 只在新版本更大时覆盖
+while (
+  (await db
+    .delete(Log)
+    .where((l) => l.at.lt(cutoff))
+    .orderBy((l) => l.id)
+    .limit(1000)
+    .execute()) > 0
+) {}
+```
+
+- **PG 的 unnest**：一次插入达到 100 行、所有值都是参数时，每列绑一个数组参数（`INSERT … SELECT * FROM unnest(CAST($1 AS 类型[]), …)`），
+  一条语句插完：不受 65535 个参数的限制、只解析一次。数组字面量由方言自己拼（不依赖驱动怎么序列化数组），数组列、表达式值照旧写成 VALUES；
+  openGauss 没有多参数的 unnest，照旧 VALUES。
+- **MySQL 按包大小切分**：批量插入在按参数个数切块之后，再按估计的字节数切，不超过 `max_allowed_packet` 的四分之三；
+  `mysql.detect` 读服务器的实际值，`mysql(pool)` 默认按 4 MiB（`mysql(pool, { maxPacket })` 可改）。
+- **带条件的 upsert**：`merge(列, { onlyIf: (现有行, 新行) => 条件 })` 渲染成 `ON CONFLICT … DO UPDATE … WHERE`（PG、SQLite；
+  现有行用 `INSERT INTO t AS t0` 的别名，新行是 `excluded`）。没有这种写法的库（MySQL、openGauss 等）构建时报不支持。
+- **分批改、删**：update / delete 的 `orderBy(…).limit(n)` 只动前 n 行，循环到 0 就把大表分批处理完、不开长事务。MySQL 写成
+  `ORDER BY … LIMIT`，别的库写成"主键 IN (按同样条件排序取前 n 行的主键)"（要单列主键）；不能与导航、分表一起用。
+- 没做 PG 15 的 `MERGE`：插入或更新已由 upsert 覆盖，`MERGE` 的多分支（匹配时改 / 删、不匹配时插）要一套新的 API，留到有具体需求时再加。
+
 ## 写哪些列（对应 `SQLExecuteStrategyEnum`）
 
 TS 里"没给"（`undefined`）与"写 null"本来就分得开：没给的列一律不写。另外可以按值挑：
