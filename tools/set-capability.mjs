@@ -6,6 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { format, resolveConfig } from 'prettier';
 
 const [key, status, ts] = process.argv.slice(2);
 if (!key || !['done', 'different', 'todo', 'na'].includes(status ?? '') || !ts)
@@ -35,7 +36,8 @@ const next = block
   .replace(/status: '[a-z]+'/, `status: '${status}'`)
   .replace(/ts:\s*'(?:[^'\\]|\\.)*'/, `ts: ${quote(ts)}`);
 source = source.slice(0, start) + next + source.slice(end);
-writeFileSync(file, source);
+// 按仓库的 Prettier 配置排好再写（CI 的 format:check 会检查）
+writeFileSync(file, await format(source, { ...(await resolveConfig(file)), filepath: file }));
 execFileSync(process.execPath, [fileURLToPath(new URL('./parity-tests.mjs', import.meta.url))], {
   stdio: 'inherit',
 });

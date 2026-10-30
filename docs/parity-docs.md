@@ -7,9 +7,9 @@
 
 | 页面                                                          | TS 对应                                                                                                                     | 状态     |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------- |
-| quick-start、startup/step1–5、demo/*                          | 文档站 ORM 分区的快速开始；案例在 16.8.1 按官方的帖子、评论、类目模型重写一遍                                               | ✗ 16.8.1 |
-| what-is-easy-query、feature、feature-map、catalog、v2-v3      | 概述性页面，对应文档站 ORM 首页                                                                                             | ✗ 16.8.1 |
-| best-practices（实体设计）                                    | 实体、视图、关系的写法建议                                                                                                  | ✗ 16.8.1 |
+| quick-start、startup/step1–5、demo/*                          | 文档站 ORM 分区：快速开始（/stack/orm/start），实体、建 Db、第一条查询                                                      | ✓ 16.8.1 |
+| what-is-easy-query、feature、feature-map、catalog、v2-v3      | 文档站 ORM 首页（/stack/orm）与各章：查询、导航与 DTO、写入、函数、建表、缓存与分库分表、方言                               | ✓ 16.8.1 |
+| best-practices（实体设计）                                    | 文档站各章里的写法建议：实体与关系、视图复用形状、主键由应用给值的分析库                                                    | ✓ 16.8.1 |
 | context-mode（实体无接口模式、DbSet）                         | TS 本来就不要接口：`db.queryable(User)`                                                                                     | ≈        |
 | framework/concept、terminology、key-word（关键字加引号）      | 方言的 `quote`，所有标识符都加引号                                                                                          | ✓        |
 | framework/annotation、annotation/readme                       | `entity()` 与列修饰器代替注解                                                                                               | ≈        |
@@ -23,77 +23,77 @@
 
 ## 查询（ability、sub-query、native-sql、other）
 
-| 页面                                                                | TS 对应                                                      | 状态     |
-| ------------------------------------------------------------------- | ------------------------------------------------------------ | -------- |
-| ability/select/single、common-api、expression、where、ability/where | `where` 条件数组、短路忽略空条件                             | ✓        |
-| ability/select/order、page、group、union、case-when、partition      | `orderBy`、`toPage`、`groupBy`、`union`、`caseWhen`、`win.*` | ✓        |
-| ability/select/join                                                 | 显式 join（含 right、cross）                                 | ✓        |
-| ability/select/fill                                                 | `fillMany` / `fillOne`                                       | ✓        |
-| ability/select/tree                                                 | `toTree`、`descendantsOf` / `ancestorsOf`                    | ✓        |
-| ability/select/stream-query                                         | `stream()`                                                   | ✓        |
-| ability/select/to-map、return-result/*                              | 结果是普通对象、匿名形状；无实体的按表名查询                 | ✗ 16.2.5 |
-| ability/select/query-bean                                           | 条件对象：`filterBy(input, rules)`                           | ✗ 16.3.4 |
-| ability/reuse                                                       | 查询对象不可变                                               | ≈        |
-| ability/dynamic-table-name                                          | `mapTables`、`inSchema`                                      | ≈        |
-| ability/native-sql、native-sql/*                                    | `sql` 标签、`db.sql`                                         | ✓        |
-| ability/transaction                                                 | `transaction`、`begin`、保存点、`afterCommit`                | ✓        |
-| sub-query/where-sub-query                                           | `in(query)`、`any`、`none`                                   | ✓        |
-| sub-query/select-sub-query、select-sub                              | 导航上的聚合、标量子查询                                     | ✓        |
-| sub-query/from-sub-query                                            | `asTable()` 派生表                                           | ✓        |
-| sub-query/join-sub-query                                            | join 一条子查询                                              | ✗ 16.2.3 |
-| other/flat-element                                                  | 一对多展开                                                   | ✗ 16.2.4 |
-| other/table-with（`WITH(NOLOCK)`、ClickHouse 的 `FINAL`）           | 表后面追加片段                                               | ✗ 16.2.5 |
+| 页面                                                                | TS 对应                                                           | 状态     |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------- | -------- |
+| ability/select/single、common-api、expression、where、ability/where | `where` 条件数组、短路忽略空条件                                  | ✓        |
+| ability/select/order、page、group、union、case-when、partition      | `orderBy`、`toPage`、`groupBy`、`union`、`caseWhen`、`win.*`      | ✓        |
+| ability/select/join                                                 | 显式 join（含 right、cross）                                      | ✓        |
+| ability/select/fill                                                 | `fillMany` / `fillOne`                                            | ✓        |
+| ability/select/tree                                                 | `toTree`、`descendantsOf` / `ancestorsOf`                         | ✓        |
+| ability/select/stream-query                                         | `stream()`                                                        | ✓        |
+| ability/select/to-map、return-result/*                              | 结果是普通对象、匿名形状；无实体的按表名查询、Map 结果用 `db.sql` | ✓ 16.2.5 |
+| ability/select/query-bean                                           | 条件对象：`filterBy(input, rules)`，规则的键与值类型由实体推出    | ✓ 16.3.4 |
+| ability/reuse                                                       | 查询对象不可变                                                    | ≈        |
+| ability/dynamic-table-name                                          | `mapTables`、`inSchema`                                           | ≈        |
+| ability/native-sql、native-sql/*                                    | `sql` 标签、`db.sql`                                              | ✓        |
+| ability/transaction                                                 | `transaction`、`begin`、保存点、`afterCommit`                     | ✓        |
+| sub-query/where-sub-query                                           | `in(query)`、`any`、`none`                                        | ✓        |
+| sub-query/select-sub-query、select-sub                              | 导航上的聚合、标量子查询                                          | ✓        |
+| sub-query/from-sub-query                                            | `asTable()` 派生表                                                | ✓        |
+| sub-query/join-sub-query                                            | join 一条子查询（`innerJoin(query.asTable(), …)`，派生表带类型）  | ✓ 16.2.3 |
+| other/flat-element                                                  | 一对多展开：`u.roles.flat(…)`、any / all / at(i)、countDistinct   | ✓ 16.2.4 |
+| other/table-with（`WITH(NOLOCK)`、ClickHouse 的 `FINAL`）           | 表后面追加片段：`tableHint`（`WITH (NOLOCK)`、`FINAL`）           | ✓ 16.2.5 |
 
 ## 函数（func）
 
-| 页面              | TS 对应                                                                                                                                               | 状态     |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| func/string       | 已有 upper、lower、trim、length、concat、substring、replace、indexOf、left、right；缺 ltrim、rtrim、补位、stringFormat、nullEmpty、compareTo、joining | ✗ 16.2.1 |
-| func/datetime     | 已有 year、month、day、addDays、addMonths、diffDays、dateTrunc；缺 format、加时分秒年、时分秒、dayOfWeek / dayOfYear、duration、now                   | ✗ 16.2.1 |
-| func/math、number | 已有 abs、floor、ceil、round、mod、加减乘除；缺 power、sqrt、log、exp、sign 等                                                                        | ✗ 16.2.1 |
-| func/general      | 已有 orElse（nullOrDefault）、nullIf；缺 maxColumns / minColumns                                                                                      | ✗ 16.2.1 |
-| func/boolean      | 条件即布尔表达式                                                                                                                                      | ✓        |
-| func/offset       | 已有 lag、lead；缺 firstValue、lastValue、nthValue                                                                                                    | ✗ 16.2.1 |
-| func/json         | 缺                                                                                                                                                    | ✗ 16.2.2 |
+| 页面              | TS 对应                                                                                                                                       | 状态     |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| func/string       | upper、lower、trim、ltrim、rtrim、length、concat、substring、replace、indexOf、left、right、补位、stringFormat、nullEmpty、compareTo、joining | ✓ 16.2.1 |
+| func/datetime     | year…second、dayOfWeek / dayOfYear、format、加年月日时分秒、diffDays、duration、dateTrunc、now / utcNow                                       | ✓ 16.2.1 |
+| func/math、number | abs、floor、ceil、round、truncate、mod、power、sqrt、exp、log、sign、三角函数，加减乘除                                                       | ✓ 16.2.1 |
+| func/general      | orElse（nullOrDefault）、nullIf、maxColumns / minColumns（GREATEST / LEAST，忽略 NULL）                                                       | ✓ 16.2.1 |
+| func/boolean      | 条件即布尔表达式                                                                                                                              | ✓        |
+| func/offset       | lag、lead、firstValue、lastValue、nthValue                                                                                                    | ✓ 16.2.1 |
+| func/json         | json / jsonText / jsonNumber / jsonBoolean / jsonHas / jsonLength，路径按列的 TS 类型检查；各方言渲染                                         | ✓ 16.2.2 |
 
 ## 导航与 DTO（navigate、include、dto-query、prop）
 
-| 页面                                                                               | TS 对应                                            | 状态     |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------- | -------- |
-| navigate/definition、many2many1                                                    | `r.one` / `r.many` / `r.manyToMany`，复合键        | ✓        |
-| navigate/direct2one                                                                | `r.path` / `r.pathOne`                             | ✓        |
-| navigate/many-first                                                                | `orderBy(…).first()`、`limit(n)`                   | ✓        |
-| navigate/many2many2（无中间表）、dotcolumn（逗号分隔列）、pathcolumn（路径左匹配） | 任意条件的关系                                     | ✗ 16.3.1 |
-| include/README、fetcher                                                            | `include`、select 里的 `toList`                    | ✓        |
-| include/relation-filter、relation-extra-filter                                     | 导航上的 `where`、关系定义的 `where`               | ✓        |
-| performance/include（忽略空串等特殊键值）                                          | 关联键为空串时不查                                 | ✗ 16.3.2 |
-| performance/implicit-join（`required` 导航用 inner join）                          | 关系上声明 `required`：类型不可空、渲染 inner join | ✗ 16.3.2 |
-| dto-query/readme、map1–3、question                                                 | `defineView`、嵌套视图、形状里平铺导航列           | ≈        |
-| dto-query/filter、sort                                                             | `table(request)`；`filterBy`、白名单               | ✗ 16.3.4 |
-| prop/README、combine、cross-table、status、simple-sql                              | 实体上的计算属性                                   | ✗ 16.3.3 |
-| prop/enum、json、global-value-converter                                            | `col.enum`、`col.json`、`col.custom`               | ✓        |
-| prop/sql-column、sql-column-generate                                               | `sqlConvert`、`$default(() => sql…)`               | ✓        |
+| 页面                                                                               | TS 对应                                                                                    | 状态     |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | -------- |
+| navigate/definition、many2many1                                                    | `r.one` / `r.many` / `r.manyToMany`，复合键                                                | ✓        |
+| navigate/direct2one                                                                | `r.path` / `r.pathOne`                                                                     | ✓        |
+| navigate/many-first                                                                | `orderBy(…).first()`、`limit(n)`                                                           | ✓        |
+| navigate/many2many2（无中间表）、dotcolumn（逗号分隔列）、pathcolumn（路径左匹配） | 任意条件的关系：`r.manyOn` / `oneOn`，`inCsv`、`like` 接受列                               | ✓ 16.3.1 |
+| include/README、fetcher                                                            | `include`、select 里的 `toList`                                                            | ✓        |
+| include/relation-filter、relation-extra-filter                                     | 导航上的 `where`、关系定义的 `where`                                                       | ✓        |
+| performance/include（忽略空串等特殊键值）                                          | 关联键为空串时不查子项                                                                     | ✓ 16.3.2 |
+| performance/implicit-join（`required` 导航用 inner join）                          | 关系上声明 `required`：类型不可空、渲染 inner join                                         | ✓ 16.3.2 |
+| dto-query/readme、map1–3、question                                                 | `defineView`、嵌套视图、形状里平铺导航列                                                   | ≈        |
+| dto-query/filter、sort                                                             | `filterBy`、`sortBy`；`table()` 的 `filterable` / `sortable` 白名单                        | ✓ 16.3.4 |
+| prop/README、combine、cross-table、status、simple-sql                              | 实体上的计算属性 `computed`（跨表、CASE、组合），select / where / orderBy / table() 都能用 | ✓ 16.3.3 |
+| prop/enum、json、global-value-converter                                            | `col.enum`、`col.json`、`col.custom`                                                       | ✓        |
+| prop/sql-column、sql-column-generate                                               | `sqlConvert`、`$default(() => sql…)`                                                       | ✓        |
 
 ## 写入与保存（ability、savable、adv）
 
-| 页面                                                                            | TS 对应                                                          | 状态     |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------- |
-| ability/insert、update、delete、insertOrUpdate                                  | `insert` / `update` / `delete`、`onConflict`                     | ✓        |
-| ability/batch、performance/batch                                                | 多行插入、按方言参数上限分块；驱动层批量执行                     | ✗ 16.4.2 |
-| savable/*（聚合根、一对多、多对一、一对一、多对多、脱钩、所属权、移除根、主键） | `db.save` 只有一层一对多                                         | ✗ 16.4.1 |
-| adv/data-tracking、performance/tracking                                         | `changes(before, after)`                                         | ≈        |
-| adv/version                                                                     | `version()`、`version({ initial, next })`、`withVersion`         | ✓        |
-| adv/logic-delete                                                                | `softDelete`、`$onDelete`、导航与 join 上单独关                  | ✓        |
-| adv/interceptor                                                                 | 拦截器、开关、受保护、默认关着                                   | ✓        |
-| adv/audit-log                                                                   | `afterWrite` 的事件；改之前的值                                  | ✗ 16.4.3 |
-| adv/auto-key                                                                    | `$default(() => uuid())`                                         | ✓        |
-| adv/generated-key-sql-column                                                    | 插入值、`$default` 返回 `sql` 片段                               | ✓        |
-| adv/column-encryption                                                           | `encrypted`（可分段搜索）、`sqlConvert`                          | ✓        |
-| adv/value-converter、type-handler                                               | codec、各方言包的驱动处理                                        | ✓        |
-| adv/value-object                                                                | `embed()`                                                        | ✓        |
-| adv/cte                                                                         | `db.with`、`withRecursive`                                       | ✓        |
-| adv/atomic-update                                                               | 官方已废弃；表达式更新 `set({ stars: (t) => t.stars.minus(1) })` | ≈        |
-| adv/smart-predicate、performance/derived-tables                                 | 派生表条件穿透                                                   | ✗ 16.2.6 |
+| 页面                                                                            | TS 对应                                                                                  | 状态     |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------- |
+| ability/insert、update、delete、insertOrUpdate                                  | `insert` / `update` / `delete`、`onConflict`                                             | ✓        |
+| ability/batch、performance/batch                                                | 多行插入按方言参数上限分块；`batch` 驱动层批量执行                                       | ✓ 16.4.2 |
+| savable/*（聚合根、一对多、多对一、一对一、多对多、脱钩、所属权、移除根、主键） | `db.save` 聚合保存：多层、多对一 / 一对一 / 多对多、脱钩方式、只保存哪些路径（类型推出） | ✓ 16.4.1 |
+| adv/data-tracking、performance/tracking                                         | `changes(before, after)`                                                                 | ≈        |
+| adv/version                                                                     | `version()`、`version({ initial, next })`、`withVersion`                                 | ✓        |
+| adv/logic-delete                                                                | `softDelete`、`$onDelete`、导航与 join 上单独关                                          | ✓        |
+| adv/interceptor                                                                 | 拦截器、开关、受保护、默认关着                                                           | ✓        |
+| adv/audit-log                                                                   | `afterWrite` 的事件；拦截器声明 `before` 时带上改之前的值                                | ✓ 16.4.3 |
+| adv/auto-key                                                                    | `$default(() => uuid())`                                                                 | ✓        |
+| adv/generated-key-sql-column                                                    | 插入值、`$default` 返回 `sql` 片段                                                       | ✓        |
+| adv/column-encryption                                                           | `encrypted`（可分段搜索）、`sqlConvert`                                                  | ✓        |
+| adv/value-converter、type-handler                                               | codec、各方言包的驱动处理                                                                | ✓        |
+| adv/value-object                                                                | `embed()`                                                                                | ✓        |
+| adv/cte                                                                         | `db.with`、`withRecursive`                                                               | ✓        |
+| adv/atomic-update                                                               | 官方已废弃；表达式更新 `set({ stars: (t) => t.stars.minus(1) })`                         | ≈        |
+| adv/smart-predicate、performance/derived-tables                                 | 派生表条件穿透（有窗口、分组等时不推）                                                   | ✓ 16.2.6 |
 
 ## 性能（performance）
 
@@ -102,7 +102,7 @@
 | performance/implicit-subquery-group-join | `groupJoin()`                                 | ✓        |
 | performance/include-many-limit           | 导航上 `limit(n).toList()`（ROW_NUMBER 分区） | ✓        |
 | performance/page（已知总数不再 count）   | `table()` 带 total                            | ✓        |
-| performance/deep-page                    | 深分页反向排序                                | ✗ 16.2.6 |
+| performance/deep-page                    | 深分页反向排序：`reversePageAfter`            | ✓ 16.2.6 |
 
 ## 建表、缓存、分库分表（code-first、cache、super）
 
@@ -114,3 +114,25 @@
 | super/sharding-table、time、mod、multi、sequence、dna、default-route-* | `byMod` / `byTime`：按条件裁剪、UNION ALL、写入路由                       | ✓ 16.6.2         |
 | super/sharding-datasource、sharding-all、sharding-all-time             | `shardDatabases`：按键路由、跨库归并排序分页聚合                          | ✓ 16.6.3         |
 | super/README（读写分离）                                               | `createDb({ replicas })`、`usePrimary()`                                  | ✓ 16.6.4         |
+
+## 方言（sql-db-support）
+
+官方每个方言一个模块；我们每个方言一个包（PG 协议的兼容库放在 PG 包里，MySQL 协议的 Doris 放在 MySQL 包里）。"共用套件"指 `test/src/suite.ts` 的实库用例。
+
+| 官方模块        | TS 对应                                                                                       | 状态 |
+| --------------- | --------------------------------------------------------------------------------------------- | ---- |
+| sql-mysql       | `easy-query-ts-mysql`：MySQL 8.0.18（PolarDB 基线）/ 8.4，共用套件，`mysql.detect` 读版本     | ✓    |
+| sql-pgsql       | `easy-query-ts-pg`：PostgreSQL 17，共用套件                                                   | ✓    |
+| sql-sqlite      | `easy-query-ts-sqlite`：共用套件                                                              | ✓    |
+| sql-mssql       | `easy-query-ts-mssql`：SQL Server 2022，2008 起按版本渲染，共用套件（ts-sqlserver.md）        | ✓    |
+| sql-oracle      | `easy-query-ts-oracle`：Oracle 23ai，11.2 起按版本渲染，共用套件（ts-oracle.md）              | ✓    |
+| sql-dameng      | `easy-query-ts-dameng`：继承 Oracle 方言，DM8 共用套件（ts-dameng.md）                        | ✓    |
+| sql-kingbase-es | `kingbase(pool)`（PG 包）：PG 模式的金仓；试用许可证过期，没有实库容器（ts-pg-compatible.md） | ≈    |
+| sql-gauss-db    | `opengauss(pool)`（PG 包）：openGauss 7.0 共用套件（ts-pg-compatible.md）                     | ✓    |
+| sql-duckdb      | `easy-query-ts-duckdb`：内存库共用套件（ts-duckdb.md）                                        | ✓    |
+| sql-clickhouse  | `easy-query-ts-clickhouse`：查询完整、mutation 写入、没有自增与事务（ts-clickhouse.md）       | ≈    |
+| sql-db2         | `easy-query-ts-db2`：Db2 12.1 共用套件（Linux）（ts-db2.md）                                  | ✓    |
+| sql-tsdb        | `easy-query-ts-tdengine`：TDengine 3.3，时间戳主键、写入覆盖（ts-tdengine.md）                | ✓    |
+| sql-h2          | JVM 内的库，Node 没有驱动                                                                     | —    |
+| （官方没有）    | `doris(pool)`（MySQL 包）：Apache Doris 4.1，主键模型、分析型套件（ts-doris.md）              | ✓    |
+| （官方没有）    | `easy-query-ts-hana`：SAP HANA，共用套件（本机容器，不进 CI）                                 | ✓    |
