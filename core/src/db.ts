@@ -62,10 +62,12 @@ import {
 import {
   assertWritable,
   execute,
+  explain,
   query,
   type Adapter,
   type Context,
   type ExecutionEvent,
+  type ExplainOptions,
   type Replicas,
   type Session,
   type TransactionOptions,
@@ -710,6 +712,11 @@ export class Db<S extends AnySchema> {
    */
   withSignal(signal: AbortSignal): Db<S> {
     return new Db({ ...this.ctx, signal }, this.adapter, this.keys, this.inTransaction);
+  }
+
+  /** 任意一条语句的执行计划（queryWatch 的慢查询带计划时用），见 Query.explain */
+  explain(statement: Statement, options?: ExplainOptions): Promise<unknown> {
+    return explain(primary(this.ctx), statement, options);
   }
 
   /**

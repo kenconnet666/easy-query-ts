@@ -149,6 +149,21 @@ export class SqliteDialect extends Dialect {
 
   override readonly indexFeatures = { using: false, partial: true, expressions: true };
 
+  /** EXPLAIN QUERY PLAN：各行是 id、parent、detail；没有 ANALYZE */
+  override explainStatement(sql: string, analyze: boolean): string {
+    if (analyze) throw new Error('explain({ analyze: true }) is not supported by SQLite');
+    return `EXPLAIN QUERY PLAN ${sql}`;
+  }
+
+  /** 各行整理成 { id, parent, detail }（驱动开了 bigInts 时数字是 bigint） */
+  override explainResult(rows: readonly Record<string, unknown>[]): unknown {
+    return rows.map((r) => ({
+      id: Number(r['id']),
+      parent: Number(r['parent']),
+      detail: String(r['detail']),
+    }));
+  }
+
   protected override generatedColumn(computed: NonNullable<ColumnOptions['computed']>): string {
     return `GENERATED ALWAYS AS (${computed.sql}) ${computed.stored ? 'STORED' : 'VIRTUAL'}`;
   }

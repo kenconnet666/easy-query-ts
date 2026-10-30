@@ -119,4 +119,40 @@ describe('statementSpans 与 queryWatch', async () => {
     });
     assert.deepEqual(slow, [{ kind: 'slow', sql: 'SELECT 1', durationMs: 80 }]);
   });
+
+  it('慢的读语句带上执行计划（explain），写语句与 EXPLAIN 自己照常报', async () => {
+    const warnings: QueryWarning[] = [];
+    let planned!: () => void;
+    const done = new Promise<void>((resolve) => (planned = resolve));
+    const watch = queryWatch({
+      slowMs: 0,
+      explain: (statement) => db.explain(statement),
+      report: (w) => {
+        warnings.push(w);
+        if (w.kind === 'slow' && w.plan && w.sql.includes('t_obs_item')) planned();
+      },
+    });
+    const db = createDb({
+      schema: defineSchema({ Item }),
+      adapter: sqlite(new DatabaseSync(':memory:')),
+      onExecute: watch.onExecute,
+    });
+    await db.createTables();
+    await db
+      .queryable(Item)
+      .where((i) => i.id.eq(1))
+      .toList();
+    await done;
+    // 建表时读表结构的 SELECT 也慢（slowMs 0）、也带计划：找这条查询
+    const withPlan = warnings.find(
+      (w) => w.kind === 'slow' && w.plan !== undefined && w.sql.includes('t_obs_item'),
+    );
+    assert.ok(withPlan && withPlan.kind === 'slow');
+    assert.match(withPlan.sql, /^SELECT/);
+    assert.match(JSON.stringify(withPlan.plan), /t_obs_item|t0/);
+    // EXPLAIN 自己与建表语句：不取计划
+    assert.ok(
+      warnings.some((w) => w.kind === 'slow' && /^EXPLAIN/.test(w.sql) && w.plan === undefined),
+    );
+  });
 });

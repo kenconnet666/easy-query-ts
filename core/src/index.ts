@@ -191,6 +191,7 @@ export type {
   Driver,
   ExecuteResult,
   ExecutionEvent,
+  ExplainOptions,
   IsolationLevel,
   Session,
   TransactionOptions,

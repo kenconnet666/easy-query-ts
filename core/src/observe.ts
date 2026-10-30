@@ -11,11 +11,19 @@
  * 单独一个入口：用到 node:async_hooks，核心不依赖它
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { Statement } from './dialect.ts';
 import type { ExecutionEvent } from './session.ts';
 
 /** 报出来的问题 */
 export type QueryWarning =
-  | { readonly kind: 'slow'; readonly sql: string; readonly durationMs: number }
+  /** plan：给了 explain 时慢的读语句带上执行计划（取计划失败时是 planError） */
+  | {
+      readonly kind: 'slow';
+      readonly sql: string;
+      readonly durationMs: number;
+      readonly plan?: unknown;
+      readonly planError?: unknown;
+    }
   /** 同一个 run 范围里这条 SQL 执行到了 count 次（到 repeat 时报一次） */
   | { readonly kind: 'repeated'; readonly sql: string; readonly count: number };
 
@@ -26,6 +34,10 @@ export interface QueryWatchOptions {
   readonly slowMs?: number;
   /** 怎么报；默认 console.warn */
   readonly report?: (warning: QueryWarning) => void;
+  /**
+   * 慢的读语句顺带取执行计划再报：`explain: (s) => db.explain(s)`（PG、MySQL、SQLite）。计划取回来之后才报，不阻塞原来的语句
+   */
+  readonly explain?: (statement: Statement) => Promise<unknown>;
 }
 
 export interface QueryWatch {
@@ -46,10 +58,20 @@ export function queryWatch(options: QueryWatchOptions = {}): QueryWatch {
           : `[easy-query] the same query ran ${w.count} times in one scope (N+1?): ${w.sql}`,
       ));
   const scopes = new AsyncLocalStorage<Map<string, number>>();
+  const slow = (event: ExecutionEvent) => {
+    const { sql } = event.statement;
+    const warning = { kind: 'slow' as const, sql, durationMs: event.durationMs };
+    // 只取读语句的计划：EXPLAIN 自己不是 SELECT，不会再触发一次
+    if (!options.explain || !/^\s*(SELECT|WITH)\b/i.test(sql)) return report(warning);
+    options.explain(event.statement).then(
+      (plan) => report({ ...warning, plan }),
+      (planError: unknown) => report({ ...warning, planError }),
+    );
+  };
   return {
     onExecute: (event) => {
       const { sql } = event.statement;
-      if (event.durationMs >= slowMs) report({ kind: 'slow', sql, durationMs: event.durationMs });
+      if (event.durationMs >= slowMs) slow(event);
       const counts = scopes.getStore();
       if (!counts || event.kind !== 'query') return;
       const count = (counts.get(sql) ?? 0) + 1;

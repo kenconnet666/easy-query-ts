@@ -245,6 +245,16 @@ export class PostgresDialect extends Dialect {
 
   override readonly indexFeatures = { using: true, partial: true, expressions: true };
 
+  override explainStatement(sql: string, analyze: boolean): string {
+    return `EXPLAIN (FORMAT JSON${analyze ? ', ANALYZE' : ''}) ${sql}`;
+  }
+
+  /** 一行一列 QUERY PLAN（json）：驱动可能已经解析成对象，也可能是文字 */
+  override explainResult(rows: readonly Record<string, unknown>[]): unknown {
+    const plan = rows[0]?.['QUERY PLAN'];
+    return typeof plan === 'string' ? JSON.parse(plan) : plan;
+  }
+
   /** 生成列只有 STORED（VIRTUAL 要 PG 18） */
   protected override generatedColumn(computed: NonNullable<ColumnOptions['computed']>): string {
     if (!computed.stored)

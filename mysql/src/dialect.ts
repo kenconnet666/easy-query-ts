@@ -140,6 +140,19 @@ export class MySqlDialect extends Dialect {
   /** MySQL 的 CREATE INDEX 没有 IF NOT EXISTS */
   override readonly indexIfNotExists = false;
 
+  /** FORMAT=JSON 的计划；analyze 要 8.0.18（只有文字树的格式） */
+  override explainStatement(sql: string, analyze: boolean): string {
+    if (!analyze) return `EXPLAIN FORMAT=JSON ${sql}`;
+    this.requires('EXPLAIN ANALYZE', '8.0.18');
+    return `EXPLAIN ANALYZE ${sql}`;
+  }
+
+  override explainResult(rows: readonly Record<string, unknown>[]): unknown {
+    // FORMAT=JSON 是一段 JSON 文字，EXPLAIN ANALYZE 是文字树
+    const text = rows[0]?.['EXPLAIN'];
+    return typeof text === 'string' && text.startsWith('{') ? JSON.parse(text) : text;
+  }
+
   /** 表达式索引（8.0.13+，多值索引也是它）与 USING BTREE / HASH；没有部分索引 */
   override readonly indexFeatures = { using: true, partial: false, expressions: true };
 

@@ -207,6 +207,21 @@ async function observe<T>(
   return result;
 }
 
+/** 一条语句的执行计划（Query.explain、Db.explain）；EXPLAIN 本身照常经过日志与 onExecute */
+export async function explain(
+  ctx: Context,
+  statement: Statement,
+  options: ExplainOptions = {},
+): Promise<unknown> {
+  const sql = ctx.dialect.explainStatement(statement.sql, options.analyze === true);
+  return ctx.dialect.explainResult(await query(ctx, { sql, params: statement.params }));
+}
+
+export interface ExplainOptions {
+  /** 真的执行一遍，计划里带实际的行数与耗时（PG EXPLAIN ANALYZE、MySQL 8.0.18+ EXPLAIN ANALYZE）；写语句别用 */
+  readonly analyze?: boolean;
+}
+
 /** 一条语句的取消信号：Db 的信号与这条语句的超时，谁先到算谁 */
 function statementSignal(ctx: Context): AbortSignal | undefined {
   if (ctx.timeoutMs === undefined) return ctx.signal;

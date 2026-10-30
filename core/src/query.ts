@@ -71,7 +71,7 @@ import {
   type TableRequest,
 } from './table.ts';
 import { assembleTree, type TreeNode } from './tree.ts';
-import { query, streamRows, type Context } from './session.ts';
+import { explain, query, streamRows, type Context, type ExplainOptions } from './session.ts';
 import { shardedFrom, shardTables } from './sharding.ts';
 
 /** 构建时求值的 lambda：单表查询收到一个表引用，join 之后按 join 顺序收到多个 */
@@ -471,6 +471,14 @@ abstract class Executable<Out> implements Subquery<Out> {
 
   toSQL(): Statement {
     return render(this.ctx, build(this.ctx, this.state).select);
+  }
+
+  /**
+   * 执行计划（ROADMAP 19.8）：PG `EXPLAIN (FORMAT JSON)`、MySQL `EXPLAIN FORMAT=JSON` 返回计划对象，SQLite `EXPLAIN QUERY PLAN` 返回各行；
+   * `{ analyze: true }` 真的执行一遍拿实际耗时（MySQL 返回 EXPLAIN ANALYZE 的文字树）。toList 导航的第二条查询不在里面
+   */
+  explain(options?: ExplainOptions): Promise<unknown> {
+    return explain(this.ctx, this.toSQL(), options);
   }
 
   private countStatement(): Statement {

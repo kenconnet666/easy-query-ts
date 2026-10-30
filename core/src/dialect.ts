@@ -423,6 +423,18 @@ export abstract class Dialect {
   /** CREATE INDEX 认不认 IF NOT EXISTS（MySQL、HANA 不认） */
   readonly indexIfNotExists: boolean = true;
 
+  /**
+   * 执行计划（ROADMAP 19.8）：把一条语句包成 EXPLAIN；analyze 时真的执行一遍拿实际耗时。没有的方言报错
+   */
+  explainStatement(_sql: string, _analyze: boolean): string {
+    throw new Error(`explain() is not supported by the ${this.name} dialect`);
+  }
+
+  /** EXPLAIN 读出的行 → 计划：PG、MySQL 是 JSON 计划对象，SQLite 是各行 */
+  explainResult(rows: readonly Record<string, unknown>[]): unknown {
+    return rows;
+  }
+
   /** 索引能写的东西：方法（USING）、部分索引（WHERE）、表达式；没有的写了就在建表时报错 */
   readonly indexFeatures: {
     readonly using: boolean;

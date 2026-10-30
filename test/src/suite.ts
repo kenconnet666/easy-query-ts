@@ -279,6 +279,25 @@ export function liveSuite(
       assert.equal(await base.any(), true);
     });
 
+    it('explains a query where the dialect can', async () => {
+      const { db, adapter } = await seeded();
+      const query = db.queryable(User).where((u) => u.age.ge(18));
+      let plan: unknown;
+      try {
+        plan = await query.explain();
+      } catch (error) {
+        assert.match((error as Error).message, /not supported/);
+        return;
+      }
+      const text = JSON.stringify(plan);
+      // PG：[{ Plan: … }]；MySQL：{ query_block: … }；SQLite：EXPLAIN QUERY PLAN 的各行
+      if (adapter.dialect.name === 'mysql') assert.match(text, /"query_block"/);
+      else if (adapter.dialect.name === 'sqlite') assert.match(text, /"detail"/);
+      else assert.match(text, /"Plan"/);
+      // 计划里认得出这张表（各库写的是别名 t0 或表名）
+      assert.match(text, /t0|t_user/);
+    });
+
     it('likes ignoring case and matches regular expressions', async () => {
       const { db } = await seeded();
       const users = () => db.queryable(User).orderBy((u) => u.id);
