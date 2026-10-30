@@ -559,6 +559,18 @@ export interface Entity<Name extends string = string, F extends Fields = Fields>
   readonly renamedFrom?: string;
   /** 单库分表的规则（byMod / byTime …）：查询按条件裁剪出要查的表，写入按分片键路由 */
   readonly sharding?: ShardingRule;
+  /** 多态实体（entity.union）：判别列与各子类型自己的列 */
+  readonly variants?: VariantSpec;
+}
+
+/** 多态实体的运行时信息 */
+export interface VariantSpec {
+  /** 判别列（属性名） */
+  readonly discriminator: string;
+  /** 共有的列 */
+  readonly base: Fields;
+  /** 子类型名 → 它自己的列（声明时的样子，可空性没改） */
+  readonly members: Readonly<Record<string, Fields>>;
 }
 
 /** 一个索引：名字、库里的列名（按顺序）、是否唯一 */
@@ -664,6 +676,51 @@ export function entity(
   };
 }
 
+/**
+ * 多态实体：一张表存几种子类型（单表继承），按判别列区分。读出的行、插入的形状是判别联合，
+ * `db.queryable(Payment).variant('card')` 只查这一种、结果类型也收窄：
+ * ```ts
+ * const Payment = entity.union('t_payment', 'kind', {
+ *   base: { id: col.bigint().primaryKey().generated(), amount: col.decimal(12, 2) },
+ *   variants: {
+ *     card: { cardNo: col.string(19), holder: col.string() },
+ *     wechat: { openId: col.string() },
+ *   },
+ * })
+ * ```
+ * 判别列存子类型名；各子类型的列在表里都可空（别的子类型的行里是 NULL），声明时的可空性用于读出的类型、插入与校验器
+ */
+entity.union = function union<
+  const Table extends string,
+  const D extends string,
+  Base extends Fields,
+  V extends Record<string, Fields>,
+>(
+  table: Table,
+  discriminator: D,
+  spec: { readonly base: Base; readonly variants: V },
+  options?: EntityOptions,
+): UnionEntity<Table, Base, D, V> {
+  const names = Object.keys(spec.variants);
+  if (names.length === 0) throw new Error(`${table}: entity.union needs at least one variant`);
+  const fields: Record<string, AnyColumn | Embedded<any>> = { ...spec.base };
+  if (discriminator in fields)
+    throw new Error(`${table}: the discriminator '${discriminator}' is also a column`);
+  fields[discriminator] = col.enum(names);
+  for (const [name, own] of Object.entries(spec.variants)) {
+    for (const [key, field] of Object.entries(own)) {
+      if (key in fields)
+        throw new Error(`${table}: column '${key}' of variant '${name}' is already declared`);
+      if (field instanceof Embedded)
+        throw new Error(`${table}: variant '${name}' cannot use embed() (${key})`);
+      fields[key] = (field as AnyColumn).nullable();
+    }
+  }
+  const base = entity(table, fields as Fields, options as EntityOptions<Fields>);
+  const variants: VariantSpec = { discriminator, base: spec.base, members: spec.variants };
+  return { ...base, variants } as never;
+};
+
 function checkSharding(
   table: string,
   rule: ShardingRule,
@@ -695,8 +752,87 @@ export type ValueOf<C> =
 /** 一组声明的列读出来的形状 */
 export type RowOf<F extends Fields> = { -readonly [K in keyof F]: ValueOf<F[K]> };
 
-/** 读出的整行 */
-export type Row<E extends Entity> = RowOf<E['fields']>;
+declare const variantsKey: unique symbol;
+
+/** 多态实体的类型信息（只在类型里）：共有的列、判别列、各子类型的列 */
+export interface VariantTypes<
+  Base extends Fields = Fields,
+  D extends string = string,
+  V extends Record<string, Fields> = Record<string, Fields>,
+> {
+  readonly base: Base;
+  readonly discriminator: D;
+  readonly variants: V;
+}
+
+/** entity.union 返回的实体：类型上带着各子类型 */
+export interface UnionEntity<
+  Name extends string,
+  Base extends Fields,
+  D extends string,
+  V extends Record<string, Fields>,
+> extends Entity<Name, UnionFields<Base, D, V>> {
+  readonly [variantsKey]?: VariantTypes<Base, D, V>;
+}
+
+type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (
+  x: infer I,
+) => void
+  ? I
+  : never;
+
+/** 合在一张表里的列：共有的列、判别列，各子类型的列在表里都可空 */
+export type UnionFields<
+  Base extends Fields,
+  D extends string,
+  V extends Record<string, Fields>,
+> = Base & {
+  readonly [P in D]: Column<keyof V & string, false, false>;
+} & {
+  readonly [K in keyof UnionToIntersection<V[keyof V]>]: UnionToIntersection<
+    V[keyof V]
+  >[K] extends Column<infer T, any, any>
+    ? Column<T, true, true>
+    : never;
+};
+
+/** 别的子类型的列 */
+type OtherKeys<V extends Record<string, Fields>, N extends keyof V> = Exclude<
+  { [M in keyof V]: keyof V[M] }[keyof V],
+  keyof V[N]
+>;
+
+type Flat<T> = { [K in keyof T]: T[K] } & {};
+
+/** 多态实体读出的行：按判别列区分的联合，别的子类型的列是 null */
+type UnionRow<Base extends Fields, D extends string, V extends Record<string, Fields>> = {
+  [N in keyof V & string]: Flat<
+    RowOf<Base> & { -readonly [P in D]: N } & RowOf<V[N]> & {
+        -readonly [P in OtherKeys<V, N>]: null;
+      }
+  >;
+}[keyof V & string];
+
+/** 多态实体插入的形状：先选子类型，再给它自己的列；别的子类型的列不能给值 */
+type UnionInsert<Base extends Fields, D extends string, V extends Record<string, Fields>> = {
+  [N in keyof V & string]: Flat<
+    InsertOf<Base> & { [P in D]: N } & InsertOf<V[N]> & { [P in OtherKeys<V, N>]?: null }
+  >;
+}[keyof V & string];
+
+/** 实体上的多态信息；普通实体是 never */
+export type VariantsOf<E> = E extends { readonly [variantsKey]?: infer I }
+  ? [I] extends [VariantTypes<infer Base, infer D, infer V>]
+    ? VariantTypes<Base, D, V>
+    : never
+  : never;
+
+/** 读出的整行；多态实体是按判别列区分的联合 */
+export type Row<E extends Entity> = [VariantsOf<E>] extends [never]
+  ? RowOf<E['fields']>
+  : VariantsOf<E> extends VariantTypes<infer Base, infer D, infer V>
+    ? UnionRow<Base, D, V>
+    : never;
 
 /** 插入时可省的键：自增、有默认值、可空的列，以及里面全都可省的值对象 */
 type OptionalKeys<F extends Fields> = {
@@ -719,8 +855,12 @@ export type InsertOf<F extends Fields> = {
   [K in OptionalKeys<F>]?: InsertValue<F[K]>;
 };
 
-/** 插入时的形状：自增、有默认值、可空的列可省 */
-export type Insert<E extends Entity> = InsertOf<E['fields']>;
+/** 插入时的形状：自增、有默认值、可空的列可省；多态实体先选子类型 */
+export type Insert<E extends Entity> = [VariantsOf<E>] extends [never]
+  ? InsertOf<E['fields']>
+  : VariantsOf<E> extends VariantTypes<infer Base, infer D, infer V>
+    ? UnionInsert<Base, D, V>
+    : never;
 
 /** 一组声明的列是不是都可空（值对象整个给 null 时要求这样） */
 export type AllNullable<F extends Fields> = {

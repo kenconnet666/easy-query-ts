@@ -50,7 +50,7 @@ export function validators<E extends Entity>(entity: E): EntityValidators<E> {
       vendor: 'easy-query',
       validate: (value: unknown) => {
         const issues: Issue[] = [];
-        checkObject(entity.fields, value, mode, [], issues);
+        checkEntity(entity, value, mode, issues);
         return issues.length > 0 ? { issues } : { value };
       },
     },
@@ -60,6 +60,38 @@ export function validators<E extends Entity>(entity: E): EntityValidators<E> {
     update: make('update') as never,
     row: make('row') as never,
   };
+}
+
+/** 多态实体（entity.union）插入、整行时按判别列选子类型：它自己的列按声明时的可空性检查，别的子类型的列不能有值 */
+function checkEntity(entity: Entity, value: unknown, mode: Mode, issues: Issue[]): void {
+  const spec = entity.variants;
+  if (!spec || mode === 'update' || typeof value !== 'object' || value === null) {
+    checkObject(entity.fields, value, mode, [], issues);
+    return;
+  }
+  const input = value as Record<string, unknown>;
+  const name = input[spec.discriminator];
+  const own = typeof name === 'string' ? spec.members[name] : undefined;
+  if (!own) {
+    const names = Object.keys(spec.members).map((n) => `'${n}'`);
+    issues.push({ message: `must be one of ${names.join(', ')}`, path: [spec.discriminator] });
+    return;
+  }
+  const others = new Set(
+    Object.entries(spec.members).flatMap(([n, fields]) => (n === name ? [] : Object.keys(fields))),
+  );
+  const rest: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(input)) {
+    if (!others.has(key)) rest[key] = v;
+    else if (v !== undefined && v !== null)
+      issues.push({ message: `only for variants other than '${name as string}'`, path: [key] });
+  }
+  const fields: Fields = {
+    ...spec.base,
+    [spec.discriminator]: entity.fields[spec.discriminator]!,
+    ...own,
+  };
+  checkObject(fields, rest, mode, [], issues);
 }
 
 function checkObject(

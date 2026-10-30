@@ -52,6 +52,8 @@ import {
   type DerivedEntity,
   type Entity,
   type Row,
+  type VariantsOf,
+  type VariantTypes,
 } from './schema.ts';
 import type { InterceptorName, InterceptorToggle } from './interceptor.ts';
 import {
@@ -215,6 +217,19 @@ export class NotFoundError extends Error {
  * 主键的写法：单列主键是那一列的值，复合主键是 `{ 列: 值 }`。
  * 列定义的类型上没有标出哪些是主键，所以类型只约束到"某一列的值或部分行"，少列、多给了值在运行时报错
  */
+/** 多态实体的子类型名；普通实体是 never */
+type VariantName<E> = [VariantsOf<E>] extends [never]
+  ? never
+  : VariantsOf<E> extends VariantTypes<any, any, infer V>
+    ? keyof V & string
+    : never;
+
+/** 结果收窄到子类型 N（结果是整行时） */
+type NarrowVariant<Out, E, N extends string> =
+  VariantsOf<E> extends VariantTypes<any, infer D, any>
+    ? Extract<Out, { readonly [P in D]: N }>
+    : Out;
+
 export type KeyInput<E extends Entity> = Row<E>[keyof Row<E>] | Partial<Row<E>>;
 
 type Columns = Record<string, Expr<unknown>>;
@@ -491,6 +506,25 @@ export class Queryable<
 
   where(filter: (...refs: Refs) => Cond): Queryable<S, K, Out, Refs> {
     return this.with({ where: [...this.state.where, filter] });
+  }
+
+  /**
+   * 多态实体（entity.union）只查一种子类型：加上判别列的条件，结果类型收窄到这一种（在 select 之前用）：
+   * `db.queryable(Payment).variant('card').toList()` 的每一行都有 cardNo
+   */
+  variant<const N extends VariantName<S['entities'][K]>>(
+    name: N,
+  ): Queryable<S, K, NarrowVariant<Out, S['entities'][K], N>, Refs> {
+    const entity = this.ctx.schema.entities[this.state.key]!;
+    const spec = entity.variants;
+    if (!spec) throw new Error(`${entity.table} is not a polymorphic entity (entity.union)`);
+    if (!(name in spec.members)) throw new Error(`${entity.table} has no variant '${name}'`);
+    return this.with({
+      where: [
+        ...this.state.where,
+        (root: Record<string, Expr<unknown>>) => root[spec.discriminator]!.eq(name),
+      ],
+    }) as never;
   }
 
   orderBy(order: (...refs: Refs) => Orders): Queryable<S, K, Out, Refs> {

@@ -29,8 +29,12 @@ export type {
   StandardSchema,
   TableIndex,
   Update,
+  UnionEntity,
   UpdateOf,
   ValueOf,
+  VariantSpec,
+  VariantsOf,
+  VariantTypes,
 } from './schema.ts';
 export { defineComputed, defineSchema, mergeSchemas } from './relations.ts';
 export { validators } from './validate.ts';
