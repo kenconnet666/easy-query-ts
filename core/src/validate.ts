@@ -111,6 +111,13 @@ function insertOptional(column: AnyColumn): boolean {
   );
 }
 
+/** 按 Unicode 码点数（与数据库按字符计长一致，代理对算一个） */
+function codePoints(text: string): number {
+  let n = 0;
+  for (const _ of text) n++;
+  return n;
+}
+
 function allNullable(fields: Fields): boolean {
   return Object.values(fields).every((f) =>
     f instanceof Embedded ? allNullable(f.fields) : (f as AnyColumn).options.nullable,
@@ -124,7 +131,7 @@ function checkValue(column: AnyColumn, v: unknown): string | undefined {
     switch (column.codec.kind) {
       case 'string':
         if (typeof v !== 'string') return 'expected a string';
-        if (o.length !== undefined && [...v].length > o.length)
+        if (o.length !== undefined && codePoints(v) > o.length)
           return `must be at most ${o.length} characters`;
         return undefined;
       case 'int':
