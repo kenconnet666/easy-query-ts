@@ -40,6 +40,7 @@ import type { Expr } from './expr.ts';
 import type { Ref } from './ref.ts';
 import type { DerivedEntity, Entity, Row } from './schema.ts';
 import { createSqlTag, type SqlTag } from './native.ts';
+import { checksum, historyEntity, ordered, type Migration } from './migrate.ts';
 import type { Capability, CapabilitiesOf, Requires, WithCapabilities } from './capabilities.ts';
 import { AggregateSaver, type SaveInclude, type SaveValue } from './save.ts';
 import { createStatements, findTable, planSync, type DbTable, type SyncPlan } from './ddl.ts';
@@ -453,6 +454,47 @@ export class Db<S extends AnySchema> {
   }
 
   /** 逐条执行 DDL；能放进事务的库在一个事务里执行 */
+  /**
+   * 执行还没执行过的迁移（按 id 的顺序），记进历史表（默认 eqts_migrations，没有就建），返回这次执行的 id。
+   * 每条迁移连同它的历史记录在一个事务里（DDL 能放进事务的库）；已经执行过的迁移被改了（校验和对不上）直接报错。见 migrate.ts
+   */
+  async migrate(
+    migrations: readonly Migration[],
+    options: { readonly table?: string } = {},
+  ): Promise<string[]> {
+    const history = historyEntity(options.table ?? 'eqts_migrations');
+    if (!findTable(await this.introspect(), history.table))
+      await this.runDdl([this.ctx.dialect.createTable(history, true)]);
+    const applied = new Map(
+      (await this.queryable(history).toList()).map((row) => [row.id, row.checksum]),
+    );
+    const done: string[] = [];
+    for (const migration of ordered(migrations)) {
+      const sum = checksum(migration);
+      const before = applied.get(migration.id);
+      if (before !== undefined) {
+        if (before !== sum)
+          throw new Error(
+            `migration '${migration.id}' was changed after it was applied (checksum ${before} → ${sum}); add a new migration instead`,
+          );
+        continue;
+      }
+      const run = async (db: Db<S>) => {
+        if (typeof migration.up === 'function') await migration.up(db);
+        else for (const sql of migration.up) await execute(db.ctx, { sql, params: [] });
+        await db
+          .insert(history)
+          .values({ id: migration.id, checksum: sum, appliedAt: new Date() })
+          .execute();
+      };
+      if (this.ctx.dialect.transactionalDdl && !this.inTransaction)
+        await this.runInTransaction(run);
+      else await run(this);
+      done.push(migration.id);
+    }
+    return done;
+  }
+
   private async runDdl(statements: readonly string[]): Promise<void> {
     if (statements.length === 0) return;
     const run = async (db: Db<S>) => {

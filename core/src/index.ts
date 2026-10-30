@@ -38,6 +38,8 @@ export type {
 } from './schema.ts';
 export { defineComputed, defineSchema, mergeSchemas } from './relations.ts';
 export { validators } from './validate.ts';
+export { checksum, defineMigration, migrationSource } from './migrate.ts';
+export type { Migration, MigrationDb } from './migrate.ts';
 export type { EntityValidators, Issue } from './validate.ts';
 export type { MergedEntities, MergedSchema } from './relations.ts';
 export { assembleTables, bareName } from './ddl.ts';
