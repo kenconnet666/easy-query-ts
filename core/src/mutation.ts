@@ -139,7 +139,7 @@ export class Returning<R> {
         statements: this.statements,
         ...(before ? { before } : {}),
       },
-      this.ctx.hooks,
+      this.ctx,
     );
     return out;
   }
@@ -431,7 +431,7 @@ export class InsertSelect {
         affected,
         statements: [statement],
       },
-      this.ctx.hooks,
+      this.ctx,
     );
     return affected;
   }
@@ -574,7 +574,7 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
         affected,
         statements,
       },
-      this.ctx.hooks,
+      this.ctx,
     );
     return affected;
   }
@@ -605,7 +605,7 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
         affected: 1,
         statements,
       },
-      this.ctx.hooks,
+      this.ctx,
     );
     return id;
   }
@@ -1017,7 +1017,7 @@ abstract class Filtered {
         statements: [statement],
         ...(before ? { before } : {}),
       },
-      this.ctx.hooks,
+      this.ctx,
     );
     return affected;
   }

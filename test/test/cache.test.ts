@@ -7,7 +7,7 @@ import {
   memoryStore,
   tableChanges,
   type CacheOptions,
-  type EvictEvent,
+  type EvictMessage,
 } from '@zerodep-dev/easy-query-ts-cache';
 import { cacheStore, memoryDriver } from '@zerodep-dev/storage';
 import { Company, Post, schema, seed, User } from '../src/fixture.ts';
@@ -147,7 +147,7 @@ describe('cache: kv and all modes', () => {
   });
 
   it('onEvict 收到删掉的键与改了的表：事务里的写入等提交之后，evict 在删除之后', async () => {
-    const evicted: EvictEvent[] = [];
+    const evicted: EvictMessage[] = [];
     const { db, cache } = await setup(undefined, { onEvict: (event) => evicted.push(event) });
     await db.transaction(async (tx) => {
       await tx

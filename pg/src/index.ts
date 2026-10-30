@@ -243,6 +243,119 @@ export async function listen(
   };
 }
 
+/** pgTransport 用到的连接：ListenClient 加上断线事件；release(true) 把坏掉的连接丢掉而不是还回池里 */
+interface WatchedClient {
+  query(sql: string): Promise<unknown>;
+  on(
+    event: 'notification',
+    listener: (message: { channel: string; payload?: string }) => void,
+  ): unknown;
+  on(event: 'error' | 'end', listener: () => void): unknown;
+  off(
+    event: 'notification',
+    listener: (message: { channel: string; payload?: string }) => void,
+  ): unknown;
+  off(event: 'error' | 'end', listener: () => void): unknown;
+  release(destroy?: boolean | Error): void;
+}
+
+/**
+ * 二级缓存失效消息通道的传输（easy-query-ts-cache 的 createBus，ROADMAP 23.1）：NOTIFY 发、一条专用连接 LISTEN 收。
+ * 按结构对接，不导入缓存包。监听连接断了（重启、网络、被 pg_terminate_backend）时按 1、2、4…最多 30 秒的间隔重连，
+ * 重新 LISTEN 之后调 onReset（断开期间的通知 PG 不保留）。NOTIFY 的载荷不到 8000 字节，maxBytes 让通道把大消息切开
+ * ```ts
+ * const bus = createBus(pgTransport(pool));
+ * const cache = createCache({ entities, store: tieredStore({ local: memoryStore(), shared: redisStore(redis) }), bus });
+ * ```
+ */
+export function pgTransport(
+  // 同 listen：pg 与 Neon 的 PoolClient 的 on 是一组重载，借出来之后按 WatchedClient 用
+  pool: { connect(): Promise<unknown>; query(text: string, values: unknown[]): Promise<unknown> },
+  channel = 'eqts_cache_evict',
+): {
+  send(text: string): Promise<void>;
+  listen(onText: (text: string) => void, onReset: () => void): Promise<() => Promise<void>>;
+  readonly maxBytes: number;
+} {
+  const name = `"${channel.replace(/"/g, '""')}"`;
+  return {
+    maxBytes: 7900,
+    async send(text) {
+      await pool.query('SELECT pg_notify($1, $2)', [channel, text]);
+    },
+    async listen(onText, onReset) {
+      let client: WatchedClient | undefined;
+      let stopped = false;
+      let retry: ReturnType<typeof setTimeout> | undefined;
+      const lostOf = new WeakMap<WatchedClient, () => void>();
+      const onNotification = (message: { channel: string; payload?: string }) => {
+        if (message.channel === channel) onText(message.payload ?? '');
+      };
+
+      /** 摘掉这边挂在连接上的监听：还回池里的连接不能再带着它们（之后的错误会让这边再还一次） */
+      function detach(target: WatchedClient, onLost: () => void) {
+        target.off('notification', onNotification);
+        target.off('error', onLost);
+        target.off('end', onLost);
+      }
+
+      async function open(): Promise<void> {
+        const next = (await pool.connect()) as WatchedClient;
+        // 连接坏了：丢掉它；已经在收的才重连（还没 LISTEN 成功的由调用方处理失败）
+        const onLost = () => {
+          detach(next, onLost);
+          next.release(true);
+          const established = client === next;
+          if (established) {
+            client = undefined;
+            if (!stopped) reconnect(1000);
+          }
+        };
+        next.on('error', onLost);
+        next.on('end', onLost);
+        next.on('notification', onNotification);
+        try {
+          await next.query(`LISTEN ${name}`);
+        } catch (error) {
+          onLost();
+          throw error;
+        }
+        client = next;
+        lostOf.set(next, onLost);
+      }
+
+      function reconnect(delay: number) {
+        retry = setTimeout(() => {
+          open().then(
+            () => {
+              if (!stopped) onReset();
+            },
+            () => {
+              if (!stopped) reconnect(Math.min(delay * 2, 30_000));
+            },
+          );
+        }, delay);
+        (retry as { unref?: () => void }).unref?.();
+      }
+
+      await open();
+      return async () => {
+        stopped = true;
+        clearTimeout(retry);
+        const current = client;
+        client = undefined;
+        if (!current) return;
+        detach(current, lostOf.get(current)!);
+        try {
+          await current.query(`UNLISTEN ${name}`);
+        } finally {
+          current.release();
+        }
+      };
+    },
+  };
+}
+
 export function postgres(pool: PgPool): Adapter {
   return { dialect: new PostgresDialect(), driver: new PostgresDriver(pool) };
 }

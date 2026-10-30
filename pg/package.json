@@ -46,7 +46,9 @@
     "@electric-sql/pglite": "catalog:",
     "@neondatabase/serverless": "catalog:",
     "@zerodep-dev/easy-query-ts": "workspace:*",
+    "@zerodep-dev/easy-query-ts-cache": "workspace:*",
     "@zerodep-dev/easy-query-ts-test": "workspace:*",
+    "ioredis": "catalog:",
     "@types/pg": "catalog:",
     "pg": "catalog:"
   },

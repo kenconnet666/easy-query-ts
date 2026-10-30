@@ -13,7 +13,7 @@ import type { Statement } from './dialect.ts';
 import { condNode, type Cond } from './expr.ts';
 import { refColumn, REF, type AnyRef } from './ref.ts';
 import type { ColumnOptions, Entity } from './schema.ts';
-import { runHooks, type TransactionHooks } from './session.ts';
+import { execute, runHooks, type Context, type ExecuteResult } from './session.ts';
 
 /**
  * 拦截器名字的登记处：noInterceptor / useInterceptor 只接受登记过的名字，写错在编译期就报出来。
@@ -54,6 +54,11 @@ export type WriteEvent = WriteRecord & {
    * 登记一件提交之后做的事（清缓存、发消息）：在事务里时等事务提交（回滚就不做），不在事务里时在这条语句之后马上做
    */
   readonly afterCommit: (task: () => unknown) => void;
+  /**
+   * 在这次写入所在的连接上执行一条语句：在事务里时是同一个事务（随它提交或回滚），写发件箱这类要和写入同生共死的事用它。
+   * 语句由 db.insert(…).toSQL() 这类生成；执行时不经过拦截器
+   */
+  readonly execute: (statement: Statement) => Promise<ExecuteResult>;
 };
 
 /** 写入的记录：WriteEvent 去掉 afterCommit（构建语句的地方给出这些，afterCommit 由 Interceptors.afterWrite 补上） */
@@ -257,14 +262,15 @@ export class Interceptors {
     );
   }
 
-  /** 交给各拦截器的 afterWrite；hooks 是所在事务的钩子（不在事务里时 afterCommit 登记的事在最后马上做） */
-  async afterWrite(record: WriteRecord, hooks: TransactionHooks | undefined): Promise<void> {
+  /** 交给各拦截器的 afterWrite；ctx 是执行写入的上下文（hooks 是所在事务的钩子，不在事务里时 afterCommit 登记的事在最后马上做） */
+  async afterWrite(record: WriteRecord, ctx: Context): Promise<void> {
     if (this.active.every((i) => !i.afterWrite)) return;
     const later: (() => unknown)[] = [];
-    const frames = hooks?.frames;
+    const frames = ctx.hooks?.frames;
     const event: WriteEvent = {
       ...record,
       afterCommit: (task) => (frames ? frames[frames.length - 1]!.commit : later).push(task),
+      execute: (statement) => execute(ctx, statement),
     };
     for (const interceptor of this.active) await interceptor.afterWrite?.(event);
     await runHooks(later);

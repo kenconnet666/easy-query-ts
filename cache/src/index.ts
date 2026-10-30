@@ -2,7 +2,7 @@
  * 二级缓存（对应 Java 版的 easy-cache）：kv 模式按主键缓存单行，all 模式缓存整张表（适合配置、省市这类小表）。
  *
  * ```ts
- * const cache = createCache({ entities: [User, Province], store: redisStore(redis) })
+ * const cache = createCache({ entities: [User, Province], store: tieredStore({ local: memoryStore(), shared: redisStore(redis) }), bus })
  * const db = createDb({ schema, adapter, interceptors: [cache.interceptor] })   // 写入这些实体时失效
  * const users = cache.of(db)
  * await users.kv(User).find(1)                                   // 先查缓存，没有再查库并写回
@@ -15,8 +15,10 @@
  *   所以表达式更新也知道该删哪些键——官方要自己实现 CacheKeysProvider 按更新时间回查
  * - 写入时删一次，事务提交后再删一次（事务里别的请求可能把旧值读回缓存）；回滚了第二次也不删，第一次删掉的只是少命中一次
  * - 绕过本库的写入（直接改库、别的服务）不会失效，靠过期时间兜底，或接 CDC 调用 evict
- * - onEvict 在失效之后收到删掉的键与改了的表：多实例各用进程内缓存时经 PG 的 NOTIFY 转给别的实例；
- *   表名交给 kit 的失效推送送到浏览器，前端缓存（@zerodep-dev/storage）按表名标签失效
+ * - 多实例（ROADMAP 23）：store 用 tieredStore（本机内存 + Redis），bus 是失效的消息通道（createBus）。提交后删本机与共享层、发消息，
+ *   别的实例收到后只删本机层；通道断过时清空本机层。读库前记下代数，期间这个键被失效过（本机的或收到的）就不写回；
+ *   lateEvictMs 在提交后隔一会儿再删一次、再发一次（挡住从库延迟与慢请求把旧值写回）。消息丢了靠过期时间兜底
+ * - onEvict 在每次失效之后（本实例的与收到的）拿到删掉的键与改了的表；表名经 kit 的失效推送送到浏览器
  *   （前端存储包 @zerodep-dev/storage 的 cacheStore 能把 IndexedDB 等驱动变成这里的 CacheStore）
  * 读写拦截器（租户等）照常生效，它们加的条件是缓存字段的一部分：不同租户各缓存各的。
  */
@@ -44,47 +46,34 @@ declare module '@zerodep-dev/easy-query-ts' {
   }
 }
 
-/**
- * 缓存的存储（对应官方的 CacheManager）：一个键下多个字段（字段是查询条件），按键删除。
- * Redis 用 HGET / HSET + PEXPIRE / DEL 实现；进程内用 memoryStore（多实例部署要用共享的存储）
- */
-export interface CacheStore {
-  get(key: string, field: string): Promise<string | undefined>;
-  set(key: string, field: string, value: string, ttlMs: number): Promise<void>;
-  delete(keys: readonly string[]): Promise<void>;
-}
+import type { EvictMessage, InvalidationBus } from './bus.ts';
+import { writeOutbox, type OutboxOptions } from './outbox.ts';
+import { memoryStore, type CacheStore } from './stores.ts';
 
-/** 进程内的存储：每个字段各自过期；now 可以换成测试用的时钟 */
-export function memoryStore(now: () => number = Date.now): CacheStore {
-  const keys = new Map<string, Map<string, { value: string; expires: number }>>();
-  return {
-    get(key, field) {
-      const item = keys.get(key)?.get(field);
-      if (!item) return Promise.resolve(undefined);
-      if (item.expires <= now()) {
-        keys.get(key)!.delete(field);
-        return Promise.resolve(undefined);
-      }
-      return Promise.resolve(item.value);
-    },
-    set(key, field, value, ttlMs) {
-      let fields = keys.get(key);
-      if (!fields) keys.set(key, (fields = new Map()));
-      fields.set(field, { value, expires: now() + ttlMs });
-      return Promise.resolve();
-    },
-    delete(list) {
-      for (const key of list) keys.delete(key);
-      return Promise.resolve();
-    },
-  };
-}
-
-/** onEvict 收到的：删掉的缓存键，与改了的表（前端缓存的标签） */
-export interface EvictEvent {
-  readonly keys: readonly string[];
-  readonly tables: readonly string[];
-}
+export {
+  createBus,
+  memoryTransport,
+  redisTransport,
+  type BusTransport,
+  type EvictMessage,
+  type InvalidationBus,
+  type RedisPubSubClient,
+} from './bus.ts';
+export {
+  outboxTable,
+  relayOutbox,
+  type OutboxOptions,
+  type OutboxTable,
+  type RelayOptions,
+} from './outbox.ts';
+export {
+  memoryStore,
+  redisStore,
+  tieredStore,
+  type CacheStore,
+  type RedisHashClient,
+  type TieredStoreOptions,
+} from './stores.ts';
 
 export interface CacheOptions {
   /** 要缓存的实体：写入它们时失效（只有列在这里的实体能用 kv / all） */
@@ -97,12 +86,19 @@ export interface CacheOptions {
   readonly nullTtlMs?: number;
   /** 键的前缀，默认 'CACHE'：键是 CACHE:表名:主键、CACHE:表名:all */
   readonly keyPrefix?: string;
+  /** 失效的消息通道（createBus）：多实例部署时让别的实例的本机层跟着失效 */
+  readonly bus?: InvalidationBus;
   /**
-   * 失效之后通知删掉的键（写入时在提交后的那次删除之后，evict 时在删除之后）：
-   * `onEvict: ({ keys, tables }) => db.notify('cache_evict', JSON.stringify({ keys, tables }))`，别的实例 listen 到后从自己的存储里删、
-   * 把 tables 推给浏览器（kit 的 createInvalidationHub().publish(tables)）
+   * 发件箱（outboxTable 建的表）：失效消息和写入在同一个事务里落一行，relayOutbox 保底发出；提交后照样马上发一次
    */
-  readonly onEvict?: (event: EvictEvent) => unknown;
+  readonly outbox?: OutboxOptions;
+  /** 提交后隔多久再删一次、再发一次消息（毫秒）：挡住从库延迟与慢请求把旧值写回；默认不做 */
+  readonly lateEvictMs?: number;
+  /**
+   * 每次失效之后调用（写入时在提交后的那次删除之后、evict 之后、收到别的实例的消息之后）：
+   * 拿到删掉的键与改了的表，比如把表名推给浏览器（kit 的 hub.publish(tables)）
+   */
+  readonly onEvict?: (message: EvictMessage) => unknown;
 }
 
 /** 键的类型：单列主键的值 */
@@ -119,7 +115,17 @@ export class EasyCache {
   private readonly ttlMs: number;
   private readonly nullTtlMs: number;
   private readonly prefix: string;
-  private readonly onEvict: ((event: EvictEvent) => unknown) | undefined;
+  private readonly onEvict: ((message: EvictMessage) => unknown) | undefined;
+  private readonly bus: InvalidationBus | undefined;
+  private readonly outbox: OutboxOptions | undefined;
+  private readonly lateEvictMs: number;
+  /** 消息通道的订阅：ready() 等它，close() 退订 */
+  private readonly listening: Promise<(() => Promise<void>) | undefined>;
+  /** 写回守卫：每次失效加一；evicted 记下每个键最后一次失效时的代数 */
+  private generation = 0;
+  private readonly evicted = new Map<string, number>();
+  /** evicted 太大时清空，这之前开始的读一律不写回 */
+  private floor = 0;
 
   constructor(options: CacheOptions) {
     this.store = options.store ?? memoryStore();
@@ -128,6 +134,19 @@ export class EasyCache {
     this.nullTtlMs = options.nullTtlMs ?? 10_000;
     this.prefix = options.keyPrefix ?? 'CACHE';
     this.onEvict = options.onEvict;
+    this.bus = options.bus;
+    this.outbox = options.outbox;
+    this.lateEvictMs = options.lateEvictMs ?? 0;
+    this.listening = this.bus
+      ? this.bus.subscribe(
+          (message, fromSelf) => {
+            if (!fromSelf) void this.applyRemote(message);
+          },
+          () => void this.resetLocal(),
+        )
+      : Promise.resolve(undefined);
+    // 订阅失败由 ready() 报出；没人等时不当作未处理的拒绝
+    this.listening.catch(() => undefined);
     this.interceptor = {
       name: 'cache',
       before: (entity) => this.tables.has(entity.table),
@@ -136,7 +155,11 @@ export class EasyCache {
         const rows = event.kind === 'insert' ? event.rows : (event.before ?? []);
         const keys = [this.allKey(event.entity), ...this.keysOf(event.entity, rows)];
         // 延迟双删：现在删一次，提交后再删一次
+        this.markEvicted(keys);
         await this.store.delete(keys);
+        if (this.outbox) {
+          await writeOutbox(this.outbox, event, { keys, tables: [event.entity.table] });
+        }
         event.afterCommit(() => this.remove(keys, [event.entity.table]));
       },
     };
@@ -155,10 +178,66 @@ export class EasyCache {
     );
   }
 
-  /** 删掉这些键并通知 onEvict */
+  /** 等消息通道订阅好（部署时启动阶段调用；没有 bus 时立即完成） */
+  async ready(): Promise<void> {
+    await this.listening;
+  }
+
+  /** 退订消息通道（停机、测试结束） */
+  async close(): Promise<void> {
+    const stop = await this.listening.catch(() => undefined);
+    await stop?.();
+  }
+
+  /** 本实例的失效：删本机与共享层、发消息、通知 onEvict；配了 lateEvictMs 时过一会儿再来一次 */
   private async remove(keys: readonly string[], tables: readonly string[]): Promise<void> {
+    const message = { keys, tables };
+    this.markEvicted(keys);
     await this.store.delete(keys);
-    await this.onEvict?.({ keys, tables });
+    await this.bus?.publish(message);
+    await this.onEvict?.(message);
+    if (this.lateEvictMs > 0) {
+      const timer = setTimeout(() => {
+        this.markEvicted(keys);
+        void this.store
+          .delete(keys)
+          .then(() => this.bus?.publish(message))
+          .catch(() => undefined);
+      }, this.lateEvictMs);
+      // 不让这个定时器拖住进程退出
+      (timer as { unref?: () => void }).unref?.();
+    }
+  }
+
+  /** 别的实例的失效：只删本机层 */
+  private async applyRemote(message: EvictMessage): Promise<void> {
+    this.markEvicted(message.keys);
+    if (message.keys.length > 0) {
+      if (this.store.evictLocal) await this.store.evictLocal(message.keys);
+      else await this.store.delete(message.keys);
+    }
+    await this.onEvict?.(message);
+  }
+
+  /** 消息通道断过：中间的可能丢了，清空本机层，这之前开始的读不写回 */
+  private async resetLocal(): Promise<void> {
+    this.floor = ++this.generation;
+    this.evicted.clear();
+    await this.store.evictLocal?.(undefined);
+  }
+
+  private markEvicted(keys: readonly string[]): void {
+    this.generation++;
+    if (this.evicted.size > 10_000) {
+      this.evicted.clear();
+      this.floor = this.generation;
+    }
+    for (const key of keys) this.evicted.set(key, this.generation);
+  }
+
+  /** @internal 读库前调用：记下现在的代数，write 时带回来 */
+  since(): number {
+    return this.generation;
   }
 
   /** @internal 缓存里的值：undefined 是没缓存，null 是缓存了"库里没有" */
@@ -167,8 +246,12 @@ export class EasyCache {
     return cached === MISSING ? null : cached;
   }
 
-  /** @internal 写回缓存；value 为 undefined 表示库里没有（较短的过期时间） */
-  async write(key: string, field: string, value: string | undefined): Promise<void> {
+  /**
+   * @internal 写回缓存；value 为 undefined 表示库里没有（较短的过期时间）。
+   * since 是读库前的代数：期间这个键被失效过（读到的可能是旧值）就不写
+   */
+  async write(key: string, field: string, value: string | undefined, since: number): Promise<void> {
+    if (since < this.floor || (this.evicted.get(key) ?? 0) > since) return;
     await this.store.set(
       key,
       field,
@@ -212,12 +295,29 @@ export class EasyCache {
  *   const hub = createInvalidationHub();   // @zerodep-dev/vue-tsx-pro-kit/server
  *   const db = createDb({ schema, adapter, interceptors: [tableChanges((tables) => hub.publish(tables))] });
  *
- * 多实例部署时每个实例只看得到自己的写入：onChange 里改发 db.notify，各实例 listen 到后各自 publish
+ * 多实例部署时每个实例只看得到自己的写入：传消息通道（createBus）代替回调，变更发给所有实例，各实例订阅后推给自己的浏览器
+ *
+ *   const db = createDb({ …, interceptors: [tableChanges(bus)] });
+ *   await bus.subscribe((message) => hub.publish(message.tables), () => hub.reset());
  */
-export function tableChanges(onChange: (tables: readonly string[]) => unknown): Interceptor {
+export function tableChanges(
+  target: ((tables: readonly string[]) => unknown) | InvalidationBus,
+  options: { readonly outbox?: OutboxOptions } = {},
+): Interceptor {
+  const report =
+    typeof target === 'function'
+      ? target
+      : (tables: readonly string[]) => target.publish({ keys: [], tables });
+  const { outbox } = options;
   return {
     name: 'tableChanges',
-    afterWrite: (event) => event.afterCommit(() => onChange([event.entity.table])),
+    afterWrite: async (event) => {
+      const tables = [event.entity.table];
+      // 发件箱的表自己不报：relay 删它时不再生出新的消息
+      if (outbox?.table.table === event.entity.table) return;
+      if (outbox) await writeOutbox(outbox, event, { keys: [], tables });
+      event.afterCommit(() => report(tables));
+    },
   };
 }
 
@@ -288,6 +388,7 @@ export class KvCache<S extends AnySchema, K extends EntityKey<S>> {
         found.set(String(key), deserialize(this.entity, cached) as RowOf<S, K>);
     }
     if (missing.length > 0) {
+      const since = this.cache.since();
       const pk = this.entity.primaryKey[0]!;
       const rows = (await this.query()
         .where((r: any) => r[pk].in(missing))
@@ -299,6 +400,7 @@ export class KvCache<S extends AnySchema, K extends EntityKey<S>> {
           this.cache.kvKey(this.entity, key),
           field,
           row && serialize(this.entity, row),
+          since,
         );
         if (row) found.set(String(key), row as RowOf<S, K>);
       }
@@ -349,9 +451,10 @@ export class AllCache<S extends AnySchema, K extends EntityKey<S>> {
     const field = fingerprint(sql, params);
     let text = await this.cache.read(key, field);
     if (typeof text !== 'string') {
+      const since = this.cache.since();
       const rows = (await ordered.toList()) as Record<string, unknown>[];
       text = JSON.stringify(rows.map((row) => serialize(this.entity, row)));
-      await this.cache.write(key, field, text);
+      await this.cache.write(key, field, text, since);
     }
     const list = JSON.parse(text) as string[];
     return list.map((item) => deserialize(this.entity, item) as RowOf<S, K>);
