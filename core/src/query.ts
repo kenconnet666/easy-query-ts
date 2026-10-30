@@ -44,6 +44,7 @@ import {
 } from './ref.ts';
 import type { Requires } from './capabilities.ts';
 import type { ColumnScope, HasColumns } from './scope.ts';
+import { placeholders, PreparedParam } from './placeholder.ts';
 import type { AnySchema, EntityKey, Schema } from './relations.ts';
 import type { KeyOf } from './db.ts';
 import {
@@ -1764,6 +1765,63 @@ function decoder(as: string, codec: Codec<any> | undefined): Reader {
     if (raw === null || raw === undefined) return null;
     return codec ? codec.decode(raw) : raw;
   };
+}
+
+/**
+ * 预编译好的查询（ROADMAP 18.3.2）：SQL 只渲染一次，每次执行只换参数。由 db.prepare 得到：
+ * ```ts
+ * const byName = db.prepare((p: { name: string }) => db.queryable(User).where((u) => u.name.eq(p.name)).select((u) => u.id))
+ * await byName.toList({ name: 'alice' })
+ * ```
+ * 占位值只能当标量用（条件、set 里的值），不能参与构建时的判断或展开成 in 列表；要带出 toList 导航、fill 的查询不能预编译
+ */
+export class PreparedQuery<P, Out> {
+  /** 渲染好的 SQL */
+  readonly sql: string;
+  private readonly ctx: Context;
+  private readonly params: readonly unknown[];
+  private readonly read: (row: Record<string, unknown>) => unknown;
+
+  constructor(ctx: Context, state: State) {
+    const built = build(ctx, state);
+    if (built.shape.lists.length > 0 || built.shape.fills.length > 0)
+      throw new Error(
+        'prepare() cannot be used with toList() navigations or fills (they run more queries)',
+      );
+    const statement = render(ctx, built.select);
+    this.ctx = ctx;
+    this.sql = statement.sql;
+    this.params = statement.params;
+    this.read = built.shape.read;
+  }
+
+  async toList(values: P): Promise<Out[]> {
+    const params = this.params.map((p) => (p instanceof PreparedParam ? this.value(p, values) : p));
+    const rows = await query(this.ctx, { sql: this.sql, params });
+    return rows.map(this.read) as Out[];
+  }
+
+  /** 第一行；没有时 undefined（查询自己要带 limit） */
+  async first(values: P): Promise<Out | undefined> {
+    return (await this.toList(values))[0];
+  }
+
+  private value(param: PreparedParam, values: P): unknown {
+    const { name, transform } = param.placeholder;
+    const given = (values as Record<string, unknown>)[name];
+    if (given === undefined) throw new Error(`prepared query: no value for '${name}'`);
+    const value = given === null || !transform ? given : transform(given);
+    if (value === null) return null;
+    return this.ctx.dialect.encodeParam(param.codec ? param.codec.encode(value as never) : value);
+  }
+}
+
+/** db.prepare 的实现：用占位值跑一遍构建函数，拿到查询再预编译 */
+export function prepareQuery<P, Out>(make: (p: P) => Query<Out>): PreparedQuery<P, Out> {
+  const query = make(placeholders<P>()) as unknown as { ctx: Context; state: State };
+  if (!(query.state && query.ctx))
+    throw new Error('prepare() expects the callback to return db.queryable(…) …');
+  return new PreparedQuery(query.ctx, query.state);
 }
 
 function render(ctx: Context, select: SelectNode): Statement {

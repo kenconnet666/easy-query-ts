@@ -19,7 +19,9 @@ import {
   keyCondition,
   newQueryable,
   recursiveCteEntity,
+  prepareQuery,
   type KeyInput,
+  type PreparedQuery,
   type Query,
   type Queryable,
 } from './query.ts';
@@ -599,6 +601,21 @@ export class Db<S extends AnySchema> {
     for (const [key, entity] of Object.entries((schema as AnySchema).entities))
       keys.set(entity, key);
     return new Db({ ...this.ctx, schema: merged }, this.adapter, keys, this.inTransaction) as never;
+  }
+
+  /**
+   * 预编译一条查询：SQL 只渲染一次，之后每次只换参数（热点接口省掉每次拼 SQL）。p 的每个属性是同名的占位值；
+   * 在回调参数上标出 p 的类型，结果类型照常推断：
+   * ```ts
+   * const byName = db.prepare((p: { name: string }) => db.queryable(User).where((u) => u.name.eq(p.name)))
+   * await byName.toList({ name: 'alice' })
+   * ```
+   * 见 PreparedQuery 的限制
+   */
+  prepare<P extends Record<string, unknown>, Out>(
+    make: (p: P) => Query<Out>,
+  ): PreparedQuery<P, Out> {
+    return prepareQuery(make);
   }
 
   /**

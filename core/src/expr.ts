@@ -4,6 +4,7 @@
  */
 import type { AggregateFn, BinaryOp, Node, OrderNode, SelectNode } from './ast.ts';
 import { col, type Codec, type DateText, type DecimalText } from './schema.ts';
+import { Placeholder } from './placeholder.ts';
 
 export const codecs = {
   int: col.int().codec,
@@ -691,11 +692,20 @@ export class Expr<T> {
       throw new Error(
         'like / startsWith / endsWith on an encrypted column need a searchable encryption strategy; use sqlConvert to search inside the database',
       );
-    const term = encryption ? encryption.encrypt(text) : text;
+    const pattern = (value: string) =>
+      before + escapeLike(encryption ? encryption.encrypt(value) : value) + after;
     return pred({
       k: 'like',
       e: this.node,
-      pattern: { k: 'param', value: before + escapeLike(term) + after, codec: undefined },
+      // 预编译查询的占位值：转义与前后缀留到执行时做
+      pattern: {
+        k: 'param',
+        value:
+          (text as unknown) instanceof Placeholder
+            ? (text as unknown as Placeholder).map((v) => pattern(String(v)))
+            : pattern(text),
+        codec: undefined,
+      },
       not,
     });
   }

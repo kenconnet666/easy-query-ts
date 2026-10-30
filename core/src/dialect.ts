@@ -16,6 +16,7 @@ import type {
 import { sqlString, unquoteSql } from './expr.ts';
 import { bareName, type DbTable, type ForeignKeySpec, type QueryRunner } from './ddl.ts';
 import { utcText, type ColumnOptions, type Entity, type TableIndex } from './schema.ts';
+import { Placeholder, PreparedParam } from './placeholder.ts';
 
 export interface Statement {
   readonly sql: string;
@@ -692,6 +693,9 @@ export abstract class Dialect {
         return `${n.alias}.${this.quote(n.name)}`;
       // 列编码之后再交给方言：例如布尔列编码后仍是布尔，由方言决定写 1 / 0 还是 true / false
       case 'param':
+        // 预编译查询的占位值：先绑成待填参数，执行时再编码
+        if (n.value instanceof Placeholder)
+          return this.bindParam(new PreparedParam(n.value, n.codec as never), w);
         return this.bindParam(
           n.value == null ? null : this.encodeParam(n.codec ? n.codec.encode(n.value) : n.value),
           w,

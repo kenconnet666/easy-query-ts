@@ -39,6 +39,7 @@ export type {
 export { defineComputed, defineSchema, mergeSchemas } from './relations.ts';
 export { validators } from './validate.ts';
 export { defineScope } from './scope.ts';
+export type { PreparedQuery } from './query.ts';
 export type { ColumnScope, HasColumns } from './scope.ts';
 export { checksum, defineMigration, migrationSource } from './migrate.ts';
 export type { Migration, MigrationDb } from './migrate.ts';
