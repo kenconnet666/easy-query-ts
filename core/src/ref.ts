@@ -671,6 +671,32 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
     return new Expr({ k: 'sub', q }, codec);
   }
 
+  /**
+   * toList 一条语句的写法（listStrategy('json')）：孩子的查询作为父语句里的关联子查询，关联条件、拦截器、where、orderBy、limit 都在里面；
+   * 末尾加一列 eq_ord（按 orderBy 编的号），聚合成 JSON 之后靠它恢复顺序
+   */
+  listSelect(columns: (r: AnyRef) => { e: Node; as: string }[]): SelectNode {
+    let root: AnyRef | undefined;
+    const q = this.correlated(undefined, (r) => {
+      root = r;
+      return columns(r);
+    });
+    const orderBy = this.orders.flatMap((o) => orderNodes(o(root)));
+    const ordinal: Node = {
+      k: 'over',
+      fn: { k: 'lit', sql: 'ROW_NUMBER()' },
+      partition: [],
+      order: orderBy,
+      frame: undefined,
+    };
+    return {
+      ...q,
+      columns: [...q.columns, { e: ordinal, as: 'eq_ord' }],
+      orderBy,
+      limit: this.take,
+    };
+  }
+
   private subquery(
     filter: ((r: any) => Cond) | undefined,
     columns: (r: AnyRef) => { e: Node; as: string }[],
@@ -679,6 +705,14 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
       throw new Error(
         'limit() on a navigation only applies to toList() / first(); filter with where() before any / count / sum',
       );
+    return this.correlated(filter, columns);
+  }
+
+  /** 关联到父行的子查询：孩子一侧的关联列等于父行的列，加上拦截器的条件与 where */
+  private correlated(
+    filter: ((r: any) => Cond) | undefined,
+    columns: (r: AnyRef) => { e: Node; as: string }[],
+  ): SelectNode {
     const scope = this.scope.child(this.toggles);
     const target = scope.schema.entities[this.relation.target]!;
     const root = scope.root(this.relation.target);

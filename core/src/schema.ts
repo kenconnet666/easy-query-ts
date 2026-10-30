@@ -441,10 +441,14 @@ function toUuid(raw: unknown): string {
   if (typeof raw !== 'string') {
     const bytes = new Uint8Array(raw as ArrayLike<number>);
     if (bytes.length !== 16) throw new TypeError(`a uuid has 16 bytes, got ${bytes.length}`);
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    return dashed(Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(''));
   }
-  return checkUuid(raw);
+  // 32 位十六进制：MySQL 的 BINARY(16) 经 HEX() 进 JSON（listStrategy('json')）
+  return checkUuid(/^[0-9a-f]{32}$/i.test(raw) ? dashed(raw) : raw);
+}
+
+function dashed(hex: string): string {
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function checkUuid(value: string): string {

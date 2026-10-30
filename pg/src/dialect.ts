@@ -10,6 +10,7 @@ import {
   type FunctionRenderer,
   type Node,
   type QueryRunner,
+  type SelectNode,
   type SqlWriter,
 } from '@zerodep-dev/easy-query-ts';
 
@@ -203,6 +204,19 @@ export class PostgresDialect extends Dialect {
   }
 
   /** CASE 分支里的字符串 / 数字 / 布尔参数 PG 推断不出类型（"could not determine data type of parameter"），加显式转换 */
+  /** to_jsonb 把派生表的整行转成对象（不受 jsonb_build_object 最多 100 个参数的限制） */
+  protected override jsonList(q: SelectNode, w: SqlWriter): string {
+    return `(SELECT coalesce(jsonb_agg(to_jsonb(eq_l) ORDER BY eq_l.eq_ord), '[]'::jsonb) FROM (${this.select(q, w)}) eq_l)`;
+  }
+
+  /** 布尔、JSON 原样进 JSON；别的转成文字，读出与直接查这一列一样（日期时间、int8、numeric、bytea、数组都是驱动给的文字） */
+  protected override jsonText(e: Node, kind: string | undefined, w: SqlWriter): string {
+    const sql = this.node(e, w);
+    return kind === undefined || kind === 'boolean' || kind === 'json'
+      ? sql
+      : `CAST(${sql} AS TEXT)`;
+  }
+
   protected override caseValue(n: Node, w: SqlWriter): string {
     const sql = this.node(n, w);
     if (n.k !== 'param') return sql;

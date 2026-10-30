@@ -1,5 +1,21 @@
 # TS：多对多导航与复合外键
 
+## 一条语句的对象树（listStrategy）
+
+`toList()` 导航默认每层一条 SQL：父查询读完，按父行的键再发一条 IN 查询（各库都行）。PG 与 MySQL 8.0.14+ 可以改成整棵树一条语句：
+
+```ts
+const db = createDb({ schema, adapter, listStrategy: 'json' }); // 整个 Db 的默认
+db.queryable(Company).listStrategy('json').select((c) => ({ … })); // 只这一条
+```
+
+- 孩子的查询成了父语句里的一条关联子查询，在库里聚合成 JSON 数组（PG `jsonb_agg(to_jsonb(…))`，MySQL `JSON_ARRAYAGG(JSON_OBJECT(…))`）；
+  where、orderBy、每个父行的 limit、拦截器都在子查询里，顺序按库里编的 `ROW_NUMBER()`，与两步写法的结果一样（共用套件两种写法都跑）。
+- 各列先转成文字再进 JSON，读出时由列的 codec 解码：日期时间、bigint、decimal、二进制、uuid 不会被 JSON 的数字和时间格式弄丢精度。
+- 往返少一半以上；还能做两步写法做不到的：预编译查询（`db.prepare`）、流式读取（`stream()`）可以带 toList，
+  toList 的条件里可以引用外层的列（`u.posts.where((p) => p.title.eq(u.name))`）。
+- 父行很多、孩子很多时，一条语句的结果更大、库里的聚合更重；按场景选，单条查询可以覆盖 Db 的默认。别的方言渲染时报不支持。
+
 ## 多对多
 
 经中间表连接两个实体，中间表也是 schema 里的一个实体（常常是复合主键）：

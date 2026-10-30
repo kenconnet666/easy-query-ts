@@ -28,6 +28,30 @@ describe('postgres: SQL text', () => {
   });
 });
 
+describe('postgres: toList() in one statement', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+
+  it('aggregates the children into a JSON array column: columns as text, order and limit inside', () => {
+    assert.equal(
+      db
+        .queryable(User)
+        .where((u) => u.id.eq(1))
+        .select((u) => ({
+          name: u.name,
+          posts: u.posts
+            .orderBy((p) => p.id.desc())
+            .limit(2)
+            .toList((p) => ({ title: p.title, amount: p.amount })),
+        }))
+        .listStrategy('json')
+        .toSQL().sql,
+      'SELECT t0."name" AS "c0", (SELECT coalesce(jsonb_agg(to_jsonb(eq_l) ORDER BY eq_l.eq_ord), \'[]\'::jsonb)' +
+        ' FROM (SELECT CAST(t1."title" AS TEXT) AS "c0", CAST(t1."amount" AS TEXT) AS "c1", ROW_NUMBER() OVER (ORDER BY t1."id" DESC) AS "eq_ord"' +
+        ' FROM "t_post" t1 WHERE t1."user_id" = t0."id" ORDER BY t1."id" DESC LIMIT 2) eq_l) AS "c1" FROM "t_user" t0 WHERE t0."id" = $1',
+    );
+  });
+});
+
 describe('postgres: code-first DDL', () => {
   const db = createDb({
     schema,

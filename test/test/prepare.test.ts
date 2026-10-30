@@ -57,7 +57,7 @@ describe('db.prepare', async () => {
             .where((u) => u.id.eq(p.id))
             .select((u) => ({ posts: u.posts.toList((x) => x.title) })),
         ),
-      /cannot be used with toList\(\) navigations/,
+      /cannot be used with fills or toList\(\) navigations/,
     );
   });
 });

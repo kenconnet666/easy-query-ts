@@ -88,6 +88,11 @@ export interface LiveSuiteOptions {
   readonly noWait?: boolean;
   /** jsonLength（Db2 的 JSON_TABLE 只能从根展开，数不了数组长度） */
   readonly jsonLength?: boolean;
+  /**
+   * env.db 的 toList() 取法（createDb 的 listStrategy）：'json' 时整棵对象树一条语句，toList 里可以引用外层的导航，
+   * 也能流式读取；其余用例的结果与 'queries' 一样
+   */
+  readonly listStrategy?: 'queries' | 'json';
 }
 
 export function liveSuite(
@@ -206,7 +211,8 @@ export function liveSuite(
         },
         { name: 'bob', posts: [{ title: 'hello', author: 'bob', comments: [] }] },
       ]);
-      assert.equal(statements.length, 3, 'one query per level');
+      if (options.listStrategy === 'json') assert.equal(statements.length, 1, 'one statement');
+      else assert.equal(statements.length, 3, 'one query per level');
     });
 
     it('includes navigations on whole rows', async () => {
@@ -300,15 +306,19 @@ export function liveSuite(
       assert.deepEqual(r, { up: 'ALICE', len: 5, year: 2026, label: 'alice@acme' });
     });
 
-    it('rejects outer navigations inside toList filters', async () => {
+    it('rejects outer navigations inside toList filters (allowed when lists are one statement)', async () => {
       const { db } = await seeded();
-      await assert.rejects(
-        db
-          .queryable(User)
-          .select((u) => ({ posts: u.posts.where((p) => p.title.eq(u.name)).toList() }))
-          .toList(),
-        /not part of this statement/,
-      );
+      const query = db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({ posts: u.posts.where((p) => p.title.eq(u.name)).toList() }));
+      // json 写法里孩子是父语句的关联子查询，外层的列看得见；两步写法的第二条语句里没有外层
+      if (options.listStrategy === 'json')
+        assert.deepEqual(
+          (await query.toList()).map((r) => r.posts.length),
+          [0, 0, 0],
+        );
+      else await assert.rejects(query.toList(), /not part of this statement/);
     });
 
     it('runs subqueries through deep navigation', async () => {
@@ -2338,13 +2348,19 @@ export function liveSuite(
         break;
       }
       assert.equal(await db.queryable(Post).count(), 1204);
-      await assert.rejects(async () => {
-        for await (const _ of db
-          .queryable(User)
-          .select((u) => ({ posts: u.posts.toList() }))
-          .stream())
-          void _;
-      }, /toList()/);
+      const withPosts = db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({ posts: u.posts.toList() }));
+      if (options.listStrategy === 'json') {
+        // 一条语句的对象树也能流式读
+        let users = 0;
+        for await (const _ of withPosts.stream()) users += 1;
+        assert.equal(users, 3);
+      } else
+        await assert.rejects(async () => {
+          for await (const _ of withPosts.stream()) void _;
+        }, /toList()/);
     });
 
     it('streams inside a transaction and reports the streamed rows to onExecute', async () => {

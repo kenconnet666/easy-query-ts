@@ -47,6 +47,10 @@ export type Node =
     }
   /** 标量子查询 */
   | { readonly k: 'sub'; readonly q: SelectNode }
+  /** toList 一条语句的写法（listStrategy('json')）：孩子的查询聚合成父行上的一个 JSON 数组，每一项是 q 的一行（列名 → 值） */
+  | { readonly k: 'json_list'; readonly q: SelectNode }
+  /** 进 JSON 之前的一列：按列的种类转成文字（不经过 JSON 的数字、时间格式），读出时由列的 codec 解码 */
+  | { readonly k: 'json_text'; readonly e: Node; readonly kind: string | undefined }
   /** 字符串聚合（joining）：GROUP_CONCAT / STRING_AGG，分隔符是受信任的字面量 */
   | {
       readonly k: 'string_agg';
@@ -233,7 +237,11 @@ export function checkAliases(
         return;
       case 'exists':
       case 'sub':
+      case 'json_list':
         checkAliases(n.q, declared);
+        return;
+      case 'json_text':
+        visit(n.e);
         return;
       case 'string_agg':
         visit(n.e);

@@ -225,6 +225,21 @@ export abstract class Dialect {
     return `TO_CHAR(${value}, ${sqlString(format)})`;
   }
 
+  /**
+   * toList 一条语句的写法（listStrategy('json')）：q 的各行聚合成一个 JSON 数组，每一项是"列名 → 值"的对象；没有行时是空数组。
+   * q 的最后一列是 eq_ord（库里按 toList 的顺序编的号），读出后按它排序。各方言实现（PG、MySQL 8.0.14+）
+   */
+  protected jsonList(_q: SelectNode, _w: SqlWriter): string {
+    throw new Error(
+      `toList() in one statement (listStrategy('json')) is not supported by the ${this.name} dialect`,
+    );
+  }
+
+  /** 进 JSON 之前的一列：转成文字（列的 codec 按驱动读出的文字解码）；布尔、JSON、没有 codec 的表达式原样 */
+  protected jsonText(e: Node, _kind: string | undefined, w: SqlWriter): string {
+    return this.node(e, w);
+  }
+
   /** 字符串聚合：基类是 STRING_AGG(e, 分隔符 ORDER BY …)（PG、HANA、SQL Server） */
   protected stringAgg(n: Extract<Node, { k: 'string_agg' }>, w: SqlWriter): string {
     return `STRING_AGG(${n.distinct ? 'DISTINCT ' : ''}${this.node(n.e, w)}, ${sqlString(n.separator)}${this.aggOrder(n.order, w)})`;
@@ -796,6 +811,10 @@ export abstract class Dialect {
       }
       case 'sub':
         return `(${this.select(n.q, w)})`;
+      case 'json_list':
+        return this.jsonList(n.q, w);
+      case 'json_text':
+        return this.jsonText(n.e, n.kind, w);
       case 'string_agg':
         return this.stringAgg(n, w);
     }

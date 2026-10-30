@@ -55,24 +55,32 @@ for (const url of urls) {
     await pools[0]?.end();
   });
 
-  const open = async (): Promise<TestEnv> => {
+  const open = async (listStrategy: 'queries' | 'json' = 'queries'): Promise<TestEnv> => {
     const p = await pool();
     for (const statement of DDL) await p.query(statement);
     const statements: Statement[] = [];
     // 按服务器的真实版本渲染（8.0.18 的 upsert 用 VALUES()，8.4 用行别名）
     const adapter = await mysql.detect(p);
     return {
-      db: createDb({ schema, adapter, log: (s) => statements.push(s) }),
+      db: createDb({ schema, adapter, listStrategy, log: (s) => statements.push(s) }),
       statements,
       adapter,
     };
   };
 
-  liveSuite(`mysql ${new URL(url).port}`, open, {
+  liveSuite(`mysql ${new URL(url).port}`, () => open(), {
     extensionTypes: true,
     extraTables: true,
     cube: false,
     returning: false,
+  });
+  // toList() 一条语句的写法（8.0.14+）：同一套用例，结果要与两步写法一致
+  liveSuite(`mysql ${new URL(url).port} json lists`, () => open('json'), {
+    extensionTypes: true,
+    extraTables: true,
+    cube: false,
+    returning: false,
+    listStrategy: 'json',
   });
 
   describe(`mysql ${new URL(url).port}: MySQL.* functions`, () => {
