@@ -3,7 +3,6 @@
  * （容器：infra/dev/db.sh --profile db2 up -d）。ibm_db 要先装好 IBM CLI 驱动：pnpm --filter @zerodep-dev/easy-query-ts-db2 driver
  */
 import { afterAll, describe, it, vi } from 'vitest';
-import ibmdb from 'ibm_db';
 import { createDb, type Statement } from '@zerodep-dev/easy-query-ts';
 import { schema, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
@@ -48,6 +47,8 @@ if (!url) {
     it('skipped: set EQTS_DB2_URL to run', { skip: true }, () => {});
   });
 } else {
+  // 只在要跑时才加载 ibm_db：没装 CLI 驱动的环境（普通的测试任务）加载原生模块就会失败
+  const { default: ibmdb } = await import('ibm_db');
   const pool = new ibmdb.Pool();
   afterAll(async () => {
     await pool.close();
