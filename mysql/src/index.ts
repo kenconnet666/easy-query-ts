@@ -64,15 +64,51 @@ interface CorePool extends CoreQueryable {
 class MySqlSession implements Session {
   protected readonly target: Queryable;
   private readonly core: CoreQueryable;
+  /** 终止语句时从这里另开一条连接发 KILL QUERY（事务里的会话也有） */
+  private readonly killer: Pool;
 
-  constructor(target: Queryable, core: CoreQueryable) {
+  constructor(target: Queryable, core: CoreQueryable, killer: Pool) {
     this.target = target;
     this.core = core;
+    this.killer = killer;
   }
 
-  async query(sql: string, params: readonly unknown[]): Promise<Record<string, unknown>[]> {
-    const [rows] = await this.target.query({ sql, values: params, typeCast });
+  async query(
+    sql: string,
+    params: readonly unknown[],
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>[]> {
+    const [rows] = await this.killable(signal, (on) => on.query({ sql, values: params, typeCast }));
     return rows as Record<string, unknown>[];
+  }
+
+  /**
+   * 带信号的语句：信号触发时 KILL QUERY 它所在的连接线程（连接本身保留）。池级会话先借一条连接才知道线程号；
+   * KILL 发完才归还连接，免得落到复用这条连接的下一条语句上
+   */
+  private async killable<T>(
+    signal: AbortSignal | undefined,
+    work: (on: Queryable) => Promise<T>,
+  ): Promise<T> {
+    if (!signal) return work(this.target);
+    signal.throwIfAborted();
+    const pooled = 'getConnection' in this.target;
+    const connection = pooled ? await this.killer.getConnection() : (this.target as PoolConnection);
+    let killing: Promise<unknown> | undefined;
+    const kill = () => {
+      // 尽力而为：KILL 失败（语句恰好刚结束）不影响调用方，调用方已经以信号的 reason 失败
+      killing = this.killer
+        .query(`KILL QUERY ${Number(connection.threadId)}`)
+        .catch(() => undefined);
+    };
+    signal.addEventListener('abort', kill, { once: true });
+    try {
+      return await work(connection);
+    } finally {
+      signal.removeEventListener('abort', kill);
+      await killing;
+      if (pooled) connection.release();
+    }
   }
 
   /**
@@ -122,8 +158,14 @@ class MySqlSession implements Session {
     }
   }
 
-  async execute(sql: string, params: readonly unknown[]): Promise<ExecuteResult> {
-    const [result] = await this.target.query<ResultSetHeader>({ sql, values: params });
+  async execute(
+    sql: string,
+    params: readonly unknown[],
+    signal?: AbortSignal,
+  ): Promise<ExecuteResult> {
+    const [result] = await this.killable(signal, (on) =>
+      on.query<ResultSetHeader>({ sql, values: params }),
+    );
     return {
       affected: result.affectedRows,
       insertId: result.insertId === 0 ? undefined : result.insertId,
@@ -142,7 +184,7 @@ class MySqlDriver extends MySqlSession implements Driver {
   private readonly pool: Pool;
 
   constructor(pool: Pool) {
-    super(pool, (pool as unknown as { pool: CoreQueryable }).pool);
+    super(pool, (pool as unknown as { pool: CoreQueryable }).pool, pool);
     this.pool = pool;
   }
 
@@ -163,6 +205,7 @@ class MySqlDriver extends MySqlSession implements Driver {
           new MySqlSession(
             connection,
             (connection as unknown as { connection: CoreQueryable }).connection,
+            this.pool,
           ),
         );
         await connection.commit();

@@ -40,8 +40,9 @@ interface Target {
   query(config: QueryConfig): Promise<QueryResult>;
 }
 
-/** 从池里借出的连接 */
+/** 从池里借出的连接；processID 是服务端的进程号（取消语句用） */
 interface PgPoolClient extends Target {
+  readonly processID?: number | null;
   release(): void;
 }
 
@@ -60,17 +61,55 @@ function run(target: Target, sql: string, params: readonly unknown[]): Promise<Q
 
 class PostgresSession implements Session {
   protected readonly target: Target;
-  /** 连接池（事务里的会话没有）：流式读取时用它借一条连接开临时事务 */
+  /** 连接池（事务里的会话没有）：流式读取、带取消信号的语句用它借一条连接 */
   protected readonly pool: PgPool | undefined;
+  /** 取消语句时从这里另开一条连接发 pg_cancel_backend（事务里的会话也有） */
+  private readonly canceller: PgPool;
 
-  constructor(target: Target, pool?: PgPool) {
+  constructor(target: Target, canceller: PgPool, pool?: PgPool) {
     this.target = target;
+    this.canceller = canceller;
     this.pool = pool;
   }
 
-  async query(sql: string, params: readonly unknown[]): Promise<Record<string, unknown>[]> {
-    const result = await run(this.target, sql, params);
+  async query(
+    sql: string,
+    params: readonly unknown[],
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>[]> {
+    const result = await this.cancellable(sql, params, signal);
     return result.rows as Record<string, unknown>[];
+  }
+
+  /**
+   * 带信号的语句：信号触发时在服务端终止它。要知道语句跑在哪个服务端进程上，池级会话先借一条连接（事务里的连接本来就固定）。
+   * 取消请求发完才归还连接：否则连接可能已经在跑别人的语句，取消会落到那条语句上
+   */
+  private async cancellable(
+    sql: string,
+    params: readonly unknown[],
+    signal: AbortSignal | undefined,
+  ): Promise<QueryResult> {
+    if (!signal) return run(this.target, sql, params);
+    signal.throwIfAborted();
+    const own = this.pool ? await this.pool.connect() : undefined;
+    const client: Target & { readonly processID?: number | null } = own ?? this.target;
+    let cancelling: Promise<unknown> | undefined;
+    const cancel = () => {
+      if (!client.processID) return;
+      // 尽力而为：取消失败（语句恰好刚结束、连接断了）不影响调用方，调用方已经以信号的 reason 失败
+      cancelling = run(this.canceller, 'SELECT pg_cancel_backend($1)', [client.processID]).catch(
+        () => undefined,
+      );
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+      return await run(client, sql, params);
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      await cancelling;
+      own?.release();
+    }
   }
 
   /**
@@ -103,8 +142,12 @@ class PostgresSession implements Session {
     }
   }
 
-  async execute(sql: string, params: readonly unknown[]): Promise<ExecuteResult> {
-    const result = await run(this.target, sql, params);
+  async execute(
+    sql: string,
+    params: readonly unknown[],
+    signal?: AbortSignal,
+  ): Promise<ExecuteResult> {
+    const result = await this.cancellable(sql, params, signal);
     return { affected: result.rowCount ?? 0, insertId: undefined };
   }
 }
@@ -120,7 +163,7 @@ class PostgresDriver extends PostgresSession implements Driver {
   private readonly source: PgPool;
 
   constructor(pool: PgPool) {
-    super(pool, pool);
+    super(pool, pool, pool);
     this.source = pool;
   }
 
@@ -136,7 +179,7 @@ class PostgresDriver extends PostgresSession implements Driver {
         [],
       );
       try {
-        const result = await work(new PostgresSession(client));
+        const result = await work(new PostgresSession(client, this.source));
         await run(client, 'COMMIT', []);
         return result;
       } catch (error) {

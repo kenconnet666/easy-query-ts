@@ -46,6 +46,37 @@ for (const url of urls) {
   arraySuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
   enumSuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
 
+  describe(`postgres ${new URL(url).port}: server-side cancellation`, () => {
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    it('stops the statement on the server when the timeout fires or the signal aborts, also inside a transaction', async () => {
+      const db = createDb({ schema, adapter: postgres(pool) });
+      // 别的连接上还在跑的 pg_sleep(3)；取消是异步的，给它一点时间结束
+      const running = async () => {
+        for (let i = 0; i < 40; i++) {
+          const [row] = await db.sql<{ n: number }>`SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE query LIKE ${'%pg_sleep(3)%'} AND state = 'active' AND pid <> pg_backend_pid()`;
+          if (row!.n === 0) return 0;
+          await pause(50);
+        }
+        return 1;
+      };
+      const started = Date.now();
+      await assert.rejects(db.withTimeout(300).sql`SELECT pg_sleep(3)`, { name: 'TimeoutError' });
+      assert.ok(Date.now() - started < 2000);
+      assert.equal(await running(), 0);
+
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new Error('stop')), 200);
+      await assert.rejects(
+        db.withSignal(controller.signal).transaction((tx) => tx.sql`SELECT pg_sleep(3)`),
+        /stop/,
+      );
+      assert.equal(await running(), 0);
+      // 连接还回池里照常可用
+      assert.deepEqual(await db.sql<{ v: number }>`SELECT 1 AS v`, [{ v: 1 }]);
+    });
+  });
+
   describe(`postgres ${new URL(url).port}: Pg.* functions`, () => {
     it('jsonb, arrays and full-text search', async () => {
       const { db } = await seed(await open());

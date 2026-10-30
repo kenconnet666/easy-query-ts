@@ -131,6 +131,8 @@ export interface DbOptions<S extends AnySchema> {
    * 写入前后的回查）、事务里的一切、introspect 走主库。刚写完马上要读到时用 `db.usePrimary()`
    */
   readonly replicas?: readonly Adapter[];
+  /** 每条语句默认的超时（毫秒），见 Db.withTimeout；默认不限 */
+  readonly statementTimeout?: number;
 }
 
 export class Db<S extends AnySchema> {
@@ -703,10 +705,21 @@ export class Db<S extends AnySchema> {
   /**
    * 一个绑定了取消信号的 Db：通过它发出的所有语句（含事务里的）遵守这个信号。
    * 信号已取消时新语句直接失败；执行中取消则不再等待结果，立刻以信号的 reason 失败。
-   * 这只是"客户端不再等"，数据库里的语句不会被终止。超时：`db.withSignal(AbortSignal.timeout(5000))`。
+   * PG、MySQL 的驱动同时在服务端终止正在跑的语句（pg_cancel_backend、KILL QUERY）；别的库只是"客户端不再等"。
+   * 每条语句的超时用 withTimeout
    */
   withSignal(signal: AbortSignal): Db<S> {
     return new Db({ ...this.ctx, signal }, this.adapter, this.keys, this.inTransaction);
+  }
+
+  /**
+   * 每条语句最多跑这么多毫秒（从发出算起，各自计时），到点按取消处理：调用方立刻以 TimeoutError 失败，
+   * PG、MySQL 的语句在服务端被终止。整个 Db 的默认见 createDb 的 statementTimeout；流式读取不受它限制
+   */
+  withTimeout(ms: number): Db<S> {
+    if (!Number.isSafeInteger(ms) || ms <= 0)
+      throw new RangeError(`timeout must be a positive number of milliseconds, got ${ms}`);
+    return new Db({ ...this.ctx, timeoutMs: ms }, this.adapter, this.keys, this.inTransaction);
   }
 
   /**
@@ -985,6 +998,7 @@ export function createDb<S extends AnySchema, C extends Capability = Capability>
     log: options.log,
     onExecute: chain(options.onExecute),
     signal: undefined,
+    timeoutMs: options.statementTimeout,
     hooks: undefined,
     replicas: replicaSet(options),
     guards: {

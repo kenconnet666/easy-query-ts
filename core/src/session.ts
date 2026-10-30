@@ -12,10 +12,17 @@ export interface ExecuteResult {
   readonly insertId: number | bigint | undefined;
 }
 
-/** 一条连接（或事务）上的执行 */
+/**
+ * 一条连接（或事务）上的执行。signal 是这条语句的取消信号（Db.withSignal、withTimeout 合成的）：
+ * 能在服务端终止语句的驱动在它触发时终止（PG pg_cancel_backend、MySQL KILL QUERY）；不能的忽略它，核心照样不再等待
+ */
 export interface Session {
-  query(sql: string, params: readonly unknown[]): Promise<Record<string, unknown>[]>;
-  execute(sql: string, params: readonly unknown[]): Promise<ExecuteResult>;
+  query(
+    sql: string,
+    params: readonly unknown[],
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>[]>;
+  execute(sql: string, params: readonly unknown[], signal?: AbortSignal): Promise<ExecuteResult>;
   /**
    * 流式读取：每次产出一批（最多 batchSize 行），不把整个结果集读进内存。驱动不支持时不实现，
    * 核心退化成一次读完再分批产出（API 一致，只是没有省内存）。
@@ -74,6 +81,8 @@ export interface Context {
   readonly interceptors: Interceptors;
   /** 取消信号：已取消的信号让新语句直接失败，执行中取消则不再等待结果（见 Db.withSignal） */
   readonly signal: AbortSignal | undefined;
+  /** 每条语句的超时（毫秒，Db.withTimeout / createDb 的 statementTimeout）：到点按取消处理 */
+  readonly timeoutMs: number | undefined;
   /** 事务结束后要做的事（Db.afterCommit / afterRollback）；不在事务里时没有 */
   readonly hooks: TransactionHooks | undefined;
   /** 全局护栏（createDb 的 hardDelete、maxRows） */
@@ -145,7 +154,7 @@ export function query(ctx: Context, statement: Statement): Promise<Record<string
     ctx,
     statement,
     'query',
-    () => readSession(ctx).query(statement.sql, statement.params),
+    (signal) => readSession(ctx).query(statement.sql, statement.params, signal),
     (rows) => rows.length,
   );
 }
@@ -155,7 +164,7 @@ export function execute(ctx: Context, statement: Statement): Promise<ExecuteResu
     ctx,
     statement,
     'execute',
-    () => ctx.session.execute(statement.sql, statement.params),
+    (signal) => ctx.session.execute(statement.sql, statement.params, signal),
     (result) => result.affected,
   );
 }
@@ -167,14 +176,15 @@ async function observe<T>(
   ctx: Context,
   statement: Statement,
   kind: 'query' | 'execute',
-  run: () => Promise<T>,
+  run: (signal: AbortSignal | undefined) => Promise<T>,
   count: (result: T) => number,
 ): Promise<T> {
   ctx.log?.(statement);
   const started = performance.now();
+  const signal = statementSignal(ctx);
   let result: T;
   try {
-    result = await abortable(ctx.signal, run);
+    result = await abortable(signal, () => run(signal));
   } catch (error) {
     ctx.onExecute?.({
       statement,
@@ -197,9 +207,16 @@ async function observe<T>(
   return result;
 }
 
+/** 一条语句的取消信号：Db 的信号与这条语句的超时，谁先到算谁 */
+function statementSignal(ctx: Context): AbortSignal | undefined {
+  if (ctx.timeoutMs === undefined) return ctx.signal;
+  const timeout = AbortSignal.timeout(ctx.timeoutMs);
+  return ctx.signal ? AbortSignal.any([ctx.signal, timeout]) : timeout;
+}
+
 /**
  * 带取消地执行：信号已取消就不再发出语句；执行中取消就不再等待，立刻以信号的 reason 失败。
- * 注意这只是"客户端不再等"，数据库那边的语句不会被终止（真正的终止要各驱动的取消协议，如 MySQL KILL QUERY、PG pg_cancel_backend）。
+ * 服务端的语句由驱动终止（见 Session 的 signal）；不支持的驱动只是"客户端不再等"。
  */
 export async function abortable<T>(
   signal: AbortSignal | undefined,

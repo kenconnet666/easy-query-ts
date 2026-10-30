@@ -75,6 +75,38 @@ for (const url of urls) {
     returning: false,
   });
 
+  describe(`mysql ${new URL(url).port}: server-side cancellation`, () => {
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    it('kills the statement on the server when the timeout fires or the signal aborts, also inside a transaction', async () => {
+      const db = createDb({ schema, adapter: mysql(await pool()) });
+      const running = async () => {
+        for (let i = 0; i < 40; i++) {
+          const [row] = await db.sql<{
+            n: number;
+          }>`SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST
+            WHERE INFO LIKE ${'SELECT SLEEP(3)%'} AND ID <> CONNECTION_ID()`;
+          if (Number(row!.n) === 0) return 0;
+          await pause(50);
+        }
+        return 1;
+      };
+      const started = Date.now();
+      await assert.rejects(db.withTimeout(300).sql`SELECT SLEEP(3)`, { name: 'TimeoutError' });
+      assert.ok(Date.now() - started < 2000);
+      assert.equal(await running(), 0);
+
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new Error('stop')), 200);
+      await assert.rejects(
+        db.withSignal(controller.signal).transaction((tx) => tx.sql`SELECT SLEEP(3)`),
+        /stop/,
+      );
+      assert.equal(await running(), 0);
+      // 连接还回池里照常可用（整数按文字读）
+      assert.deepEqual(await db.sql<{ v: string }>`SELECT 1 AS v`, [{ v: '1' }]);
+    });
+  });
+
   describe(`mysql ${new URL(url).port}: MySQL.* functions`, () => {
     it('json predicates and full-text match', async () => {
       const { db } = await seed(await open());

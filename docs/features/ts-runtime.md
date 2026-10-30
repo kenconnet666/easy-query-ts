@@ -17,13 +17,23 @@ for await (const order of db.queryable(Order).orderBy(o => o.id).stream({ batchS
 
 不能和 `toList()` 导航（对象树）一起用——对象树要先拿到所有父行，会报错。`onExecute` 在流结束（或被放弃）时触发，`rows` 是实际产出的行数。
 
-## 取消 `withSignal`
+## 取消与超时：`withSignal`、`withTimeout`
 
 ```ts
-const rows = await db.withSignal(AbortSignal.timeout(5000)).queryable(Order).toList();
+const rows = await db.withTimeout(5000).queryable(Order).toList(); // 每条语句最多 5 秒
+const ac = new AbortController();
+req.on('close', () => ac.abort()); // 客户端断开就取消
+await db.withSignal(ac.signal).transaction(async (tx) => { … });
+createDb({ schema, adapter, statementTimeout: 30_000 }); // 整个 Db 的默认
 ```
 
-通过这个 Db 发出的所有语句（含事务、`db.sql`、`stream()`）遵守信号：已取消的信号让新语句直接失败；执行中取消则**不再等待**，立刻以信号的 `reason` 失败（超时是 `TimeoutError`）。**这只是"客户端不再等"，数据库里的语句不会被终止**——真正终止要各驱动的取消协议（MySQL `KILL QUERY`、PG `pg_cancel_backend`），没有做。
+通过这个 Db 发出的所有语句（含事务、`db.sql`）遵守信号与超时：已取消的信号让新语句直接失败；执行中取消或超时则**立刻**以信号的
+`reason` 失败（超时是 `TimeoutError`）。超时每条语句各自计时；`stream()` 只受信号控制，不受超时限制。
+
+**服务端也停下**（ROADMAP 19.3）：PG 驱动从池里另一条连接发 `pg_cancel_backend(进程号)`，MySQL 驱动发 `KILL QUERY 线程号`，
+正在跑的语句在库里被终止（连接保留、还回池里照常可用）；事务里取消时语句失败、事务随之回滚。为了知道语句跑在哪个连接上，
+带信号或超时的语句会先从池里借一条连接；取消请求发完才归还，不会落到复用这条连接的下一条语句上。
+别的库的驱动只做到"客户端不再等"，库里的语句照样跑完。驱动在 `Session.query / execute` 的第三个参数收到这条语句的信号。
 
 ## 嵌套事务（保存点）
 
