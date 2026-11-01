@@ -225,7 +225,7 @@ easy-query 的 TS 版。阶段编号沿用迁移前 vue-tsx-pro 的 ROADMAP，�
 - [x] 24.2 工具链独立：解析条件改名 `@easy-query-ts/source`，CI 的实库任务、本机容器（端口 3xxxx）搬过来，新增 `consumer` 检查发布产物
 - [x] 24.3 缓存收窄（用户定）：去掉前端相关（`tableChanges`、`onEvict`、前端存储的 `cacheStore`）与真实驱动（`redisStore`、`redisTransport`、`pgTransport`、发件箱）。
       只留本机与 Redis 两级、三种部署；Redis 由使用方实现 `CacheStore`、`CacheTransport`，示例与实测放在 `packages/test`。上面阶段 23 里提到的这些都已不在本仓库
-- [ ] 24.4 发布 0.2.0，vue-tsx-pro 改用 npm 上的版本
+- [x] 24.4 发布 0.2.0（17 个包），vue-tsx-pro 改用 npm 上的版本
 
 ## 阶段 25：文档站
 
