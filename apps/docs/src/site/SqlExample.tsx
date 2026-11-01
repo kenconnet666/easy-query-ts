@@ -17,7 +17,7 @@ import {
   Text,
 } from '@zerodep-dev/vue-tsx-pro-ui';
 import { currentDialect, dialectInfo, dialects } from './dialects';
-import type { Example, RenderedStatement } from './example';
+import type { Example } from './example';
 import type { LiveResult } from './live';
 import { sqlText } from './sql-text';
 
