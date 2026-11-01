@@ -515,19 +515,20 @@ function base<T>(c: Codec<T>, extra: Partial<ColumnOptions> = {}): Column<T, fal
  * Standard Schema（https://standardschema.dev）的最小子集：只依赖 `~standard.validate`，不引入任何校验库。
  * zod ≥3.24、valibot、arktype 等都实现了它。
  */
+export type StandardResult<Output> =
+  | { readonly value: Output; readonly issues?: undefined }
+  | {
+      readonly issues: readonly {
+        readonly message: string;
+        readonly path?: readonly unknown[] | undefined;
+      }[];
+    };
+
 export interface StandardSchema<Output = unknown> {
   readonly '~standard': {
     readonly version: 1;
     readonly vendor: string;
-    readonly validate: (value: unknown) =>
-      | { readonly value: Output; readonly issues?: undefined }
-      | {
-          readonly issues: readonly {
-            readonly message: string;
-            readonly path?: readonly unknown[] | undefined;
-          }[];
-        }
-      | Promise<unknown>;
+    readonly validate: (value: unknown) => StandardResult<Output> | Promise<StandardResult<Output>>;
     /** 仅类型用：校验器的输出类型 */
     readonly types?: { readonly input: unknown; readonly output: Output } | undefined;
   };
