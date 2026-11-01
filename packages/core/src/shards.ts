@@ -64,7 +64,9 @@ export class ShardedDb<S extends AnySchema> {
     const groups = new Map<string, Insert<E>[]>();
     for (const row of rows) {
       const name = this.shardOfRow(entity, row as Record<string, unknown>);
-      groups.set(name, [...(groups.get(name) ?? []), row]);
+      const group = groups.get(name);
+      if (group) group.push(row);
+      else groups.set(name, [row]);
     }
     let affected = 0;
     for (const [name, list] of groups)

@@ -821,14 +821,18 @@ function nextVersion(column: AnyColumn, current: unknown): unknown {
   return typeof current === 'bigint' ? current + 1n : Number(current) + 1;
 }
 
-/** entity(row)、changes 会写的列：主键、版本（由版本条件另写）、只插入的列、生成列不写 */
+/**
+ * entity(row)、changes 会写的列：主键、版本（由版本条件另写）、只插入的列、生成列不写。
+ * $onUpdate 的列也不从行里取：行多半是查出来改的，写回去就成了旧值，要由规则填新值；真要指定就用 set
+ */
 function updatableColumn(entity: Entity, prop: string): boolean {
   const options = entity.columns[prop]!.options;
   return (
     !entity.primaryKey.includes(prop) &&
     !options.version &&
     !options.insertOnly &&
-    !options.computed
+    !options.computed &&
+    !options.onUpdateFn
   );
 }
 

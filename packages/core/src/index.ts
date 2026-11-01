@@ -27,6 +27,7 @@ export type {
   InsertOf,
   Row,
   RowOf,
+  StandardResult,
   StandardSchema,
   TableIndex,
   Update,

@@ -273,24 +273,25 @@ export class AggregateSaver {
     const flat = flattenRow(entity, values);
     if (hasKey(flat, pk)) {
       const byKey = (r: any) => pk.map((k) => (r[k] as Expr<unknown>).eq(flat[k] as never));
-      const exists = (await this.db.queryable(entity).where(byKey).count()) > 0;
-      if (!exists)
+      const current = await this.db.queryable(entity).where(byKey).first();
+      if (!current) {
         await this.db
           .insert(entity)
           .values(values as never)
           .execute();
-      else {
-        const changes = Object.fromEntries(
-          Object.entries(values).filter(([p, v]) => !pk.includes(p) && v !== undefined),
-        );
-        if (Object.keys(changes).length > 0)
-          await this.db
-            .update(entity)
-            .set(changes as never)
-            .where(byKey)
-            .execute();
+        return flat;
       }
-      return flat;
+      const changes = Object.fromEntries(
+        Object.entries(values).filter(([p, v]) => !pk.includes(p) && v !== undefined),
+      );
+      if (Object.keys(changes).length > 0)
+        await this.db
+          .update(entity)
+          .set(changes as never)
+          .where(byKey)
+          .execute();
+      // 输入可能只给了主键：子项的关联列（关系的 from 不一定是主键）要从库里的行取
+      return { ...flattenRow(entity, current as Row), ...flat };
     }
     if (pk.length > 1)
       throw new Error(`save: composite primary key of ${entity.table} must be given completely`);

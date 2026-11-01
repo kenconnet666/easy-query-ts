@@ -71,7 +71,12 @@ async function pull(args: readonly string[]): Promise<void> {
   if (values.out) {
     await writeFile(values.out, source);
     console.error(`wrote ${values.out}`);
-  } else process.stdout.write(source);
+  } else {
+    // main 做完就 process.exit：等写完，否则管道里的输出会被截断
+    await new Promise<void>((done, fail) =>
+      process.stdout.write(source, (error) => (error ? fail(error) : done())),
+    );
+  }
 }
 
 async function migrate(args: readonly string[]): Promise<void> {
