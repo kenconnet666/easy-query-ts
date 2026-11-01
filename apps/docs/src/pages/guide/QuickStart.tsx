@@ -52,7 +52,7 @@ export default _component(() => () => (
     <Section id="next" title="接下来">
       <Points
         items={[
-          '查询的写法看“条件、排序与分页”，每段代码都能运行。',
+          '查询的写法看“基础查询”“条件”，每段代码都能运行。',
           '`toList`、`single`、`find`、`count`、`any`、`toPage`、`stream` 是终结方法，调用时才发 SQL。',
         ]}
       />

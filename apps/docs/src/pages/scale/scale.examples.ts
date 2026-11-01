@@ -1,6 +1,6 @@
-/** 性能、动态表名两章的示例 */
+/** 性能、动态表名、分表几章的示例 */
 import { example } from '../../site/example.ts';
-import { Post, User } from '../../site/model.ts';
+import { Bill, Log, Post, User } from '../../site/model.ts';
 
 // ---- 性能
 
@@ -114,4 +114,77 @@ export const tableLink = example((db) => {
     .toSQL();
 
   return [statement.sql];
+});
+
+// ---- 分表
+
+export const modTables = example((db) =>
+  db.createTablesSql(Log),
+);
+
+export const modEq = example((db) => {
+  const { sql } = db
+    .queryable(Log)
+    .where((l) => l.userId.eq(5))
+    .toSQL();
+
+  return [sql];
+});
+
+export const modIn = example((db) => {
+  const { sql } = db
+    .queryable(Log)
+    .where((l) => l.userId.in([1, 2]))
+    .select((l) => l.message)
+    .toSQL();
+
+  return [sql];
+});
+
+export const modAll = example((db) => {
+  const { sql } = db
+    .queryable(Log)
+    .orderBy((l) => l.id.desc())
+    .limit(10)
+    .select((l) => ({ id: l.id, message: l.message }))
+    .toSQL();
+
+  return [sql];
+});
+
+export const monthEq = example((db) => {
+  const { sql } = db
+    .queryable(Bill)
+    .where((b) =>
+      b.createdAt.eq(new Date('2025-03-15T00:00:00Z')),
+    )
+    .toSQL();
+
+  return [sql];
+});
+
+export const monthRange = example((db) => {
+  const { sql } = db
+    .queryable(Bill)
+    .where((b) => [
+      b.createdAt.ge(new Date('2025-02-01T00:00:00Z')),
+      b.createdAt.lt(new Date('2025-04-01T00:00:00Z')),
+    ])
+    .select((b) => b.amount)
+    .toSQL();
+
+  return [sql];
+});
+
+export const shardAggregate = example((db) => {
+  const { sql } = db
+    .queryable(Bill)
+    .where((b) =>
+      b.createdAt.ge(new Date('2025-05-01T00:00:00Z')),
+    )
+    .groupBy(() => ({}))
+    .select((g) => g.sum((b) => b.amount))
+    .toSQL();
+
+  return [sql];
 });

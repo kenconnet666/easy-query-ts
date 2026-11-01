@@ -1,16 +1,9 @@
-/** 实体与列：声明表、列修饰器、索引、值对象、品牌类型、从实体取类型 */
+/** 实体与列：声明表、列修饰器、索引、品牌类型、从实体取类型 */
 import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
 import { CodeBlock } from '@zerodep-dev/vue-tsx-pro-ui';
-import { DocPage, Note, P, Points, Section, SimpleTable, Sub } from '../../site/content';
+import { DocPage, Note, P, Section, SimpleTable, Sub } from '../../site/content';
 import { SqlExample } from '../../site/SqlExample';
-import {
-  declareTable,
-  defaults,
-  embedGroup,
-  embedInsert,
-  embedRead,
-  embedSelect,
-} from './model.examples.ts';
+import { declareTable, defaults } from './model.examples.ts';
 
 const first = `import { col, createDb, defineSchema, entity } from '@zerodep-dev/easy-query-ts';
 
@@ -22,7 +15,7 @@ export const User = entity('t_user', {
   createdAt: col.datetime().$default(() => new Date()),
 });
 
-// 把实体登记进 schema，关系写在第二个参数里，见“隐式 join 与子查询”
+// 把实体登记进 schema，关系写在第二个参数里，见“关系”
 export const schema = defineSchema({ User });
 export const db = createDb({ schema, adapter });`;
 
@@ -53,16 +46,6 @@ const foreignKey = `defineSchema({ Shelf, Book }, {
     shelf: r.one('Shelf', { from: 'shelfId', to: 'id' }, {
       foreignKey: { onDelete: 'cascade' }, // 外键声明在多对一导航上，名字默认 fk_表_列
     }),
-  }),
-});`;
-
-const embedDeclare = `const Shop = entity('t_shop', {
-  id: col.bigint().primaryKey().generated(),
-  name: col.string(50),
-  address: embed({
-    city: col.string(20),                    // 列 address_city
-    street: col.string(100).nullable(),      // 列 address_street
-    geo: embed({ lat: col.double(), lng: col.double() }, { prefix: 'geo_' }), // 列 geo_lat、geo_lng
   }),
 });`;
 
@@ -120,7 +103,11 @@ export default _component(() => () => (
           ['`unsigned()`', 'MySQL 的无符号，别的库建表时忽略', '不变'],
           ['`generatedAs(sql)`', '生成列（PG、MySQL、SQLite）', '写入时给值报错'],
           ['`renamedFrom(old)`', '列改过名：同步时改名而不是加列', '不变'],
-          ['`softDelete()`、`version()`、`insertOnly()`、`encrypted()`', '见“列规则与拦截器”', '-'],
+          [
+            '`softDelete()`、`version()`、`insertOnly()`、`encrypted()`',
+            '见“逻辑删除”“乐观锁”“自动填充”“加密列”',
+            '-',
+          ],
         ]}
       />
       <P text="下面这张表用到了其中几个，切换方言看同一份声明怎么变成各库的语句。" />
@@ -133,22 +120,6 @@ export default _component(() => () => (
       <CodeBlock code={indexes} lang="ts" />
       <P text="外键不是必须的：导航只看声明，不看库里有没有外键。需要时声明在多对一导航上。" />
       <CodeBlock code={foreignKey} lang="ts" />
-    </Section>
-    <Section id="embed" title="值对象">
-      <P text="地址、金额加币种这类总是一起出现的几列，用 `embed` 收成一个属性：库里还是平铺的列，代码里是嵌套对象。对应 Java 版的 `@ValueObject`。" />
-      <CodeBlock code={embedDeclare} lang="ts" />
-      <SqlExample example={embedRead} title="读出来是嵌套对象" />
-      <SqlExample example={embedSelect} title="子属性直接点：条件、排序、select 都行" />
-      <SqlExample example={embedGroup} title="按城市分组" />
-      <SqlExample example={embedInsert} title="整个对象写入，展开成几列" />
-      <Points
-        items={[
-          '列名默认是“属性名_子属性名”，`prefix` 换掉前缀，子列 `named()` 时用它给的全名。',
-          '全都可空的值对象插入时可省，更新时可以整个给 `null`。',
-          '列表请求里写路径：`sort=-address.city`、`filter.address.city=杭州`。',
-          '主键不能放进值对象；整行带值对象的查询不能 `asTable()`，先 `select` 成平的列。',
-        ]}
-      />
     </Section>
     <Section id="brand" title="品牌类型">
       <P text="主键、外键都是数字，把订单号当客户号传进去，类型上看不出来。打上品牌之后值类型互不相容。品牌只存在于类型里，运行时就是原来的数字，算术照常。" />

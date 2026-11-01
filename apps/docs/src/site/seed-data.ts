@@ -368,4 +368,12 @@ export const seedData = {
     { kind: 'wechat', orderId: 4, amount: '398.00', openId: 'wx-chenmo' },
     { kind: 'wechat', orderId: 7, amount: '328.50', openId: 'wx-hanmei' },
   ],
+  /** 工单：两个租户；示例的 Db 只看 1 号租户。这里是明文，库里存的是密文 */
+  Ticket: [
+    { tenantId: 1, title: '发票抬头写错了', contact: '13800000001' },
+    { tenantId: 1, title: '想开通团队版', contact: '13800000002' },
+    { tenantId: 1, title: '导出报表很慢', contact: '13800000001' },
+    { tenantId: 2, title: '登录不上', contact: '13900000001' },
+    { tenantId: 2, title: '要改绑手机号', contact: '13900000002' },
+  ],
 } as const;

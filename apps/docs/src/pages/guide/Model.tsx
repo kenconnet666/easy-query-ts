@@ -52,6 +52,7 @@ const tables: readonly {
   { entity: 'Doc', table: 't_doc', title: '文档（列规则）', generatedId: true },
   { entity: 'Shop', table: 't_shop', title: '门店（值对象）', generatedId: true },
   { entity: 'Payment', table: 't_payment', title: '支付记录（多态）', generatedId: true },
+  { entity: 'Ticket', table: 't_ticket', title: '工单（多租户）', generatedId: true },
 ];
 
 /** 单元格的文字：数组用顿号连起来，值对象写成一串，时间只留到分钟；这种支付方式没有的列是 null */

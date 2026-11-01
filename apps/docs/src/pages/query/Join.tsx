@@ -25,7 +25,7 @@ import {
 export default _component(() => () => (
   <DocPage>
     <Section id="when" title="和导航怎么选">
-      <P text="声明过的关系用导航最省事（见“隐式 join 与子查询”）。下面这些情况写显式 join，两种写法可以混用。" />
+      <P text="声明过的关系用导航最省事（见“对一：隐式 join”）。下面这些情况写显式 join，两种写法可以混用。" />
       <SimpleTable
         head={['你要的', '写法', 'SQL']}
         rows={[

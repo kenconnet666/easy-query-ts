@@ -3,14 +3,19 @@
  * 文档里每段代码都跑在这套模型与 seed-data.ts 的数据上：构建时算出 SQL 与结果，浏览器里点“运行”时真的执行
  */
 import {
+  byMod,
+  byMonth,
   caseWhen,
   col,
   defineComputed,
   defineSchema,
   entity,
   embed,
+  tenant,
   text,
+  touch,
   type Db,
+  type Interceptor,
 } from '@zerodep-dev/easy-query-ts';
 import { seedData } from './seed-data.ts';
 
@@ -143,6 +148,58 @@ export const Payment = entity.union('t_payment', 'kind', {
   },
 });
 
+/** 按用户取模分四张表（“分表”一章）：不在 schema 里，也不建表，卡片只渲染 SQL */
+export const Log = entity(
+  't_log',
+  { id: col.bigint().primaryKey(), userId: col.bigint(), message: col.string(200) },
+  { sharding: byMod('userId', 4) },
+);
+
+/** 按月分表（“分表”一章）：同上 */
+export const Bill = entity(
+  't_bill',
+  { id: col.bigint().primaryKey(), createdAt: col.datetime(), amount: col.decimal(10, 2) },
+  {
+    sharding: byMonth('createdAt', { from: '2025-01', to: () => new Date('2025-06-01T00:00:00Z') }),
+  },
+);
+
+/** 工单：多租户、自动填充的时间、加密的联系方式（“多租户”“自动填充”“加密”几章） */
+export const Ticket = entity('t_ticket', {
+  id: col.bigint().primaryKey().generated(),
+  // 插入时由 tenant 拦截器填：类型上可省
+  tenantId: col.int().defaulted(),
+  title: col.string(100),
+  contact: col.string(100).encrypted({
+    // 示例用的可逆变换：确定性的，所以能按密文比较。真实项目换成 AES 这类加密
+    encrypt: (plain) => `enc:${plain.split('').reverse().join('')}`,
+    decrypt: (cipher) => cipher.slice(4).split('').reverse().join(''),
+  }),
+  touchedAt: col.datetime().nullable(),
+});
+
+declare module '@zerodep-dev/easy-query-ts' {
+  interface InterceptorNames {
+    audit: true;
+  }
+}
+
+/** 示例里记下的写入：“拦截器”一章看它 */
+export const auditLog: string[] = [];
+
+/** 示例 Db 上的拦截器：工单只看 1 号租户；审计默认关着，语句上 useInterceptor('audit') 才生效 */
+export const interceptors: readonly Interceptor[] = [
+  tenant('tenantId', () => 1),
+  touch('touchedAt', () => new Date('2026-11-01T08:00:00Z')),
+  {
+    name: 'audit',
+    enabled: false,
+    afterWrite(event) {
+      auditLog.push(`${event.kind} ${event.entity.table}：${event.affected} 行`);
+    },
+  },
+];
+
 const relations = defineSchema(
   {
     Company,
@@ -161,6 +218,7 @@ const relations = defineSchema(
     Doc,
     Shop,
     Payment,
+    Ticket,
   },
   {
     Company: (r) => ({
@@ -200,6 +258,8 @@ const relations = defineSchema(
       posts: r.many('Post', { from: 'id', to: 'authorId' }),
       comments: r.many('Comment', { from: 'id', to: 'authorId' }),
       orders: r.many('Order', { from: 'id', to: 'userId' }),
+      // 不是主键的关联：文档记的是创建人的名字。文档有逻辑删除，导航上也只看没删除的
+      docs: r.many('Doc', { from: 'name', to: 'createdBy' }),
       // 直达关系：经订单到买过的商品，同一个商品只算一次
       products: r.path('Product', ['orders', 'products']),
       // 固定条件的一对多：只算阅读量过千的帖子
@@ -329,5 +389,9 @@ export async function seed(db: Db<typeof schema>): Promise<void> {
   await db
     .insert(Payment)
     .values([...seedData.Payment])
+    .execute();
+  await db
+    .insert(Ticket)
+    .values([...seedData.Ticket])
     .execute();
 }

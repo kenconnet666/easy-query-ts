@@ -35,7 +35,7 @@ import {
   formatSql,
   generatedStatements,
 } from '../src/site/format-sql.ts';
-import { schema, seed } from '../src/site/model.ts';
+import { interceptors, schema, seed } from '../src/site/model.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -106,7 +106,7 @@ async function render(build: ExampleBuild) {
   await seed(setup);
   const log: Recording = { queries: [], executes: [] };
   const value = await build(
-    createDb({ schema, adapter: { ...real, driver: recording(real.driver, log) } }),
+    createDb({ schema, interceptors, adapter: { ...real, driver: recording(real.driver, log) } }),
   );
   database.close();
 
@@ -115,7 +115,11 @@ async function render(build: ExampleBuild) {
     const statements: RenderedStatement[] = [];
     try {
       const returned = await build(
-        createDb({ schema, adapter: { dialect, driver: replaying(log, statements) } }),
+        createDb({
+          schema,
+          interceptors,
+          adapter: { dialect, driver: replaying(log, statements) },
+        }),
       );
       dialects[label] = {
         statements: generatedStatements(statements.length, returned) ?? statements,
@@ -148,7 +152,11 @@ function bodies(source: string): Map<string, string> {
   for (const part of parts) {
     const head = /^export const (\w+) = example\(\s*(async\s*)?\(_?db\)\s*=>\s*/.exec(part);
     if (!head) continue;
-    let body = part.slice(head[0].length, part.lastIndexOf(');')).replace(/,\s*$/, '');
+    // 示例到顶格的 ); 为止，后面可能跟着不属于它的代码
+    const end = part.search(/^\);/m);
+    let body = part
+      .slice(head[0].length, end < 0 ? part.lastIndexOf(');') : end)
+      .replace(/,\s*$/, '');
     if (body.startsWith('{')) {
       // 语句体：去掉外层大括号，整体少缩进一层
       body = body

@@ -8,7 +8,7 @@ import type { LiveEngine } from './dialects';
 import type { ExampleBuild, RenderedStatement } from './example.ts';
 import { formatParams, formatResult, formatSql, generatedStatements } from './format-sql.ts';
 import * as model from './model.ts';
-import { schema, seed } from './model.ts';
+import { interceptors, schema, seed } from './model.ts';
 
 /** 一次运行的结果 */
 export interface LiveResult {
@@ -80,8 +80,10 @@ async function execute(build: ExampleBuild, engine: LiveEngine): Promise<LiveRes
   await seed(setup);
 
   const statements: RenderedStatement[] = [];
+  model.auditLog.length = 0;
   const db = createDb({
     schema,
+    interceptors,
     adapter,
     log: ({ sql, params }) =>
       statements.push({ sql: formatSql(sql), params: formatParams(params) }),
