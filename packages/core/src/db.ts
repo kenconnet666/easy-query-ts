@@ -447,7 +447,8 @@ export class Db<S extends AnySchema> {
   }
 
   async tableExists(entity: Entity): Promise<boolean> {
-    return findTable(await this.introspect(), entity.table) !== undefined;
+    const tables = await this.introspect();
+    return this.targets([entity]).every((e) => findTable(tables, e.table) !== undefined);
   }
 
   /**
@@ -508,11 +509,18 @@ export class Db<S extends AnySchema> {
     return new Db(primary(this.ctx), this.adapter, this.keys, this.inTransaction);
   }
 
-  /** 没给实体时是 schema 里全部非派生的实体；分表实体展开成它的每一张实际表 */
+  /**
+   * 没给实体时是 schema 里全部非派生的实体；分表实体展开成它的每一张实际表。
+   * 用户手里的实体对象按键换成当前 schema 里的那份：mapTables、inSchema 之后 DDL 才落在映射后的表上，不会动到原表
+   */
   private targets(entities: readonly Entity[]): Entity[] {
+    const current = (e: Entity): Entity => {
+      const key = this.keys.get(e);
+      return (key && this.ctx.schema.entities[key]) || e;
+    };
     const list =
       entities.length > 0
-        ? entities
+        ? entities.map(current)
         : Object.values(this.ctx.schema.entities).filter((e) => !e.derived);
     return list.flatMap((e) => {
       if (!e.sharding) return [e];
