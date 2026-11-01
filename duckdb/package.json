@@ -1,0 +1,51 @@
+{
+  "name": "@zerodep-dev/easy-query-ts-duckdb",
+  "version": "0.1.0",
+  "description": "DuckDB dialect and driver adapter (@duckdb/node-api) for @zerodep-dev/easy-query-ts",
+  "license": "Apache-2.0",
+  "author": "lionheart (https://github.com/kenconnet666)",
+  "homepage": "https://github.com/kenconnet666/vue-tsx-pro/tree/master/packages/easy-query#readme",
+  "bugs": {
+    "url": "https://github.com/kenconnet666/vue-tsx-pro/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kenconnet666/vue-tsx-pro.git",
+    "directory": "packages/easy-query/duckdb"
+  },
+  "keywords": [
+    "duckdb",
+    "analytics",
+    "orm",
+    "easy-query"
+  ],
+  "exports": {
+    ".": {
+      "@vue-tsx-pro/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:^",
+    "@duckdb/node-api": "^1.5.0"
+  },
+  "devDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:*",
+    "@zerodep-dev/easy-query-ts-test": "workspace:*",
+    "@duckdb/node-api": "catalog:"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "prepack": "tsc -b tsconfig.build.json"
+  }
+}

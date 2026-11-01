@@ -1,0 +1,52 @@
+{
+  "name": "@zerodep-dev/easy-query-ts-db2",
+  "version": "0.1.0",
+  "description": "IBM Db2 dialect and driver adapter (ibm_db) for @zerodep-dev/easy-query-ts",
+  "license": "Apache-2.0",
+  "author": "lionheart (https://github.com/kenconnet666)",
+  "homepage": "https://github.com/kenconnet666/vue-tsx-pro/tree/master/packages/easy-query#readme",
+  "bugs": {
+    "url": "https://github.com/kenconnet666/vue-tsx-pro/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kenconnet666/vue-tsx-pro.git",
+    "directory": "packages/easy-query/db2"
+  },
+  "keywords": [
+    "db2",
+    "ibm_db",
+    "orm",
+    "easy-query"
+  ],
+  "exports": {
+    ".": {
+      "@vue-tsx-pro/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:^",
+    "ibm_db": "^3.0.0 || ^4.0.0"
+  },
+  "devDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:*",
+    "@zerodep-dev/easy-query-ts-test": "workspace:*",
+    "ibm_db": "catalog:"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "prepack": "tsc -b tsconfig.build.json",
+    "driver": "cd node_modules/ibm_db && node installer/driverInstall.js"
+  }
+}

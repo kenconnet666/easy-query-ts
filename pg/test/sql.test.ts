@@ -1,0 +1,227 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'vitest';
+import type { Pool } from 'pg';
+import { col, createDb, entity } from '@zerodep-dev/easy-query-ts';
+import {
+  ddlSchema,
+  Gadget,
+  Post,
+  schema,
+  Token,
+  User,
+} from '@zerodep-dev/easy-query-ts-test/fixture';
+import { postgres } from '../src/index.ts';
+
+describe('postgres: SQL text', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+
+  it('numbers placeholders and keeps booleans', () => {
+    const s = db
+      .queryable(User)
+      .where((u) => [u.name.eq('a'), u.age.in([1, 2])])
+      .select((u) => ({ id: u.id }))
+      .toSQL();
+    assert.equal(
+      s.sql,
+      'SELECT t0."id" AS "c0" FROM "t_user" t0 WHERE t0."name" = $1 AND t0."age" IN ($2, $3)',
+    );
+    assert.equal(
+      db
+        .queryable(User)
+        .where((u) => u.id.eq(1))
+        .toSQL().params.length,
+      1,
+    );
+  });
+});
+
+describe('postgres: JSON edits and jsonSome', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+  type Order = { items: { sku: string; qty: number }[] };
+  const JOrder = entity('t_jorder', { id: col.int().primaryKey(), body: col.json<Order>() });
+
+  it('renders jsonb_set with a JSONB parameter and jsonb_to_recordset for array elements', () => {
+    const s = db
+      .update(JOrder)
+      .set((o) => ({ body: o.body.jsonSet(['items', 0, 'qty'], 2) }))
+      .where((o) =>
+        o.body.jsonSome(['items'], { sku: col.string(), qty: col.int() }, (it) => [
+          it.sku.eq('A1'),
+          it.qty.gt(2),
+        ]),
+      )
+      .toSQL();
+    assert.equal(
+      s.sql,
+      'UPDATE "t_jorder" AS t0 SET "body" = jsonb_set(CAST(t0."body" AS JSONB), \'{"items","0","qty"}\', CAST($1 AS JSONB))' +
+        ' WHERE EXISTS (SELECT 1 FROM jsonb_to_recordset(CAST(t0."body" AS JSONB) #> \'{"items"}\') AS eq_j("sku" VARCHAR(255), "qty" INTEGER)' +
+        ' WHERE eq_j."sku" = $2 AND eq_j."qty" > $3)',
+    );
+    assert.deepEqual(s.params, ['2', 'A1', 2]);
+  });
+});
+
+describe('postgres: query forms', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+
+  it('renders DISTINCT ON with its keys leading the ORDER BY, ILIKE, ~*, COLLATE and the lock strengths', () => {
+    assert.equal(
+      db
+        .queryable(Post)
+        .distinctOn((p) => p.userId)
+        .orderBy((p) => p.id.desc())
+        .where((p) => [
+          p.title.startsWith('a', { ignoreCase: true }),
+          p.title.matches('^o', { ignoreCase: true }),
+        ])
+        .select((p) => p.title.collate('C'))
+        .toSQL().sql,
+      'SELECT DISTINCT ON (t0."user_id") (t0."title" COLLATE "C") AS "c0" FROM "t_post" t0' +
+        ` WHERE t0."title" ILIKE $1 ESCAPE '\\' AND (t0."title" ~* $2) ORDER BY t0."user_id" ASC, t0."id" DESC`,
+    );
+    assert.match(db.queryable(Post).forShare().toSQL().sql, / FOR SHARE$/);
+    assert.match(db.queryable(Post).forNoKeyUpdate().toSQL().sql, / FOR NO KEY UPDATE$/);
+    assert.match(
+      db.queryable(Post).optimizerHint('SeqScan(t0)').toSQL().sql,
+      /^SELECT \/\*\+ SeqScan\(t0\) \*\/ /,
+    );
+  });
+});
+
+describe('postgres: generated columns and index kinds', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+  const Doc = entity(
+    't_gdoc',
+    {
+      id: col.int().primaryKey(),
+      attrs: col.json<{ tags: string[] }>(),
+      qty: col.int(),
+      price: col.int(),
+      total: col.int().generatedAs('qty * price'),
+    },
+    {
+      indexes: [
+        { columns: ['attrs'], using: 'gin', name: 't_gdoc_attrs_gin' },
+        { columns: ['qty'], where: 'qty > 0', name: 't_gdoc_live_idx' },
+        { expressions: ["CAST(attrs->'$.tags' AS CHAR(32) ARRAY)"], name: 't_gdoc_tags_mvi' },
+      ],
+    },
+  );
+
+  it('renders GENERATED ALWAYS AS … STORED, USING gin, partial and expression indexes', () => {
+    const sql = db.createTablesSql(Doc);
+    assert.match(sql[0]!, /"total" INTEGER GENERATED ALWAYS AS \(qty \* price\) STORED NOT NULL/);
+    assert.deepEqual(sql.slice(1), [
+      'CREATE INDEX IF NOT EXISTS "t_gdoc_attrs_gin" ON "t_gdoc" USING gin ("attrs")',
+      'CREATE INDEX IF NOT EXISTS "t_gdoc_live_idx" ON "t_gdoc" ("qty") WHERE qty > 0',
+      `CREATE INDEX IF NOT EXISTS "t_gdoc_tags_mvi" ON "t_gdoc" ((CAST(attrs->'$.tags' AS CHAR(32) ARRAY)))`,
+    ]);
+  });
+});
+
+describe('postgres: batched writes', () => {
+  const db = createDb({ schema, adapter: postgres({} as Pool) });
+
+  it('rewrites orderBy().limit(n) on a delete into a primary-key IN subquery', () => {
+    assert.equal(
+      db
+        .delete(Post)
+        .where((p) => p.userId.eq(1))
+        .orderBy((p) => p.id)
+        .limit(500)
+        .toSQL().sql,
+      'DELETE FROM "t_post" AS t0 WHERE t0."id" IN (SELECT t0."id" AS "k" FROM "t_post" t0 WHERE t0."user_id" = $1 ORDER BY t0."id" ASC LIMIT 500)',
+    );
+  });
+});
+
+describe('postgres: code-first DDL', () => {
+  const db = createDb({
+    schema,
+    adapter: postgres({ query: async () => ({ rows: [] }) } as unknown as Pool),
+  });
+
+  it('renders array columns as element type plus [] and array conditions with ANY, @> and &&', () => {
+    const Tagged = entity('t_tagged', {
+      id: col.int().primaryKey(),
+      tags: col.array(col.string(30)),
+      scores: col.array(col.int().nullable()).nullable(),
+    });
+    assert.equal(
+      db.createTableSql(Tagged),
+      'CREATE TABLE IF NOT EXISTS "t_tagged" ("id" INTEGER NOT NULL, "tags" VARCHAR(30)[] NOT NULL, "scores" INTEGER[], PRIMARY KEY ("id"))',
+    );
+    const s = db
+      .queryable(Tagged)
+      .where((t) => [
+        t.tags.has('a'),
+        t.tags.hasAll(['a', 'b']),
+        t.tags.hasAny(['c']),
+        t.scores.arrayLength().gt(1),
+      ])
+      .select((t) => t.id)
+      .toSQL();
+    assert.equal(
+      s.sql,
+      'SELECT t0."id" AS "c0" FROM "t_tagged" t0 WHERE $1 = ANY(t0."tags") AND t0."tags" @> $2 AND t0."tags" && $3 AND cardinality(t0."scores") > $4',
+    );
+    assert.deepEqual(s.params, ['a', ['a', 'b'], ['c'], 1]);
+  });
+
+  it('stores uuids in the UUID type, ignores unsigned and creates native enum types first', () => {
+    assert.equal(
+      db.createTableSql(Token),
+      'CREATE TABLE IF NOT EXISTS "t_token" ("id" UUID NOT NULL, "owner" UUID, "hits" BIGINT NOT NULL, "level" "eqts_level" NOT NULL, PRIMARY KEY ("id"))',
+    );
+    // 原生枚举的类型排在建表前面，能重复执行
+    assert.equal(
+      db.createTablesSql(Token)[0],
+      `DO $$ BEGIN CREATE TYPE "eqts_level" AS ENUM ('low', 'mid', 'high'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    );
+  });
+
+  it('renders CREATE TABLE with PG types and an identity column', () => {
+    assert.equal(
+      db.createTableSql(Gadget),
+      'CREATE TABLE IF NOT EXISTS "t_gadget" ("id" BIGINT GENERATED BY DEFAULT AS IDENTITY NOT NULL, "name" VARCHAR(50) NOT NULL, "price" NUMERIC(10, 2) NOT NULL,' +
+        ' "qty" INTEGER NOT NULL DEFAULT 0, "active" BOOLEAN NOT NULL, "born" DATE, "seen_at" TIMESTAMP(3) NOT NULL, "tags" JSONB NOT NULL, "photo" BYTEA, PRIMARY KEY ("id"), UNIQUE ("name"))',
+    );
+  });
+});
+
+describe('postgres: create statements with comments, indexes and foreign keys', async () => {
+  const db = createDb({ schema: ddlSchema, adapter: postgres({} as Pool) });
+
+  it('renders every statement in order', () => {
+    assert.deepEqual(db.createTablesSql(), [
+      'CREATE TABLE IF NOT EXISTS "t_shelf" ("id" BIGINT GENERATED BY DEFAULT AS IDENTITY NOT NULL, "name" VARCHAR(50) NOT NULL, PRIMARY KEY ("id"))',
+      'CREATE TABLE IF NOT EXISTS "t_book" ("id" BIGINT GENERATED BY DEFAULT AS IDENTITY NOT NULL, "shelf_id" BIGINT NOT NULL, "title" VARCHAR(100) NOT NULL, PRIMARY KEY ("id"))',
+      'COMMENT ON TABLE "t_shelf" IS \'书架\'',
+      'COMMENT ON COLUMN "t_shelf"."name" IS \'书架\'\'s 名\'',
+      'CREATE UNIQUE INDEX IF NOT EXISTS "t_book_shelf_id_title_uidx" ON "t_book" ("shelf_id", "title")',
+      'ALTER TABLE "t_book" ADD CONSTRAINT "fk_t_book_shelf_id" FOREIGN KEY ("shelf_id") REFERENCES "t_shelf" ("id") ON DELETE CASCADE',
+    ]);
+  });
+
+  it('renames and adds columns in standard syntax', () => {
+    const dialect = postgres({} as Pool).dialect;
+    assert.equal(
+      dialect.renameColumn('t_book', 'title', 'name'),
+      'ALTER TABLE "t_book" RENAME COLUMN "title" TO "name"',
+    );
+    assert.equal(
+      dialect.renameTable('t_book', 't_books'),
+      'ALTER TABLE "t_book" RENAME TO "t_books"',
+    );
+    assert.equal(
+      dialect.addColumn('t_book', 'note', 'string', {
+        nullable: true,
+        primaryKey: false,
+        generated: false,
+        hasDefault: false,
+        length: 20,
+      }),
+      'ALTER TABLE "t_book" ADD COLUMN "note" VARCHAR(20)',
+    );
+  });
+});

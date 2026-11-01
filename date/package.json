@@ -1,0 +1,50 @@
+{
+  "name": "@zerodep-dev/easy-query-ts-date",
+  "version": "0.1.0",
+  "description": "@internationalized/date column types for @zerodep-dev/easy-query-ts",
+  "license": "Apache-2.0",
+  "author": "lionheart (https://github.com/kenconnet666)",
+  "homepage": "https://github.com/kenconnet666/vue-tsx-pro/tree/master/packages/easy-query#readme",
+  "bugs": {
+    "url": "https://github.com/kenconnet666/vue-tsx-pro/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kenconnet666/vue-tsx-pro.git",
+    "directory": "packages/easy-query/date"
+  },
+  "keywords": [
+    "date",
+    "internationalized-date",
+    "orm",
+    "easy-query"
+  ],
+  "exports": {
+    ".": {
+      "@vue-tsx-pro/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:^",
+    "@internationalized/date": "^3.12.4"
+  },
+  "devDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:*",
+    "@internationalized/date": "catalog:"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "prepack": "tsc -b tsconfig.build.json"
+  }
+}

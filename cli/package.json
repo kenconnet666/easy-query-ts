@@ -1,0 +1,54 @@
+{
+  "name": "@zerodep-dev/easy-query-ts-cli",
+  "version": "0.1.0",
+  "description": "eqts command line: generate easy-query-ts entities from an existing database (eqts pull)",
+  "license": "Apache-2.0",
+  "author": "lionheart (https://github.com/kenconnet666)",
+  "homepage": "https://github.com/kenconnet666/vue-tsx-pro/tree/master/packages/easy-query#readme",
+  "bugs": {
+    "url": "https://github.com/kenconnet666/vue-tsx-pro/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kenconnet666/vue-tsx-pro.git",
+    "directory": "packages/easy-query/cli"
+  },
+  "keywords": [
+    "orm",
+    "codegen",
+    "cli",
+    "easy-query"
+  ],
+  "exports": {
+    ".": {
+      "@vue-tsx-pro/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:^"
+  },
+  "devDependencies": {
+    "@zerodep-dev/easy-query-ts": "workspace:*"
+  },
+  "type": "module",
+  "sideEffects": [
+    "./dist/bin.js",
+    "./src/bin.ts"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "prepack": "tsc -b tsconfig.build.json"
+  },
+  "bin": {
+    "eqts": "./dist/bin.js"
+  }
+}

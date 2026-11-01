@@ -1,0 +1,442 @@
+/**
+ * 类型层面的检查：只参与 tsc，不运行。正例用 Equal 断言推导出的类型，负例用 @ts-expect-error 固定"必须报错"。
+ */
+import {
+  col,
+  createDb,
+  defineSchema,
+  defineView,
+  embed,
+  entity,
+  sql,
+  win,
+  type Adapter,
+  type Expr,
+  type Insert,
+  type Row,
+  type ViewOf,
+} from '@zerodep-dev/easy-query-ts';
+
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+function expect<T extends true>(): T | void {}
+
+const Company = entity('t_company', {
+  id: col.bigint().primaryKey().generated(),
+  name: col.string(),
+});
+const User = entity('t_user', {
+  id: col.bigint().primaryKey().generated(),
+  name: col.string(),
+  age: col.int().nullable(),
+  companyId: col.bigint().nullable(),
+  attrs: col.json<{ tags: string[] }>().defaulted(),
+  createdAt: col.datetime(),
+});
+const Post = entity('t_post', {
+  id: col.bigint().primaryKey().generated(),
+  userId: col.bigint(),
+  title: col.string(),
+  amount: col.decimal(12, 2),
+});
+const Unrelated = entity('t_unrelated', { id: col.int() });
+
+const schema = defineSchema(
+  { Company, User, Post },
+  {
+    User: (r) => ({
+      company: r.one('Company', { from: 'companyId', to: 'id' }),
+      posts: r.many('Post', { from: 'id', to: 'userId' }),
+    }),
+    Post: (r) => ({ user: r.one('User', { from: 'userId', to: 'id' }) }),
+  },
+);
+
+declare const adapter: Adapter;
+const db = createDb({ schema, adapter });
+
+// 行与插入的形状
+expect<
+  Equal<
+    Row<typeof User>,
+    {
+      id: number;
+      name: string;
+      age: number | null;
+      companyId: number | null;
+      attrs: { tags: string[] };
+      createdAt: Date;
+    }
+  >
+>();
+expect<
+  Equal<keyof Insert<typeof User>, 'id' | 'name' | 'age' | 'companyId' | 'attrs' | 'createdAt'>
+>();
+db.insert(User).values({ name: 'a', createdAt: new Date() });
+// @ts-expect-error 缺必填列 createdAt
+db.insert(User).values({ name: 'a' });
+// @ts-expect-error 列类型不对
+db.insert(User).values({ name: 1, createdAt: new Date() });
+
+// 查询结果的推导
+async function results() {
+  const rows = await db
+    .queryable(User)
+    .where((u) => [u.name.like('a'), u.posts.any((p) => p.title.eq('x'))])
+    .select((u) => ({
+      id: u.id,
+      company: u.company.name,
+      user: { age: u.age, n: u.posts.count(), total: u.posts.sum((p) => p.amount) },
+      posts: u.posts.toList((p) => ({ title: p.title, author: p.user.name })),
+      len: sql<number>`LENGTH(${u.name})`,
+    }))
+    .toList();
+  expect<
+    Equal<
+      typeof rows,
+      {
+        id: number;
+        company: string | null;
+        user: { age: number | null; n: number; total: `${number}` | null };
+        posts: { title: string; author: string }[];
+        len: number;
+      }[]
+    >
+  >();
+
+  const included = await db
+    .queryable(User)
+    .include((u) => ({ company: u.company, posts: u.posts.toList() }))
+    .first();
+  expect<Equal<NonNullable<typeof included>['company'], Row<typeof Company> | null>>();
+  expect<Equal<NonNullable<typeof included>['posts'], Row<typeof Post>[]>>();
+
+  // 非空外键的多对一导航不带 null
+  const authors = await db
+    .queryable(Post)
+    .select((p) => ({ author: p.user.name, company: p.user.company.name }))
+    .toList();
+  expect<Equal<typeof authors, { author: string; company: string | null }[]>>();
+
+  const groups = await db
+    .queryable(Post)
+    .groupBy((p) => ({ userId: p.userId }))
+    .select((g) => ({ ...g.key, n: g.count(), max: g.max((p) => p.title) }))
+    .toList();
+  expect<Equal<typeof groups, { userId: number; n: number; max: string | null }[]>>();
+
+  const latest = await db
+    .queryable(User)
+    .select((u) => ({
+      first: u.posts.orderBy((p) => p.id.desc()).first((p) => ({ title: p.title })),
+      top: u.posts.limit(3).toList(),
+      rn: win.rowNumber((w) => w.partitionBy(u.companyId)),
+      running: win.sum(u.age, (w) => w.orderBy(u.id).rows('unboundedPreceding', 'currentRow')),
+    }))
+    .toList();
+  expect<
+    Equal<
+      typeof latest,
+      {
+        first: { title: string } | null;
+        top: Row<typeof Post>[];
+        rn: number;
+        running: number | null;
+      }[]
+    >
+  >();
+
+  const keys = await db
+    .queryable(Post)
+    .groupBy((p) => ({ userId: p.userId }))
+    .toList();
+  expect<Equal<typeof keys, { userId: number }[]>>();
+
+  // 根查询聚合：decimal 列的和是数值文字，整数列是 number，没有行时都是 null
+  const total = await db.queryable(Post).sum((p) => p.amount);
+  expect<Equal<typeof total, `${number}` | null>>();
+  const oldest = await db.queryable(User).max((u) => u.createdAt);
+  expect<Equal<typeof oldest, Date | null>>();
+  const ageSum = await db.queryable(User).sum((u) => u.age);
+  expect<Equal<typeof ageSum, number | null>>();
+  const distinctUsers = await db.queryable(Post).countDistinct((p) => p.userId);
+  expect<Equal<typeof distinctUsers, number>>();
+}
+void results;
+
+// 显式 join：lambda 按 join 顺序收到各表引用；left join 的那张表列可空；没写 select 时按实体名分组
+// 按键填充：fillMany 是数组，fillOne 可空；键的类型要对得上
+async function fills() {
+  const posts = db.queryable(Post).select((p) => ({ title: p.title }));
+  const rows = await db
+    .queryable(User)
+    .select((u) => ({
+      posts: posts.fillMany((p) => p.userId, u.id),
+      company: db.queryable(Company).fillOne((c) => c.id, u.companyId),
+    }))
+    .toList();
+  expect<
+    Equal<typeof rows, { posts: { title: string }[]; company: Row<typeof Company> | null }[]>
+  >();
+  // @ts-expect-error 键的类型对不上（number 对 string）
+  db.queryable(User).select((u) => ({ posts: posts.fillMany((p) => p.userId, u.name) }));
+}
+
+async function joins() {
+  const inner = await db
+    .queryable(User)
+    .innerJoin(Post, (u, p) => p.userId.eq(u.id))
+    .select((u, p) => ({ name: u.name, title: p.title }))
+    .toList();
+  expect<Equal<typeof inner, { name: string; title: string }[]>>();
+
+  const left = await db
+    .queryable(User)
+    .leftJoin(Post, (u, p) => p.userId.eq(u.id))
+    .select((u, p) => ({ name: u.name, title: p.title }))
+    .toList();
+  expect<Equal<typeof left, { name: string; title: string | null }[]>>();
+
+  const rows = await db
+    .queryable(User)
+    .innerJoin(Post, (u, p) => p.userId.eq(u.id))
+    .leftJoin(Company, (u, _p, c) => c.id.eq(u.companyId))
+    .toList();
+  expect<
+    Equal<
+      typeof rows,
+      { User: Row<typeof User>; Post: Row<typeof Post>; Company: Row<typeof Company> | null }[]
+    >
+  >();
+
+  // right join：此前各表的列都可空，新表的不可空；没写 select 时此前各表的整行可空
+  const right = await db
+    .queryable(User)
+    .innerJoin(Post, (u, p) => p.userId.eq(u.id))
+    .rightJoin(Company, (u, p, c) => {
+      expect<Equal<typeof p.title, Expr<string | null>>>();
+      return c.id.eq(u.companyId);
+    })
+    .select((u, _p, c) => ({ name: u.name, company: c.name }))
+    .toList();
+  expect<Equal<typeof right, { name: string | null; company: string }[]>>();
+  const rightRows = await db
+    .queryable(User)
+    .rightJoin(Company, (u, c) => c.id.eq(u.companyId))
+    .toList();
+  expect<
+    Equal<typeof rightRows, { User: Row<typeof User> | null; Company: Row<typeof Company> }[]>
+  >();
+  const cross = await db
+    .queryable(User)
+    .crossJoin(Company)
+    .select((u, c) => ({ name: u.name, company: c.name }))
+    .toList();
+  expect<Equal<typeof cross, { name: string; company: string }[]>>();
+
+  // join 之后 where / orderBy / groupBy 都按顺序收到各表引用
+  const grouped = await db
+    .queryable(User)
+    .innerJoin(Post, (u, p) => p.userId.eq(u.id))
+    .where((u, p) => [u.age.ge(18), p.amount.gt('5')])
+    .groupBy((u) => ({ name: u.name }))
+    .select((g) => ({ name: g.key.name, total: g.sum((_u, p) => p.amount) }))
+    .toList();
+  expect<Equal<typeof grouped, { name: string; total: `${number}` | null }[]>>();
+
+  const total = await db
+    .queryable(User)
+    .innerJoin(Post, (u, p) => p.userId.eq(u.id))
+    .sum((_u, p) => p.amount);
+  expect<Equal<typeof total, `${number}` | null>>();
+}
+void joins;
+void fills;
+
+// 值对象：行、插入、表引用都是嵌套的；全都可空的值对象插入时可省、更新时可以给 null
+async function embeds() {
+  const Shop = entity('t_shop', {
+    id: col.int().primaryKey().generated(),
+    address: embed({ city: col.string(), street: col.string().nullable() }),
+    contact: embed({ phone: col.string().nullable() }),
+  });
+  const Visit = entity('t_visit', { id: col.int().primaryKey(), shopId: col.int() });
+  const shops = defineSchema(
+    { Shop, Visit },
+    {
+      Visit: (r) => ({
+        shop: r.one('Shop', { from: 'shopId', to: 'id' }),
+        // @ts-expect-error 值对象不能整个当关联列
+        wrong: r.one('Shop', { from: 'shopId', to: 'address' }),
+      }),
+    },
+  );
+  type ShopRow = Row<typeof Shop>;
+  expect<
+    Equal<
+      ShopRow,
+      {
+        id: number;
+        address: { city: string; street: string | null };
+        contact: { phone: string | null };
+      }
+    >
+  >();
+  const inserted: Insert<typeof Shop> = { address: { city: 'x' } };
+  void inserted;
+  // @ts-expect-error address 里有必填的列，插入时不能省
+  const missing: Insert<typeof Shop> = { contact: { phone: null } };
+  void missing;
+  const sdb = createDb({ schema: shops, adapter: {} as Adapter });
+  const cities = await sdb
+    .queryable(Visit)
+    .select((v) => ({ city: v.shop.address.city, address: v.shop.address }))
+    .toList();
+  expect<
+    Equal<typeof cities, { city: string; address: { city: string; street: string | null } }[]>
+  >();
+  sdb.update(Shop).set({ address: { city: 'x' }, contact: null });
+  // @ts-expect-error address 里有不可空的列，不能整个给 null
+  sdb.update(Shop).set({ address: null });
+}
+void embeds;
+
+// @ts-expect-error join 的 on 里新表没有这个列
+db.queryable(User).innerJoin(Post, (u, p) => p.nope.eq(u.id));
+// @ts-expect-error 实体不在 schema 里
+db.queryable(User).innerJoin(Unrelated, (u, x) => x.id.eq(u.id));
+
+// decimal 列可以做算术（数值文字或 number），结果仍是 decimal；普通字符串列不行
+db.update(Post)
+  .set((p) => ({ amount: p.amount.times(2) }))
+  .where((p) => p.amount.plus('1.5').gt('3'));
+db.queryable(Post).select((p) => ({
+  doubled: p.amount.times(2),
+  shifted: p.amount.minus(p.amount),
+}));
+
+// 负例
+db.queryable(User).where((u) => [
+  // @ts-expect-error 数字列不能和字符串比
+  u.age.eq('1'),
+  // @ts-expect-error like 只能用在字符串列
+  u.age.like('1'),
+  // @ts-expect-error 不存在的列
+  u.nope.eq(1),
+  // @ts-expect-error 一对多导航不能直接取列
+  u.posts.title.eq('x'),
+  // @ts-expect-error 年份只能从日期取（date 列是文字，所以字符串列也允许）
+  u.age.year().eq(2026),
+  // @ts-expect-error 普通字符串列不能做算术（decimal 列才是数值文字）
+  u.name.plus(1).eq('x'),
+]);
+// @ts-expect-error sum 只接受数值列
+void db.queryable(User).sum((u) => u.name);
+// 不在 schema 里的实体也能查（动态表、外部表）：类型照样由列推出，只是没有导航
+async function adhoc() {
+  const rows = await db.queryable(Unrelated).toList();
+  expect<Equal<typeof rows, { id: number }[]>>();
+  // @ts-expect-error 临时的实体没有导航
+  db.queryable(Unrelated).select((x) => x.company);
+}
+void adhoc;
+db.update(User).set({
+  // @ts-expect-error set 的值类型不对
+  age: 'x',
+});
+
+defineSchema(
+  { Company, User },
+  {
+    // @ts-expect-error from 必须是本实体的列
+    User: (r) => ({ company: r.one('Company', { from: 'nope', to: 'id' }) }),
+  },
+);
+defineSchema(
+  { Company, User },
+  {
+    // @ts-expect-error 目标实体不存在
+    User: (r) => ({ company: r.one('Nope', { from: 'companyId', to: 'id' }) }),
+  },
+);
+
+// 列修饰器：品牌类型、枚举、客户端默认值让插入时可省
+type UserId = number & { readonly __brand: 'UserId' };
+const Tagged = entity('t_tagged', {
+  id: col.bigint().primaryKey().generated().$type<UserId>(),
+  kind: col.enum(['a', 'b'] as const),
+  token: col.string().$default(() => 'x'),
+  gone: col.boolean().softDelete(),
+  version: col.int().version(),
+});
+expect<Equal<Row<typeof Tagged>['id'], UserId>>();
+expect<Equal<Row<typeof Tagged>['kind'], 'a' | 'b'>>();
+// token、gone、version 插入时可省；kind 必填
+expect<Equal<keyof Insert<typeof Tagged>, 'id' | 'kind' | 'token' | 'gone' | 'version'>>();
+const taggedDb = createDb({ schema: defineSchema({ Tagged }), adapter });
+taggedDb.insert(Tagged).values({ kind: 'a' });
+// @ts-expect-error 枚举之外的值
+taggedDb.insert(Tagged).values({ kind: 'c' });
+// @ts-expect-error kind 必填
+taggedDb.insert(Tagged).values({});
+
+// 视图：可复用、可嵌套的投影，结果类型自动推导
+const PostCard = defineView(schema, Post, (p) => ({ title: p.title, author: p.user.name }));
+const UserCard = defineView(schema, User, (u) => ({
+  id: u.id,
+  company: u.company.name,
+  posts: u.posts.toList(PostCard),
+}));
+async function views() {
+  const rows = await db.queryable(User).select(UserCard).toList();
+  type Card = { id: number; company: string | null; posts: { title: string; author: string }[] };
+  expect<Equal<typeof rows, Card[]>>();
+  expect<Equal<ViewOf<typeof UserCard>, Card>>();
+  // 在别的 select 里展开视图
+  const posts = await db
+    .queryable(Post)
+    .select((p) => ({ ...PostCard(p), id: p.id }))
+    .toList();
+  expect<Equal<typeof posts, { title: string; author: string; id: number }[]>>();
+}
+void views;
+// @ts-expect-error 视图属于 User，不能用在 Post 的查询上
+db.queryable(Post).select(UserCard);
+
+// date 列是 'YYYY-MM-DD' 文字：可以取年月日，普通字符串列不行
+const Person = entity('t_person', {
+  id: col.bigint().primaryKey().generated(),
+  name: col.string(),
+  born: col.date(),
+});
+const personDb = createDb({ schema: defineSchema({ Person }), adapter });
+personDb
+  .queryable(Person)
+  .where((p) => [
+    p.born.year().eq(1990),
+    p.born.ge('1990-01-01'),
+    p.born.addDays(1).ge('1990-01-02'),
+  ]);
+expect<Equal<Row<typeof Person>['born'], `${number}-${number}-${number}`>>();
+personDb.queryable(Person).where((p) => [
+  // @ts-expect-error 字符串列不是日期，不能取年份
+  p.name.year().eq(1990),
+  // @ts-expect-error 不是 'YYYY-MM-DD' 形状的字面量
+  p.born.ge('not a date'),
+]);
+
+// 聚合保存：输入里能写哪些导航由 include 决定，值的形状由关系推出
+void db.save(
+  User,
+  { name: 'dave', posts: [{ title: 'p', amount: '1.00' }], company: { name: 'acme' } },
+  { include: { posts: { removed: 'delete', key: 'title' }, company: true } },
+);
+void db.save(User, { id: 1, company: null }, { include: { company: true } });
+// @ts-expect-error posts 没写进 include，不能出现在输入里
+void db.save(User, { id: 1, posts: [] });
+// @ts-expect-error 一对多的值是数组
+void db.save(User, { id: 1, posts: { title: 'p' } }, { include: { posts: true } });
+// @ts-expect-error key 只能是目标实体的列
+void db.save(User, { id: 1 }, { include: { posts: { key: 'nope' } } });
+// @ts-expect-error 不是 User 的导航
+void db.save(User, { id: 1 }, { include: { comments: true } });
