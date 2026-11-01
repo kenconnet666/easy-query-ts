@@ -6,7 +6,6 @@ import {
   Comment,
   Company,
   Department,
-  Order,
   Post,
   Profile,
   schema,
@@ -234,43 +233,6 @@ export const pathProducts = example((db) =>
     .select((u) => ({
       name: u.name,
       products: u.products.toList((p) => p.name),
-    }))
-    .toList(),
-);
-
-// ---- 显式 join
-
-export const innerJoin = example((db) =>
-  db
-    .queryable(User)
-    .innerJoin(Post, (u, p) => p.authorId.eq(u.id))
-    .where((_u, p) => p.views.ge(2000))
-    .select((u, p) => ({ name: u.name, title: p.title }))
-    .toList(),
-);
-
-export const leftJoin = example((db) =>
-  db
-    .queryable(Company)
-    .leftJoin(User, (c, u) => u.companyId.eq(c.id))
-    .orderBy((c, u) => [c.id, u.id])
-    .select((c, u) => ({
-      company: c.name,
-      user: u.name,
-    }))
-    .toList(),
-);
-
-export const threeTables = example((db) =>
-  db
-    .queryable(Order)
-    .innerJoin(User, (o, u) => u.id.eq(o.userId))
-    .leftJoin(Company, (_o, u, c) => c.id.eq(u.companyId))
-    .where((o) => o.status.eq('paid'))
-    .select((o, u, c) => ({
-      order: o.id,
-      user: u.name,
-      company: c.name,
     }))
     .toList(),
 );

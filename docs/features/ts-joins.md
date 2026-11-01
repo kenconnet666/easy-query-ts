@@ -49,5 +49,5 @@ db.queryable(Company)
 
 ## 限制
 
-- 导航本身的 inner 语义（`u.company` 强制内连接）没做；要内连接请显式 `innerJoin(Company, …)`。
+- 导航默认 LEFT JOIN；要内连接，关系上声明 `{ required: true }`，或显式 `innerJoin(Company, …)`。
 - 更新 / 删除里仍不允许 join（各库写法不一致），用一对多的 `any()`。

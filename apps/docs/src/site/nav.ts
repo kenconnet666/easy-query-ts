@@ -72,6 +72,13 @@ export const sections: readonly NavSection[] = [
         component: () => import('../pages/query/Basics'),
       },
       {
+        path: '/query/join',
+        title: '显式 join 与表别名',
+        description:
+          '`innerJoin`、`leftJoin`、`rightJoin`、`crossJoin`：自连接、join 子查询，以及别名怎么来的。',
+        component: () => import('../pages/query/Join'),
+      },
+      {
         path: '/query/advanced',
         title: '分组、窗口与子查询',
         description: '聚合、HAVING、CASE、窗口函数、子查询、联合，以及在哪里插原生 SQL。',

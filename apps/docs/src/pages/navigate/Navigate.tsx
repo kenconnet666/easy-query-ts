@@ -1,4 +1,4 @@
-/** 导航：隐式 join、隐式子查询、多对多、自关联、直达关系、显式 join */
+/** 导航：隐式 join、隐式子查询、多对多、自关联、直达关系 */
 import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
 import { CodeBlock } from '@zerodep-dev/vue-tsx-pro-ui';
 import { DocPage, Note, P, Points, Section, Sub } from '../../site/content';
@@ -9,8 +9,6 @@ import {
   conditionalCount,
   fixedCondition,
   groupJoin,
-  innerJoin,
-  leftJoin,
   manyToMany,
   multiLevel,
   mutual,
@@ -24,7 +22,6 @@ import {
   reverseOne,
   selfManager,
   selfManyToMany,
-  threeTables,
   toOne,
 } from './navigate.examples.ts';
 
@@ -101,12 +98,6 @@ export default _component(() => () => (
       <SqlExample example={path} title="公司的全部帖子：经员工到帖子" />
       <SqlExample example={pathProducts} title="用户买过的商品：经订单、订单明细" />
     </Section>
-    <Section id="join" title="显式 join">
-      <P text="导航表达不了时才用：内连接筛选、join 没声明过关系的表、把一对多展平成“父子对”。之后的回调按 join 顺序拿到各张表；left join 那张表的列在类型上自动可空。" />
-      <SqlExample example={innerJoin} title="INNER JOIN：用户和他的热门帖子" />
-      <SqlExample example={leftJoin} title="LEFT JOIN：没有员工的公司也在结果里" />
-      <SqlExample example={threeTables} title="三张表：已付款订单、下单人、公司" />
-      <Note text="`on` 收到此前所有表和新表；条件全被跳过时报错，免得悄悄变成笛卡尔积。" />
-    </Section>
+    <Note text="导航表达不了的（把一对多展平、连没声明关系的表、自连接）用显式 join，见“查询”分组的“显式 join 与表别名”。" />
   </DocPage>
 ));
