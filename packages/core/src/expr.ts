@@ -73,8 +73,9 @@ type Unbranded<T> = T extends number
 export type Arith<T> =
   | Operand<T>
   | Operand<Unbranded<T>>
+  // 小数能和数字运算：amount.times(2)，也能乘整数列：price.times(quantity)
   | (NonNullable<T> extends DecimalText | NumericExtensions[keyof NumericExtensions]
-      ? number
+      ? number | Expr<number | null>
       : never);
 
 /** T 可空时结果也可空 */

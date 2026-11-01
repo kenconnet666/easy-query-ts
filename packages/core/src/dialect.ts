@@ -94,6 +94,14 @@ const CONDITION_NODES = new Set([
 ]);
 const COMPARISONS = new Set(['=', '<>', '!=', '<', '<=', '>', '>=']);
 
+/** 表达式里有没有绑定参数 */
+function hasParam(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasParam);
+  if (value === null || typeof value !== 'object') return false;
+  if ((value as { k?: unknown }).k === 'param') return true;
+  return Object.values(value).some(hasParam);
+}
+
 export abstract class Dialect {
   abstract readonly name: string;
   /** 面向的服务器版本；undefined 表示最新 */
@@ -646,6 +654,21 @@ export abstract class Dialect {
   /** null 安全相等的运算符（MySQL `<=>`、PG `IS NOT DISTINCT FROM`）；没有的库写成 (a = b OR (a IS NULL AND b IS NULL)) */
   readonly nullSafeEquals: string | undefined = undefined;
 
+  /**
+   * GROUP BY、ORDER BY 能写 SELECT 列的序号（PG、MySQL）。这些库比较表达式时把两个参数当成不同的值，
+   * 分组键里带参数（如 caseWhen 的分支）时，SELECT 与 GROUP BY 各绑一份就认不出是同一个表达式了，只能用序号
+   */
+  readonly groupByOrdinal: boolean = false;
+
+  /** GROUP BY、ORDER BY 里的一项：带参数、也选出来了的写成序号，其余照常渲染 */
+  private selectedKey(key: Node, q: SelectNode, w: SqlWriter): string {
+    if (this.groupByOrdinal && hasParam(key)) {
+      const index = q.columns.findIndex((column) => column.e === key);
+      if (index >= 0) return String(index + 1);
+    }
+    return this.node(key, w);
+  }
+
   /** GROUP BY 子句里的键列表：rollup / cube 默认写成 ROLLUP(…) / CUBE(…)（PG、HANA）；MySQL 等写法不同的库覆盖 */
   groupByKeys(keys: string[], mode: 'rollup' | 'cube' | undefined): string {
     return mode ? `${mode.toUpperCase()}(${keys.join(', ')})` : keys.join(', ');
@@ -718,12 +741,12 @@ export abstract class Dialect {
     if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
     if (q.groupBy.length > 0)
       s += ` GROUP BY ${this.groupByKeys(
-        q.groupBy.map((g) => this.node(g, w)),
+        q.groupBy.map((g) => this.selectedKey(g, q, w)),
         q.groupMode,
       )}`;
     if (q.having.length > 0) s += ` HAVING ${this.conjunction(q.having, w)}`;
     if (q.orderBy.length > 0)
-      s += ` ORDER BY ${q.orderBy.map((o) => this.node(o.e, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
+      s += ` ORDER BY ${q.orderBy.map((o) => this.selectedKey(o.e, q, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
     s += this.limitOffset(q.limit, q.offset, q.orderBy.length > 0);
     if (q.forUpdate) s += this.rowLock(q.lockMode, q.lockWait);
     return s;

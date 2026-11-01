@@ -69,6 +69,16 @@ function nativeEnums(entities: readonly Entity[]): Map<string, readonly string[]
   return enums;
 }
 
+/** CASE 分支里的文字参数按列的种类转换 */
+const CASE_TYPES: Readonly<Record<string, string>> = {
+  decimal: 'NUMERIC',
+  date: 'DATE',
+  time: 'TIME',
+  datetime: 'TIMESTAMP',
+  uuid: 'UUID',
+  json: 'JSONB',
+};
+
 export class PostgresDialect extends Dialect {
   readonly name: string = 'postgres';
   /** PG 协议里参数个数是 16 位整数，最多 65535 */
@@ -299,17 +309,22 @@ export class PostgresDialect extends Dialect {
     return `EXISTS (SELECT 1 FROM jsonb_to_recordset(${doc}) AS eq_j(${columns}) WHERE ${this.condition(n.cond, w)})`;
   }
 
+  /** 按序号分组：键里带参数时 PG 认不出 SELECT 与 GROUP BY 是同一个表达式 */
+  override readonly groupByOrdinal = true;
+
   protected override caseValue(n: Node, w: SqlWriter): string {
     const sql = this.node(n, w);
     if (n.k !== 'param') return sql;
+    // 小数、日期这些值是文字，按 JS 的类型转成 TEXT 就和列的类型对不上（batch 的 ELSE 是原列）
     const type =
-      typeof n.value === 'string'
+      CASE_TYPES[n.codec?.kind ?? ''] ??
+      (typeof n.value === 'string'
         ? 'TEXT'
         : typeof n.value === 'number'
           ? 'NUMERIC'
           : typeof n.value === 'boolean'
             ? 'BOOLEAN'
-            : undefined;
+            : undefined);
     return type ? `CAST(${sql} AS ${type})` : sql;
   }
 

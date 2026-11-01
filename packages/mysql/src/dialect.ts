@@ -43,6 +43,9 @@ const MYSQL_MINIMUM: Record<string, string> = {
 };
 
 export class MySqlDialect extends Dialect {
+  /** 按序号分组：only_full_group_by 下，键里带参数时认不出 SELECT 与 GROUP BY 是同一个表达式 */
+  override readonly groupByOrdinal: boolean = true;
+
   /** 带 join：MySQL 的多表 UPDATE，JOIN 写在 SET 前面，SET 的列带上别名 */
   /** UPDATE / DELETE 单表时可以带 ORDER BY … LIMIT */
   override readonly nativeWriteLimit: boolean = true;

@@ -313,6 +313,8 @@ db.update(Post)
 db.queryable(Post).select((p) => ({
   doubled: p.amount.times(2),
   shifted: p.amount.minus(p.amount),
+  // 小数乘整数列：单价乘数量
+  scaled: p.amount.times(p.userId),
 }));
 
 // 负例
