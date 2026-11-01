@@ -30,7 +30,8 @@ export const sections: readonly NavSection[] = [
       {
         path: '/guide/model',
         title: '示例模型',
-        description: '全站示例共用的模型和数据：公司、用户、帖子、评论、标签。',
+        description:
+          '全站示例共用的模型和数据：公司、部门、用户、帖子、评论、标签、关注、订单，关系一览和全部数据。',
         component: () => import('../pages/guide/Model'),
       },
       {
@@ -84,6 +85,24 @@ export const sections: readonly NavSection[] = [
         component: () => import('../pages/query/Table'),
       },
       {
+        path: '/query/json',
+        title: 'JSON 列',
+        description: '读写整列、按路径取值和筛选，路径按列的类型检查。',
+        component: () => import('../pages/query/Json'),
+      },
+      {
+        path: '/query/computed',
+        title: '计算属性',
+        description: '拼接、状态、跨表聚合，声明一次，之后像一列那样用。',
+        component: () => import('../pages/query/Computed'),
+      },
+      {
+        path: '/query/reuse',
+        title: '复用查询',
+        description: '查询对象不可变、通用条件、预编译。',
+        component: () => import('../pages/query/Reuse'),
+      },
+      {
         path: '/func',
         title: '函数',
         description: '字符串、日期、数学、JSON：写在列上，按方言渲染，类型跟着列走。',
@@ -122,6 +141,12 @@ export const sections: readonly NavSection[] = [
         title: '聚合保存与事务',
         description: '`db.save` 保存一棵对象树；事务、提交后的动作和行锁。',
         component: () => import('../pages/write/Save'),
+      },
+      {
+        path: '/write/validate',
+        title: '校验',
+        description: '由实体生成校验器：必填、长度、枚举都来自列的声明，不用再写一遍。',
+        component: () => import('../pages/write/Validate'),
       },
       {
         path: '/write/rules',

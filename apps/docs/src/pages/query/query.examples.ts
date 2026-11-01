@@ -1,12 +1,103 @@
-/** 查询一章的示例 */
-import { or } from '@zerodep-dev/easy-query-ts';
+/** 基础查询的示例：从查一行到动态条件 */
+import { and, not, or } from '@zerodep-dev/easy-query-ts';
 import { example } from '../../site/example.ts';
-import { Company, Post, User } from '../../site/model.ts';
+import { Post, User } from '../../site/model.ts';
+
+export const all = example((db) =>
+  db.queryable(User).limit(3).toList(),
+);
+
+export const find = example((db) =>
+  db.queryable(User).find(1),
+);
+
+export const pickColumns = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.companyId.eq(1))
+    .select((u) => ({ name: u.name, age: u.age }))
+    .toList(),
+);
+
+export const oneColumn = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.level.eq('lead'))
+    .select((u) => u.name)
+    .toList(),
+);
+
+export const count = example((db) =>
+  db
+    .queryable(Post)
+    .where((p) => p.status.eq('published'))
+    .count(),
+);
+
+export const exists = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.age.lt(18))
+    .any(),
+);
+
+export const first = example((db) =>
+  db
+    .queryable(Post)
+    .orderBy((p) => p.views.desc())
+    .select((p) => ({ title: p.title, views: p.views }))
+    .first(),
+);
+
+export const distinct = example((db) =>
+  db
+    .queryable(Post)
+    .select((p) => p.status)
+    .distinct()
+    .toList(),
+);
 
 export const filter = example((db) =>
   db
     .queryable(User)
     .where((u) => [u.age.ge(18), u.name.startsWith('林')])
+    .toList(),
+);
+
+export const operators = example((db) =>
+  db
+    .queryable(Post)
+    .where((p) => [
+      p.views.between(500, 2000),
+      p.authorId.in([1, 2, 7]),
+      not(p.title.like('组件')),
+      p.publishedAt.isNotNull(),
+    ])
+    .select((p) => ({ title: p.title, views: p.views }))
+    .toList(),
+);
+
+export const orCondition = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => or(u.age.lt(18), u.age.isNull()))
+    .toList(),
+);
+
+export const nested = example((db) =>
+  db
+    .queryable(Post)
+    .where((p) =>
+      and(
+        p.status.eq('published'),
+        or(
+          p.views.ge(2000),
+          and(p.views.ge(500), p.title.like('缓存')),
+        ),
+        not(p.authorId.eq(9)),
+      ),
+    )
+    .select((p) => ({ title: p.title, views: p.views }))
     .toList(),
 );
 
@@ -24,10 +115,25 @@ export const dynamic = example(async (db) => {
     .toList();
 });
 
-export const orCondition = example((db) =>
+export const sort = example((db) =>
   db
     .queryable(User)
-    .where((u) => or(u.age.lt(18), u.age.isNull()))
+    .orderBy((u) => [u.level.desc(), u.age.asc(), u.id])
+    .select((u) => ({
+      name: u.name,
+      level: u.level,
+      age: u.age,
+    }))
+    .toList(),
+);
+
+export const limitOffset = example((db) =>
+  db
+    .queryable(Post)
+    .orderBy((p) => p.id)
+    .offset(4)
+    .limit(3)
+    .select((p) => ({ id: p.id, title: p.title }))
     .toList(),
 );
 
@@ -36,39 +142,6 @@ export const sortPage = example((db) =>
     .queryable(Post)
     .where((p) => p.status.eq('published'))
     .orderBy((p) => [p.views.desc(), p.id])
-    .toPage(1, 3),
-);
-
-export const implicitJoin = example((db) =>
-  db
-    .queryable(User)
-    .where((u) => u.company.city.eq('杭州'))
-    .select((u) => ({
-      name: u.name,
-      company: u.company.name,
-    }))
-    .toList(),
-);
-
-export const implicitSubquery = example((db) =>
-  db
-    .queryable(Company)
-    .where((c) => c.users.any((u) => u.age.lt(30)))
-    .select((c) => ({
-      name: c.name,
-      staff: c.users.count(),
-    }))
-    .toList(),
-);
-
-export const objectTree = example((db) =>
-  db
-    .queryable(Company)
-    .select((c) => ({
-      name: c.name,
-      users: c.users
-        .orderBy((u) => u.id)
-        .toList((u) => ({ id: u.id, name: u.name })),
-    }))
-    .toList(),
+    .select((p) => ({ title: p.title, views: p.views }))
+    .toPage(2, 3),
 );

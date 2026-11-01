@@ -5,7 +5,12 @@ import {
   win,
 } from '@zerodep-dev/easy-query-ts';
 import { example } from '../../site/example.ts';
-import { Post, User } from '../../site/model.ts';
+import {
+  Department,
+  OrderItem,
+  Post,
+  User,
+} from '../../site/model.ts';
 
 export const group = example((db) =>
   db
@@ -14,7 +19,21 @@ export const group = example((db) =>
     .select((g) => ({
       status: g.key.status,
       posts: g.count(),
-      views: g.sum((p) => p.views),
+    }))
+    .toList(),
+);
+
+export const groupAggregates = example((db) =>
+  db
+    .queryable(Post)
+    .where((p) => p.status.eq('published'))
+    .groupBy((p) => ({ category: p.category.name }))
+    .select((g) => ({
+      category: g.key.category,
+      posts: g.count(),
+      total: g.sum((p) => p.views),
+      average: g.avg((p) => p.views),
+      top: g.max((p) => p.views),
     }))
     .toList(),
 );
@@ -22,13 +41,27 @@ export const group = example((db) =>
 export const having = example((db) =>
   db
     .queryable(Post)
-    .groupBy((p) => ({ authorId: p.authorId }))
+    .groupBy((p) => ({ author: p.author.name }))
     .having((g) => g.count().ge(2))
     .select((g) => ({
-      authorId: g.key.authorId,
+      author: g.key.author,
       titles: g.joining((p) => p.title, {
         separator: '、',
       }),
+    }))
+    .toList(),
+);
+
+export const salesByProduct = example((db) =>
+  db
+    .queryable(OrderItem)
+    .where((i) => i.order.status.in(['paid', 'shipped']))
+    .groupBy((i) => ({ product: i.product.name }))
+    .having((g) => g.sum((i) => i.quantity).ge(2))
+    .select((g) => ({
+      product: g.key.product,
+      sold: g.sum((i) => i.quantity),
+      revenue: g.sum((i) => i.price.times(i.quantity)),
     }))
     .toList(),
 );
@@ -45,11 +78,38 @@ export const caseExpr = example((db) =>
     .toList(),
 );
 
+export const caseInGroup = example((db) =>
+  db
+    .queryable(Post)
+    .groupBy((p) => ({
+      level: caseWhen(p.views.ge(1000), '过千').else(
+        '未过千',
+      ),
+    }))
+    .select((g) => ({
+      level: g.key.level,
+      posts: g.count(),
+    }))
+    .toList(),
+);
+
+export const rowNumber = example((db) =>
+  db
+    .queryable(Post)
+    .where((p) => p.status.eq('published'))
+    .select((p) => ({
+      title: p.title,
+      rank: win.rowNumber((w) => w.orderBy(p.views.desc())),
+    }))
+    .toList(),
+);
+
 export const window = example((db) =>
   db
     .queryable(Post)
     .where((p) => p.status.eq('published'))
     .select((p) => ({
+      author: p.author.name,
       title: p.title,
       rank: win.rowNumber((w) =>
         w.partitionBy(p.authorId).orderBy(p.views.desc()),
@@ -57,7 +117,28 @@ export const window = example((db) =>
       total: win.sum(p.views, (w) =>
         w.partitionBy(p.authorId),
       ),
+      previous: win.lag(p.views, (w) =>
+        w.partitionBy(p.authorId).orderBy(p.id),
+      ),
     }))
+    .toList(),
+);
+
+export const topPerGroup = example((db) =>
+  db
+    .queryable(Post)
+    .where((p) => p.status.eq('published'))
+    .select((p) => ({
+      title: p.title,
+      authorId: p.authorId,
+      views: p.views,
+      rank: win.rowNumber((w) =>
+        w.partitionBy(p.authorId).orderBy(p.views.desc()),
+      ),
+    }))
+    .asTable()
+    .where((t) => t.rank.eq(1))
+    .select((t) => ({ title: t.title, views: t.views }))
     .toList(),
 );
 
@@ -76,6 +157,19 @@ export const inSubquery = example((db) =>
     .toList(),
 );
 
+export const scalar = example(async (db) => {
+  const average = db
+    .queryable(Post)
+    .groupBy(() => ({}))
+    .select((g) => g.avg((p) => p.views));
+
+  return db
+    .queryable(Post)
+    .where((p) => p.views.gt(average))
+    .select((p) => ({ title: p.title, views: p.views }))
+    .toList();
+});
+
 export const union = example((db) =>
   db
     .queryable(User)
@@ -90,6 +184,56 @@ export const union = example((db) =>
     .toList(),
 );
 
+export const cte = example(async (db) => {
+  const withHot = db.with(
+    'hot',
+    db
+      .queryable(Post)
+      .where((p) => p.views.ge(1000))
+      .select((p) => ({
+        authorId: p.authorId,
+        views: p.views,
+      })),
+  );
+
+  return withHot
+    .queryable(User)
+    .innerJoin(withHot.entity('hot'), (u, h) =>
+      h.authorId.eq(u.id),
+    )
+    .select((u, h) => ({ name: u.name, views: h.views }))
+    .toList();
+});
+
+export const recursive = example(async (db) => {
+  // 从研发部开始，一层层找到全部下级部门，记下深度
+  const tree = db.withRecursive(
+    'tree',
+    db
+      .queryable(Department)
+      .where((d) => d.id.eq(1))
+      .select((d) => ({
+        id: d.id,
+        name: d.name,
+        depth: sql<number>`0`,
+      })),
+    (rdb, self) =>
+      rdb
+        .queryable(Department)
+        .innerJoin(self, (d, t) => d.parentId.eq(t.id))
+        .select((d, t) => ({
+          id: d.id,
+          name: d.name,
+          depth: t.depth.plus(1),
+        })),
+  );
+
+  return tree
+    .queryable(tree.entity('tree'))
+    .orderBy((t) => [t.depth, t.id])
+    .toList();
+});
+
 export const rawFragment = example((db) =>
   db
     .queryable(Post)
@@ -97,3 +241,11 @@ export const rawFragment = example((db) =>
     .select((p) => p.title)
     .toList(),
 );
+
+export const rawStatement = example(async (db) => {
+  const minViews = 2000;
+
+  return db.sql<{ title: string }>`
+    SELECT title FROM t_post WHERE views >= ${minViews} ORDER BY id
+  `;
+});

@@ -31,6 +31,8 @@ export interface DialectRendering {
 export interface Example {
   /** 卡片上显示的代码：函数体 */
   readonly code: string;
+  /** 去掉类型的代码：带到演练场，按 JS 执行 */
+  readonly js: string;
   /** 方言 → 这段代码在该方言下发出的语句 */
   readonly dialects: Readonly<Record<string, DialectRendering>>;
   /** 在示例数据上的结果（JSON 文字）；没有返回值时为空 */

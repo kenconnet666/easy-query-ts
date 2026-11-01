@@ -140,7 +140,7 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
             size="sm"
             variant="soft"
             icon={PencilLine}
-            href={`/guide/playground#code=${encodeURIComponent(example.code)}`}
+            href={`/guide/playground#code=${encodeURIComponent(example.js)}`}
           >
             改一改
           </LinkButton>
@@ -169,7 +169,11 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
             />
           </div>
           <div {...css.attrs(styles.pane, styles.divided)}>
-            {rendering?.error && !shown ? (
+            {statements.length === 0 && !rendering?.error ? (
+              <Small tone="muted" sx={styles.empty}>
+                这段代码不发 SQL
+              </Small>
+            ) : rendering?.error && !shown ? (
               <Alert tone="neutral" title={`${dialect.label} 不支持这种写法`} sx={styles.error}>
                 {rendering.error}
               </Alert>

@@ -7,6 +7,7 @@
  * 用法：node --conditions=@easy-query-ts/source build/render-examples.ts
  */
 import { globSync, readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -129,12 +130,23 @@ async function render(build: ExampleBuild) {
   return { dialects, result: generated ? undefined : formatResult(value) };
 }
 
+/** 去掉类型的版本：演练场按 JS 执行。函数体里有 await、return，要包一层才是合法的模块 */
+function toJs(code: string): string {
+  const wrapped = stripTypeScriptTypes(
+    `async function body() {
+${code}
+}`,
+    { mode: 'transform' },
+  );
+  return wrapped.slice(wrapped.indexOf('{') + 1, wrapped.lastIndexOf('}')).trim();
+}
+
 /** 从源码里取出每段示例的函数体：卡片上显示的代码 */
 function bodies(source: string): Map<string, string> {
   const result = new Map<string, string>();
   const parts = source.split(/^(?=export const \w+ = example\()/m);
   for (const part of parts) {
-    const head = /^export const (\w+) = example\(\s*(async\s*)?\(db\)\s*=>\s*/.exec(part);
+    const head = /^export const (\w+) = example\(\s*(async\s*)?\(_?db\)\s*=>\s*/.exec(part);
     if (!head) continue;
     let body = part.slice(head[0].length, part.lastIndexOf(');')).replace(/,\s*$/, '');
     if (body.startsWith('{')) {
@@ -171,7 +183,7 @@ for (const path of globSync('src/**/*.examples.ts', { cwd: root })) {
         `${key}：没有从源码里找到示例 ${name}（要写成 export const ${name} = example((db) => …)）`,
       );
     try {
-      output[key][name] = { code: text, ...(await render(value.build)) };
+      output[key][name] = { code: text, js: toJs(text), ...(await render(value.build)) };
     } catch (error) {
       throw new Error(`${key} 的示例 ${name} 在 SQLite 上执行失败：${String(error)}`, {
         cause: error,

@@ -16,7 +16,7 @@ type Rendered = Record<string, Record<string, unknown>>;
 
 /** 改了这些文件要重新算 */
 const isSource = (file: string) =>
-  /\.examples\.ts$|[\\/]site[\\/]model\.ts$|[\\/]site[\\/]format-sql\.ts$|[\\/]packages[\\/]\w+[\\/]src[\\/]/.test(
+  /\.examples\.ts$|render-examples\.ts$|[\\/]site[\\/]model\.ts$|[\\/]site[\\/]format-sql\.ts$|[\\/]packages[\\/]\w+[\\/]src[\\/]/.test(
     file,
   );
 
@@ -31,6 +31,10 @@ export function examples(): Plugin {
     }).then(({ stdout, stderr }) => {
       if (stderr) console.warn(stderr);
       return JSON.parse(stdout) as Rendered;
+    });
+    // 失败了不缓存（示例写错、正在编辑）：下一次请求重新算
+    rendering.catch(() => {
+      rendering = undefined;
     });
     return rendering;
   };
