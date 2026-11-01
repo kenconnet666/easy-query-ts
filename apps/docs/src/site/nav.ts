@@ -33,6 +33,31 @@ export const sections: readonly NavSection[] = [
         description: '全站示例共用的模型和数据：公司、用户、帖子、评论、标签。',
         component: () => import('../pages/guide/Model'),
       },
+      {
+        path: '/guide/playground',
+        title: '演练场',
+        description:
+          '自己改代码，在浏览器里的 PostgreSQL、SQLite 上运行。卡片右上角的“改一改”把示例带到这里。',
+        component: () => import('../pages/Playground'),
+      },
+      {
+        path: '/guide/practice',
+        title: '完整例子：社区首页',
+        description: '用一个真实页面串起来：列表、详情、发帖、榜单，每条查询都能运行。',
+        component: () => import('../pages/guide/Practice'),
+      },
+      {
+        path: '/guide/terms',
+        title: '术语',
+        description: '隐式 join、对象树、聚合根、方言……文档里的词都是什么意思。',
+        component: () => import('../pages/guide/Terms'),
+      },
+      {
+        path: '/guide/best-practices',
+        title: '最佳实践与常见问题',
+        description: '实体怎么设计、什么时候用什么写法，以及大家常问的问题。',
+        component: () => import('../pages/guide/BestPractices'),
+      },
     ],
   },
   {
@@ -50,6 +75,13 @@ export const sections: readonly NavSection[] = [
         title: '分组、窗口与子查询',
         description: '聚合、HAVING、CASE、窗口函数、子查询、联合，以及在哪里插原生 SQL。',
         component: () => import('../pages/query/Advanced'),
+      },
+      {
+        path: '/query/table',
+        title: '列表页查询',
+        description:
+          '表格的筛选、排序、分页一次接好：`filterBy`、`sortBy`、`table`，只认登记过的列。',
+        component: () => import('../pages/query/Table'),
       },
       {
         path: '/func',
@@ -91,6 +123,12 @@ export const sections: readonly NavSection[] = [
         description: '`db.save` 保存一棵对象树；事务、提交后的动作和行锁。',
         component: () => import('../pages/write/Save'),
       },
+      {
+        path: '/write/rules',
+        title: '列规则与拦截器',
+        description: '逻辑删除、乐观锁、多租户、审计：声明一次，所有读写都生效。',
+        component: () => import('../pages/write/Rules'),
+      },
     ],
   },
   {
@@ -107,6 +145,18 @@ export const sections: readonly NavSection[] = [
         title: '二级缓存',
         description: '本机缓存与 Redis 缓存，三种部署；Redis 与消息通知由你按接口接入。',
         component: () => import('../pages/scale/Cache'),
+      },
+      {
+        path: '/scale/sharding',
+        title: '分库分表',
+        description: '实体声明分片规则，查询按条件裁剪，写入按行路由。',
+        component: () => import('../pages/scale/Sharding'),
+      },
+      {
+        path: '/scale/runtime',
+        title: '读写分离与可观测',
+        description: '读写分离、只读 Db、超时与取消、链路追踪、N+1 与慢查询。',
+        component: () => import('../pages/scale/Runtime'),
       },
       {
         path: '/scale/databases',

@@ -179,6 +179,5 @@ for (const path of globSync('src/**/*.examples.ts', { cwd: root })) {
     }
   }
 }
-process.stdout.write(JSON.stringify(output));
-// 方言包的驱动可能留着定时器
-process.exit(0);
+// 方言包的驱动可能留着定时器，要主动退出。等写完再退：管道在 Linux 上是异步的，马上退出输出会被截断
+process.stdout.write(JSON.stringify(output), () => process.exit(0));

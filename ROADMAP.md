@@ -227,10 +227,14 @@ easy-query 的 TS 版。阶段编号沿用迁移前 vue-tsx-pro 的 ROADMAP，�
       只留本机与 Redis 两级、三种部署；Redis 由使用方实现 `CacheStore`、`CacheTransport`，示例与实测放在 `packages/test`。上面阶段 23 里提到的这些都已不在本仓库
 - [x] 24.4 发布 0.2.0（17 个包），vue-tsx-pro 改用 npm 上的版本
 
-## 阶段 25：文档站
+## 阶段 25：文档站（apps/docs）
 
 用组件库（`@zerodep-dev/vue-tsx-pro-ui`、`tsx`，从 npm 装）写，不用 Markdown。
 
-- [ ] 25.1 代码卡片：TS 与它生成的 SQL 并排，可切方言，默认 PostgreSQL；SQL 在构建时用 `renderSnapshots` 的办法从真实查询渲染，不手写
-- [ ] 25.2 全站共用一套业务模型，用一个完整业务串起功能；导航、include、聚合根保存、DTO 查询单列成章；术语表、最佳实践、常见问题
-- [ ] 25.3 把 `docs/features/` 改写进来；脚本检查每个公开导出都有文档、与 `docs/parity-docs.md` 对账
+- [x] 25.1 代码卡片一行三栏：TypeScript、SQL、结果；方言全站共用，默认 PostgreSQL。SQL 不手写：`*.examples.ts` 先在 SQLite 上执行，别的方言用回放驱动走完同一段代码
+- [x] 25.2 PostgreSQL、SQLite 点“运行”在浏览器里真实执行（PGlite、SQLite WASM），其余方言显示 SQL；演练场可以自己改代码，卡片上的“改一改”带过去
+- [x] 25.3 全站共用一套业务模型（site/model.ts）；用社区首页串起功能；术语、最佳实践与常见问题
+- [x] 25.4 CI 的 docs 任务：逐页水合，每张卡片在两个引擎上各跑一遍
+- [ ] 25.5 把 `docs/features/` 剩下的内容改写进来（方言专属函数、JSON 列、多态实体、计算属性、树形查询、CTE、加密列、校验器），改完删掉对应的页
+- [ ] 25.6 全文搜索：现在只搜标题与简介；脚本检查每个公开导出都有文档、与 `docs/parity-docs.md` 对账
+- [ ] 25.7 部署（需要域名）；vue-tsx-pro 文档站的 `/stack/orm/*` 换成外链

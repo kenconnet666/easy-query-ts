@@ -2,11 +2,23 @@
  * 在浏览器里真实运行示例：PGlite（WASM 版 PostgreSQL）或 SQLite WASM。点“运行”时才加载这个模块与数据库。
  * 每次运行都重建表、放回示例数据，上一次的写入不影响这一次；运行排队，同一时间只有一个
  */
-import { createDb, type Adapter } from '@zerodep-dev/easy-query-ts';
+import {
+  and,
+  caseWhen,
+  createDb,
+  greatest,
+  least,
+  not,
+  or,
+  sql,
+  text,
+  win,
+  type Adapter,
+} from '@zerodep-dev/easy-query-ts';
 import type { LiveEngine } from './dialects';
 import type { ExampleBuild, RenderedStatement } from './example.ts';
 import { formatParams, formatResult, formatSql, generatedStatements } from './format-sql.ts';
-import { schema, seed } from './model.ts';
+import { Comment, Company, Doc, Post, PostTag, schema, seed, Tag, User } from './model.ts';
 
 /** 一次运行的结果 */
 export interface LiveResult {
@@ -97,4 +109,34 @@ export function runExample(build: ExampleBuild, engine: LiveEngine): Promise<Liv
   const run = queue.then(() => execute(build, engine));
   queue = run.catch(() => undefined);
   return run;
+}
+
+/** 演练场里代码能用的名字 */
+const SCOPE = {
+  Company,
+  User,
+  Post,
+  Comment,
+  Tag,
+  PostTag,
+  Doc,
+  and,
+  or,
+  not,
+  caseWhen,
+  win,
+  sql,
+  text,
+  greatest,
+  least,
+};
+
+/** 运行演练场里的一段代码：source 是函数体，按 JS 执行 */
+export function runSource(source: string, engine: LiveEngine): Promise<LiveResult> {
+  const names = Object.keys(SCOPE);
+  const AsyncFunction = (async () => {}).constructor as new (
+    ...args: string[]
+  ) => (...values: unknown[]) => Promise<unknown>;
+  const body = new AsyncFunction('db', ...names, source);
+  return runExample((db) => body(db, ...Object.values(SCOPE)), engine);
 }

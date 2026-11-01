@@ -1,18 +1,8 @@
 /** 对象树：select 里写 toList */
 import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
-import { CodeBlock } from '@zerodep-dev/vue-tsx-pro-ui';
 import { DocPage, Note, P, Points, Section } from '../../site/content';
 import { SqlExample } from '../../site/SqlExample';
-import { firstOfMany, tree } from './navigate.examples.ts';
-
-const view = `// 常用的形状写成视图，导航里的层级自动带出，类型由形状推出
-const CompanyCard = defineView(Company, (c) => ({
-  name: c.name,
-  staff: c.users.count(),
-  users: c.users.toList((u) => ({ name: u.name })),
-}));
-
-await db.queryable(Company).select(CompanyCard).toList();`;
+import { firstOfMany, nestedView, tree, view } from './navigate.examples.ts';
 
 export default _component(() => () => (
   <DocPage>
@@ -33,7 +23,9 @@ export default _component(() => () => (
     </Section>
     <Section id="view" title="复用形状：视图">
       <P text="结果形状就是 DTO 的类型，不需要另写 VO 类。常用的形状用 `defineView` 存下来，别处直接 `select`。" />
-      <CodeBlock code={view} lang="ts" />
+      <SqlExample example={view} title="把形状存下来，到处复用" />
+      <P text="视图能嵌套：把另一个视图传给 `toList`。`ViewOf<typeof PostCard>` 拿到这个形状的类型，给接口返回值用。" />
+      <SqlExample example={nestedView} title="视图里嵌视图" />
       <Note text="这对应官方的 selectAutoInclude：Java 版要写 DTO 类并用注解标导航，这里形状本身就是声明。" />
     </Section>
   </DocPage>

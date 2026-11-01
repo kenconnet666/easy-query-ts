@@ -4,13 +4,22 @@
  *
  *   <SqlExample example={filter} title="条件" />
  */
-import { Play } from '@lucide/icons';
+import { PencilLine, Play } from '@lucide/icons';
 import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
 import { css } from '@zerodep-dev/vue-tsx-pro-tsx/styles';
-import { Alert, Button, CodeBlock, Select, Small, Text } from '@zerodep-dev/vue-tsx-pro-ui';
+import {
+  Alert,
+  Button,
+  CodeBlock,
+  LinkButton,
+  Select,
+  Small,
+  Text,
+} from '@zerodep-dev/vue-tsx-pro-ui';
 import { currentDialect, dialectInfo, dialects } from './dialects';
 import type { Example, RenderedStatement } from './example';
 import type { LiveResult } from './live';
+import { sqlText } from './sql-text';
 
 /** 卡片至少这么宽才放得下三栏 */
 const WIDE = '@container (min-width: 60rem)';
@@ -72,13 +81,6 @@ const styles = css.create({
   },
 });
 
-/** 语句写成一段 SQL：几条之间空一行，参数写成注释 */
-function sqlText(statements: readonly RenderedStatement[]): string {
-  return statements
-    .map(({ sql, params }) => `${sql};${params ? `\n-- 参数：${params}` : ''}`)
-    .join('\n\n');
-}
-
 const dialectOptions = dialects.map((item) => ({ value: item.id, label: item.label }));
 
 /** 引擎的名字 */
@@ -134,6 +136,14 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
             _value={currentDialect.value}
             sx={styles.select}
           />
+          <LinkButton
+            size="sm"
+            variant="soft"
+            icon={PencilLine}
+            href={`/guide/playground#code=${encodeURIComponent(example.code)}`}
+          >
+            改一改
+          </LinkButton>
           <Button
             size="sm"
             icon={Play}
@@ -167,6 +177,7 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
               <CodeBlock
                 code={sqlText(statements)}
                 lang="sql"
+                wrap
                 title={`SQL · ${dialect.label}`}
                 propsRoot={{ sx: styles.code }}
               />
@@ -185,6 +196,7 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
               <CodeBlock
                 code={result}
                 lang="json"
+                wrap
                 title="结果"
                 maxLines={24}
                 propsRoot={{ sx: styles.code }}

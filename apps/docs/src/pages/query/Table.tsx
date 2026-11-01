@@ -1,0 +1,44 @@
+/** 列表页查询：filterBy、sortBy、table */
+import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
+import { DocPage, Note, P, Points, Section, SimpleTable } from '../../site/content';
+import { SqlExample } from '../../site/SqlExample';
+import { filterBy, range, sortBy, table, whitelist } from './table.examples.ts';
+
+export default _component(() => () => (
+  <DocPage>
+    <Section id="filter" title="按表单筛选">
+      <P text="`filterBy` 接一个表单对象和一组规则。没填的字段跳过；同名的列直接写比较方式，不同名的写 `{ op, column }`；`column` 可以经过导航，也可以给几列，任一满足。这对应官方的 `whereObject`，规则的键和值类型都由实体推出，写错编译不过。" />
+      <SqlExample example={filterBy} title="关键字查标题或作者，再加最低阅读量" />
+      <P text="区间用 `between`，给一对值，任一端为空就不限。" />
+      <SqlExample example={range} title="年龄区间" />
+      <SimpleTable
+        head={['比较方式', '含义']}
+        rows={[
+          ['`eq`、`ne`', '等于、不等于'],
+          ['`gt`、`ge`、`lt`、`le`', '大于、大于等于、小于、小于等于'],
+          ['`like`、`startsWith`、`endsWith`', '包含、开头是、结尾是；空白的输入跳过'],
+          ['`in`', '值在列表里；空列表跳过'],
+          ['`between`', '区间，任一端为空不限'],
+        ]}
+      />
+    </Section>
+    <Section id="sort" title="按参数排序">
+      <P text="前端传排序字段名，不能直接拼进 SQL。`sortBy` 只认登记过的名字，减号或 `desc` 是倒序，别的名字报错。" />
+      <SqlExample example={sortBy} title="动态排序" />
+    </Section>
+    <Section id="table" title="一次接好表格">
+      <P text="列表页的请求（页码、条数、排序、表头筛选、关键字）交给 `parseTableRequest` 解析，`table` 把它变成查询，返回 `{ rows, total, page, size }`。能筛选、排序的只有 `select` 里的列，相当于白名单，请求碰不到结果以外的列。" />
+      <SqlExample example={table} title="解析请求，执行，拿到这一页和总数" />
+      <P text="要收得更紧，用 `filterable`、`sortable` 单独列出来，键的类型由 `select` 推出。" />
+      <SqlExample example={whitelist} title="只允许按状态筛选、按阅读量排序" />
+      <Points
+        items={[
+          '请求参数：`page`、`pageSize`、`sort`（`-amount,name`）、`filter.列`（多选）、`search.列`（包含）、`total`（前端已知总数时不再数）。',
+          '每页条数上限 2000，超过直接报错，不悄悄少给。',
+          '其余参数留在 `request.params` 里，由你自己写进 `where`。',
+        ]}
+      />
+      <Note text="这份参数格式和 vue-tsx-pro 组件库 `useTableQuery` 发出的一致，前后端可以直接对上。" />
+    </Section>
+  </DocPage>
+));

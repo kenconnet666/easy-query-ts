@@ -43,8 +43,21 @@ export const PostTag = entity('t_post_tag', {
   tagId: col.bigint().primaryKey(),
 });
 
+/** 用到列规则的文档表：逻辑删除、乐观锁、只插入、更新时填值（“列规则”一章的示例） */
+export const Doc = entity('t_doc', {
+  id: col.bigint().primaryKey().generated(),
+  title: col.string(100),
+  deleted: col.boolean().softDelete(),
+  version: col.int().version(),
+  createdBy: col.string(50).insertOnly(),
+  updatedAt: col
+    .datetime()
+    .nullable()
+    .$onUpdate(() => new Date('2026-11-01T08:00:00Z')),
+});
+
 export const schema = defineSchema(
-  { Company, User, Post, Comment, Tag, PostTag },
+  { Company, User, Post, Comment, Tag, PostTag, Doc },
   {
     Company: (r) => ({ users: r.many('User', { from: 'id', to: 'companyId' }) }),
     User: (r) => ({
@@ -130,6 +143,13 @@ export async function seed(db: Db<typeof schema>): Promise<void> {
       { postId: 5, tagId: 2 },
       { postId: 6, tagId: 4 },
       { postId: 6, tagId: 3 },
+    ])
+    .execute();
+  await db
+    .insert(Doc)
+    .values([
+      { title: '接入指南', createdBy: '林晓' },
+      { title: '发布清单', createdBy: '周航' },
     ])
     .execute();
 }

@@ -42,6 +42,11 @@ wsl -d Debian -- bash -lc 'cd /mnt/c/Users/lionheart/IdeaProjects/easy-query-ts 
 - 核心零依赖；驱动都是方言包的 peer 依赖。缓存包不带 Redis 与 MQ 的驱动，只给接口，示例放测试包。
 - `vue-tsx-pro` 的 `flow/engine`、`flow-demo`、`fullstack-demo` 依赖 npm 上的版本：破坏性改动发版前先看一眼。
 
+## 文档站
+
+`apps/docs`：`pnpm dev:docs`（端口 5175）。页面是 TSX，用 npm 上的组件库写；示例写在 `*.examples.ts`，由 `build/render-examples.ts` 算出各方言的 SQL 与结果，浏览器里点“运行”走 `src/site/live.ts`。
+`pnpm build:docs && pnpm --filter @easy-query-ts/docs test:site`：逐页水合，每张卡片在 PGlite、SQLite WASM 上各跑一遍。
+
 ## 下一步
 
-文档站（ROADMAP 阶段 24）：用组件库写，不用 Markdown；代码卡片显示生成的 SQL、可切方言、默认 PostgreSQL。
+文档站补完（ROADMAP 25.5–25.7）。

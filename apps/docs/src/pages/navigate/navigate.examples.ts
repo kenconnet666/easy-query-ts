@@ -1,8 +1,10 @@
 /** 导航一章的示例 */
+import { defineView } from '@zerodep-dev/easy-query-ts';
 import { example } from '../../site/example.ts';
 import {
   Company,
   Post,
+  schema,
   Tag,
   User,
 } from '../../site/model.ts';
@@ -117,3 +119,29 @@ export const include = example((db) =>
     }))
     .toList(),
 );
+
+export const view = example(async (db) => {
+  const CompanyCard = defineView(schema, Company, (c) => ({
+    name: c.name,
+    staff: c.users.count(),
+  }));
+
+  return db.queryable(Company).select(CompanyCard).toList();
+});
+
+export const nestedView = example(async (db) => {
+  const PostCard = defineView(schema, Post, (p) => ({
+    title: p.title,
+    views: p.views,
+  }));
+  const Author = defineView(schema, User, (u) => ({
+    name: u.name,
+    posts: u.posts.toList(PostCard),
+  }));
+
+  return db
+    .queryable(User)
+    .where((u) => u.posts.any())
+    .select(Author)
+    .toList();
+});

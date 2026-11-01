@@ -12,7 +12,15 @@
     "typecheck": "tsc -p . --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "catalog:",
+    "@codemirror/commands": "catalog:",
+    "@codemirror/lang-javascript": "catalog:",
+    "@codemirror/language": "catalog:",
+    "@codemirror/search": "catalog:",
+    "@codemirror/state": "catalog:",
+    "@codemirror/view": "catalog:",
     "@electric-sql/pglite": "catalog:",
+    "@lezer/highlight": "catalog:",
     "@lucide/icons": "catalog:",
     "@shikijs/langs": "catalog:",
     "@sqlite.org/sqlite-wasm": "catalog:",
