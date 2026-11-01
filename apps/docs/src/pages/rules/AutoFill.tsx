@@ -52,13 +52,17 @@ export default _component(() => () => (
     <Section id="update" title="更新时">
       <P text="看 SQL 一栏：`updated_at` 自动带上了。示例模型把时间固定成了一个值，方便比较。" />
       <SqlExample example={onUpdateFills} title="$onUpdate 填更新时间" />
+      <P text="查出来改完再存时也一样：`entity(row)`、`changes` 不从行里取 `$onUpdate` 的列，否则写回去的就是旧值。真要指定时用 `set`，给了值就不填。" />
+      <SqlExample
+        example={insertOnlyBlocked}
+        title="entity(row)：updated_at 是新值，created_by 不写"
+      />
     </Section>
     <Section id="insert-only" title="只插入的列">
-      <P text="创建人、创建时间不该被改。`set` 里给它赋值报错；`entity(row)` 自动跳过，就算行里的值变了。" />
-      <SqlExample example={insertOnlyBlocked} title="SQL 里没有 created_by" />
+      <P text="创建人、创建时间不该被改。`set` 里给它赋值报错；`entity(row)` 自动跳过，就算行里的值变了，看上面那张卡片的 SQL。" />
     </Section>
     <Section id="touch" title="统一填：touch">
-      <P text="很多实体都有的更新时间、操作人，不想每个实体写一遍时用 `touch`。它是拦截器，单条语句可以 `noInterceptor('touch:列名')`。" />
+      <P text="很多实体都有的更新时间、操作人，不想每个实体写一遍时用 `touch`。它是拦截器，单条语句可以 `noInterceptor('touch:列名')`。它只在没给值时填，`entity(row)` 带着旧值时不会覆盖：这种列用 `$onUpdate` 声明，或者用 `set`、`changes`。" />
       <CodeBlock code={touchExample} lang="ts" />
       <SqlExample example={touchFills} title="工单的 touchedAt 自动填上了" />
       <Note text="`$default` 这些由内置的 `defaults` 拦截器执行。表达式更新也会补 `$onUpdate`；`fromQuery` 不经过，要自己在 `select` 里给。" />

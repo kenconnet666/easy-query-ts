@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-oracle",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Oracle dialect and driver adapter (oracledb Thin mode) for @zerodep-dev/easy-query-ts, rendering per server version",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",

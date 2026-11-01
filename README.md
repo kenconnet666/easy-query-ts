@@ -1,7 +1,7 @@
 # easy-query TS 版（@zerodep-dev/easy-query-ts\*）
 
 与 Java 版 easy-query 同一套思路：实体 + 导航、lambda 里写条件、隐式 join、隐式子查询、对象树结果；结果类型全由 TS 推导，不需要代码生成。
-设计与取舍见 [docs/decisions/0002-ts-design.md](docs/decisions/0002-ts-design.md)，现状与上手见 [HANDOFF.md](HANDOFF.md)。
+文档站在 `apps/docs`（`pnpm dev:docs`），每段代码都能看到各方言的 SQL、在浏览器里运行。设计与取舍见 [docs/decisions/0002-ts-design.md](docs/decisions/0002-ts-design.md)，现状与上手见 [HANDOFF.md](HANDOFF.md)。
 
 ```ts
 import { DatabaseSync } from 'node:sqlite';
@@ -52,7 +52,7 @@ const rows = await db
 | `easy-query-ts-decimal`、`-date`                             | decimal.js 与 `@internationalized/date` 的列类型                                           |
 | `easy-query-ts-crypto`                                       | 列加密（AES、SM4，可分段搜索）                                                             |
 | `easy-query-ts-cache`                                        | 二级缓存：本机缓存与 Redis 接口，见 [docs/features/ts-cache.md](docs/features/ts-cache.md) |
-| `easy-query-ts-cli`                                          | `eqts`：由库生成实体、SQL 快照                                                             |
+| `easy-query-ts-cli`                                          | `eqts`：由库生成实体、迁移、SQL 快照                                                       |
 
 `packages/test` 是不发布的测试模块：共用夹具、跨方言套件、类型检查（见 [packages/test/README.md](packages/test/README.md)）。
 

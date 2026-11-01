@@ -109,6 +109,7 @@ export default _component(() => () => (
         head={['Java', 'TypeScript', '在哪一章']}
         rows={[
           ['IDEA 插件：由表生成实体', '`eqts pull`', '迁移'],
+          ['AES、SM4 加密策略', '`-crypto` 包', '加密列'],
           ['`syncTableCommand`', '`planSync`、`syncTables`', '建表与同步'],
           ['`createTableCommand`', '`createTablesSql`', '建表与同步'],
           ['缓存模块', '`-cache`：本机与 Redis 两级，只给接口', '二级缓存'],

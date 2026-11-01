@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-date",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "@internationalized/date column types for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",

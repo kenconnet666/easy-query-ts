@@ -36,6 +36,7 @@ import {
   generatedStatements,
 } from '../src/site/format-sql.ts';
 import { interceptors, schema, seed } from '../src/site/model.ts';
+import { compileSource } from '../src/site/scope.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -134,6 +135,17 @@ async function render(build: ExampleBuild) {
   return { dialects, result: generated ? undefined : formatResult(value) };
 }
 
+/** 按演练场的方式跑一遍：示例用了 scope.ts 里没有的名字时，“改一改”带过去就跑不起来 */
+async function runInPlayground(js: string): Promise<void> {
+  const database = new DatabaseSync(':memory:');
+  const adapter = sqlite(database);
+  const setup = createDb({ schema, adapter });
+  await setup.createTables();
+  await seed(setup);
+  await compileSource(js)(createDb({ schema, interceptors, adapter }));
+  database.close();
+}
+
 /** 去掉类型的版本：演练场按 JS 执行。函数体里有 await、return，要包一层才是合法的模块 */
 function toJs(code: string): string {
   const wrapped = stripTypeScriptTypes(
@@ -191,7 +203,9 @@ for (const path of globSync('src/**/*.examples.ts', { cwd: root })) {
         `${key}：没有从源码里找到示例 ${name}（要写成 export const ${name} = example((db) => …)）`,
       );
     try {
-      output[key][name] = { code: text, js: toJs(text), ...(await render(value.build)) };
+      const js = toJs(text);
+      output[key][name] = { code: text, js, ...(await render(value.build)) };
+      await runInPlayground(js);
     } catch (error) {
       throw new Error(`${key} 的示例 ${name} 在 SQLite 上执行失败：${String(error)}`, {
         cause: error,

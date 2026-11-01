@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-mysql",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MySQL / PolarDB adapter (mysql2) for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",

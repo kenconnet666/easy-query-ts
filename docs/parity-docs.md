@@ -7,9 +7,9 @@
 
 | 页面                                                          | TS 对应                                                                                                                     | 状态     |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------- |
-| quick-start、startup/step1–5、demo/*                          | 文档站 ORM 分区：快速开始（/stack/orm/start），实体、建 Db、第一条查询                                                      | ✓ 16.8.1 |
-| what-is-easy-query、feature、feature-map、catalog、v2-v3      | 文档站 ORM 首页（/stack/orm）与各章：查询、导航与 DTO、写入、函数、建表、缓存与分库分表、方言                               | ✓ 16.8.1 |
-| best-practices（实体设计）                                    | 文档站各章里的写法建议：实体与关系、视图复用形状、主键由应用给值的分析库                                                    | ✓ 16.8.1 |
+| quick-start、startup/step1–5、demo/*                          | 文档站：快速开始、实体与列、创建 Db 与配置                                                                                  | ✓ 16.8.1 |
+| what-is-easy-query、feature、feature-map、catalog、v2-v3      | 文档站首页与各章：模型、查询、函数、导航、写入、列规则、运维                                                                | ✓ 16.8.1 |
+| best-practices（实体设计）                                    | 文档站“最佳实践与常见问题”                                                                                                  | ✓ 16.8.1 |
 | context-mode（实体无接口模式、DbSet）                         | TS 本来就不要接口：`db.queryable(User)`                                                                                     | ≈        |
 | framework/concept、terminology、key-word（关键字加引号）      | 方言的 `quote`，所有标识符都加引号                                                                                          | ✓        |
 | framework/annotation、annotation/readme                       | `entity()` 与列修饰器代替注解                                                                                               | ≈        |

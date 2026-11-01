@@ -109,6 +109,7 @@ export default _component(() => () => (
           ['`-pg/pglite`', 'PGlite 的适配器，不用装 `pg`'],
           ['`-cache`', '二级缓存，只给接口，不带 Redis 驱动'],
           ['`-decimal`、`-date`', 'decimal.js、`@internationalized/date` 的列类型'],
+          ['`-crypto`', '列加密：AES、SM4，可分段搜索'],
           ['`-cli`', '`eqts` 命令：由库生成实体、迁移、SQL 快照'],
         ]}
       />

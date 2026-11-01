@@ -11,7 +11,7 @@ easy-query 的 TypeScript 版。2026-11-01 从 [vue-tsx-pro](https://github.com/
 | [RELEASE.md](RELEASE.md)                                              | 发布步骤、怎么构建                                                    |
 | `packages/`                                                           | 核心、方言、列类型、缓存、CLI；`packages/test` 是共用夹具与跨方言套件 |
 | [docs/decisions/](docs/decisions/0002-ts-design.md)                   | 设计与取舍                                                            |
-| [docs/features/](docs/features/README.md)                             | 各特性的说明，文档站做好后改写进去                                    |
+| [docs/features/](docs/features/README.md)                             | 各特性的说明，内容已改写进文档站；站点部署后删掉（ROADMAP 25.5.1）    |
 | [docs/parity.md](docs/parity.md)、`parity-tests.md`、`parity-docs.md` | 对照官方 easy-query 的能力、2249 个用例、文档页；`tools/` 的脚本生成  |
 | `infra/dev/`                                                          | 本机的实库容器                                                        |
 | `tests/consumer/`                                                     | 发布产物的检查                                                        |
@@ -49,4 +49,4 @@ wsl -d Debian -- bash -lc 'cd /mnt/c/Users/lionheart/IdeaProjects/easy-query-ts 
 
 ## 下一步
 
-文档站补完（ROADMAP 25.5–25.7）。
+文档站：全文搜索与对账（ROADMAP 25.6）、部署（25.7）、方言专属函数的完整列表（25.5.2）。
