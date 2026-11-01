@@ -1,17 +1,17 @@
 {
   "name": "@zerodep-dev/easy-query-ts-pg",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "PostgreSQL adapter (pg) for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
-  "homepage": "https://github.com/kenconnet666/vue-tsx-pro/tree/master/packages/easy-query#readme",
+  "homepage": "https://github.com/kenconnet666/easy-query-ts#readme",
   "bugs": {
-    "url": "https://github.com/kenconnet666/vue-tsx-pro/issues"
+    "url": "https://github.com/kenconnet666/easy-query-ts/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kenconnet666/vue-tsx-pro.git",
-    "directory": "packages/easy-query/pg"
+    "url": "git+https://github.com/kenconnet666/easy-query-ts.git",
+    "directory": "packages/pg"
   },
   "keywords": [
     "postgres",
@@ -21,12 +21,12 @@
   ],
   "exports": {
     ".": {
-      "@vue-tsx-pro/source": "./src/index.ts",
+      "@easy-query-ts/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./pglite": {
-      "@vue-tsx-pro/source": "./src/pglite.ts",
+      "@easy-query-ts/source": "./src/pglite.ts",
       "types": "./dist/pglite.d.ts",
       "default": "./dist/pglite.js"
     }
@@ -46,9 +46,7 @@
     "@electric-sql/pglite": "catalog:",
     "@neondatabase/serverless": "catalog:",
     "@zerodep-dev/easy-query-ts": "workspace:*",
-    "@zerodep-dev/easy-query-ts-cache": "workspace:*",
     "@zerodep-dev/easy-query-ts-test": "workspace:*",
-    "ioredis": "catalog:",
     "@types/pg": "catalog:",
     "pg": "catalog:"
   },

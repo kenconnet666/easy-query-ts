@@ -1,13 +1,14 @@
 {
   "name": "@zerodep-dev/easy-query-ts-test",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "exports": {
     "./fixture": "./src/fixture.ts",
     "./suite": "./src/suite.ts",
     "./analytic": "./src/analytic.ts",
-    "./sqlite-env": "./src/sqlite-env.ts"
+    "./sqlite-env": "./src/sqlite-env.ts",
+    "./redis-cache": "./src/redis-cache.ts"
   },
   "dependencies": {
     "@zerodep-dev/easy-query-ts": "workspace:*",
@@ -17,18 +18,15 @@
     "@zerodep-dev/easy-query-ts-crypto": "workspace:*",
     "@zerodep-dev/easy-query-ts-cli": "workspace:*",
     "@zerodep-dev/easy-query-ts-cache": "workspace:*",
-    "@zerodep-dev/storage": "workspace:*",
     "vitest": "catalog:"
   },
   "devDependencies": {
     "@libsql/client": "catalog:",
+    "ioredis": "catalog:",
     "decimal.js": "catalog:",
     "@internationalized/date": "catalog:",
     "zod": "catalog:",
     "typescript": "catalog:",
     "@types/node": "catalog:"
-  },
-  "scripts": {
-    "typecheck": "tsc -p .. --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo"
   }
 }

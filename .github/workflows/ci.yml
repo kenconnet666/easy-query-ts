@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# master 上每次推送都跑完（连着推送时取消上一次就永远等不到完整的结果）；PR 上新的提交取消旧的
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# 静态检查与系统无关，只在 Ubuntu 上跑；测试、构建与发布产物在 Windows 上也跑：本地开发在 Windows
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm check
+      - run: pnpm typecheck
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm test
+
+  # 发布产物：pnpm pack 的包在仓库之外安装、类型检查并运行，核心包只有一份
+  consumer:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm test:consumer
+
+  # 实库套件：MySQL 8.0.18（PolarDB 基线）、MariaDB 11.4、PG 17、SQL Server 2022、Oracle 23ai、达梦、openGauss、ClickHouse 的服务容器；HANA 不在 CI，本机跑。
+  # Redis 8.2 给二级缓存接 Redis 的示例实现（多实例缓存的实测）
+  db:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0.18
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -proot" --health-interval=5s --health-timeout=5s --health-retries=30
+      # MariaDB 11.4 LTS（MySQL 协议，mariadb 方言）
+      mariadb:
+        image: mariadb:11.4.13
+        env:
+          MARIADB_ROOT_PASSWORD: root
+        ports: ['3307:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-timeout=5s --health-retries=30
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: eqts
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres" --health-interval=5s --health-timeout=5s --health-retries=30
+      redis:
+        image: redis:8.2.3-alpine@sha256:08ad0b1d280850169a790dba1393ff7a90aef951fc19632cf4d3ce4f78e679ba
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=5s --health-retries=30
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_SA_PASSWORD: Ci_Passw0rd!
+        ports: ['1433:1433']
+        options: >-
+          --health-cmd="/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'Ci_Passw0rd!' -Q 'SELECT 1' -b -o /dev/null"
+          --health-interval=5s --health-timeout=5s --health-retries=60 --health-start-period=20s
+      oracle:
+        image: gvenzl/oracle-free:23-slim
+        env:
+          ORACLE_PASSWORD: ci_oracle
+          APP_USER: eqts
+          APP_USER_PASSWORD: ci_oracle
+        ports: ['1521:1521']
+        options: >-
+          --health-cmd=healthcheck.sh --health-interval=10s --health-timeout=5s --health-retries=60 --health-start-period=30s
+      dameng:
+        image: xuxuclassmate/dameng:latest@sha256:c4088323442747a45d58bd33ef59e657c9b85f9e7dd956ba60b36d04a35b141d
+        env:
+          SYSDBA_PWD: Ci_Dameng001
+          UNICODE_FLAG: 1
+          LENGTH_IN_CHAR: 1
+          CASE_SENSITIVE: 1
+        ports: ['5236:5236']
+        options: >-
+          --health-cmd="bash -c 'echo > /dev/tcp/127.0.0.1/5236'" --health-interval=10s --health-timeout=5s --health-retries=60 --health-start-period=30s
+      # openGauss（PG 协议）：测试按 PG 兼容建 eqts 库
+      opengauss:
+        image: opengauss/opengauss-server:latest@sha256:d554be1b8b08165a8b19348f0ca236b5d61a4832ffadac0340ded973c34f38e4
+        env:
+          GS_PASSWORD: Ci-Gauss123
+        ports: ['5433:5432']
+        options: >-
+          --privileged --health-cmd="bash -c 'echo > /dev/tcp/127.0.0.1/5432'" --health-interval=10s --health-timeout=5s --health-retries=60 --health-start-period=30s
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8@sha256:0152dd511befe6a2c2ef53e930726179669b08116da78500b37c51c96ff5ee77
+        env:
+          CLICKHOUSE_USER: eqts
+          CLICKHOUSE_PASSWORD: ci_clickhouse
+          CLICKHOUSE_DB: eqts
+        ports: ['8123:8123']
+        options: >-
+          --ulimit nofile=262144:262144 --health-cmd="wget -qO- http://127.0.0.1:8123/ping" --health-interval=5s --health-timeout=5s --health-retries=60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm test
+        env:
+          EQTS_MYSQL_URLS: mysql://root:root@127.0.0.1:3306
+          EQTS_MARIADB_URL: mysql://root:root@127.0.0.1:3307
+          EQTS_PG_URLS: postgres://postgres:postgres@127.0.0.1:5432/eqts
+          EQTS_REDIS_URL: redis://127.0.0.1:6379/0
+          EQTS_MSSQL_URL: mssql://sa:Ci_Passw0rd!@127.0.0.1:1433
+          EQTS_ORACLE_URL: oracle://eqts:ci_oracle@127.0.0.1:1521/FREEPDB1
+          EQTS_DAMENG_URL: dm://SYSDBA:Ci_Dameng001@127.0.0.1:5236
+          EQTS_OPENGAUSS_URL: postgres://gaussdb:Ci-Gauss123@127.0.0.1:5433/eqts
+          EQTS_CLICKHOUSE_URL: http://eqts:ci_clickhouse@127.0.0.1:8123/eqts
+
+  # 分析型与时序库：Doris（单容器 FE + BE，镜像 4.5 GB、要几 GB 内存）、TDengine，单独一个 runner，免得挤占上面的服务容器
+  db-analytic:
+    runs-on: ubuntu-latest
+    services:
+      doris:
+        image: apache/doris:all-in-one-4.1.3@sha256:82a5cabc7900ebcd3d080412d636c0cebd6602799fffe2605c652b2ea7d42609
+        ports: ['9030:9030']
+      tdengine:
+        image: tdengine/tdengine:3.3.6.13@sha256:79d32ce8a42f64c7dbfc33946a36b3e176ea23c0cd695a1bc9e8aa889ca03b88
+        env:
+          TZ: UTC
+        ports: ['6041:6041']
+        options: >-
+          --health-cmd="bash -c 'echo > /dev/tcp/127.0.0.1/6041'" --health-interval=5s --health-timeout=5s --health-retries=60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm exec vitest run --configLoader native mysql/test/doris tdengine
+        env:
+          EQTS_DORIS_URL: mysql://root@127.0.0.1:9030/eqts
+          EQTS_TDENGINE_URL: ws://root:taosdata@127.0.0.1:6041/eqts
+
+  # Db2（镜像 6.7 GB、要 privileged、首次建库几分钟）单独一个 runner；ibm_db 的 CLI 驱动不随 pnpm install 下载，这里单独装
+  db-db2:
+    # IBM CLI 驱动链接的是 libxml2.so.2：固定在还提供它的 24.04
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start Db2
+        run: >-
+          docker run -d --name db2 --privileged -p 50000:50000 -e LICENSE=accept -e DB2INST1_PASSWORD=Ci_Db2pass1
+          -e DBNAME=eqts -e ARCHIVE_LOGS=false -e AUTOCONFIG=false
+          icr.io/db2_community/db2:12.1.2.0@sha256:9cc0d21df5d86cd9a5ce1c65c390dc10d56b1d38ab6e992c8a08eda677368781
+      - uses: ./.github/actions/setup
+      # IBM CLI 驱动依赖 libxml2.so.2
+      - run: sudo apt-get install -y --no-install-recommends libxml2
+      - run: pnpm --filter @zerodep-dev/easy-query-ts-db2 driver
+      - name: Wait for Db2
+        run: timeout 1200 bash -c 'until docker logs db2 2>&1 | grep -q "Setup has completed"; do sleep 10; done'
+      - run: pnpm exec vitest run --configLoader native db2
+        env:
+          EQTS_DB2_URL: DATABASE=eqts;HOSTNAME=127.0.0.1;PORT=50000;PROTOCOL=TCPIP;UID=db2inst1;PWD=Ci_Db2pass1

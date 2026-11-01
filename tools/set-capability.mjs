@@ -1,7 +1,7 @@
 /**
  * 改能力表里一项的状态与说明，再重新生成对照清单（ROADMAP 16.1）：
  *
- *   node packages/easy-query/tools/set-capability.mjs func.json done "jsonValue / jsonObject …；suite.ts json"
+ *   node tools/set-capability.mjs func.json done "jsonValue / jsonObject …；suite.ts json"
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';

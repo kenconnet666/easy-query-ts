@@ -1,0 +1,8 @@
+node_modules/
+**/dist/
+coverage/
+.idea/
+pnpm-lock.yaml
+.claude/
+# 脚本生成的逐条对照表
+docs/parity-tests.md

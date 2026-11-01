@@ -1,13 +1,13 @@
 # 0002 TS 版设计
 
-状态：已实现（2026-10-28 从 easy-query 仓库的 `ts/` 迁到本仓库 `packages/easy-query/`，原文的 `ts/packages/x` 即现在的 `packages/easy-query/x`）。下文已按实现更新；与最初草案不同的地方在末节"实现时的调整"列出。
+状态：已实现（2026-10-28 从 easy-query 仓库的 `ts/` 迁到本仓库 `packages/`，原文的 `ts/packages/x` 即现在的 `packages/x`）。下文已按实现更新；与最初草案不同的地方在末节"实现时的调整"列出。
 
 ## 目标与边界
 
 - 用法与 easy-query 相似：实体 + 导航、lambda 里写条件、隐式 join、隐式子查询（any/none/count/sum）、include、对象树结果。
 - 发挥 TS 的长处：结果类型全自动推导（不用写 DTO 类）、条件可以是数组里的短路表达式、标签模板写原生 SQL 片段。
 - **不做**：与 Java 版逐字相同的 SQL；实体追踪 / 工作单元；浏览器运行时；代码生成作为类型来源（`pull` 只是从现有库生成 schema 文件的可选工具，放 T4）。
-- 位置：原在 easy-query 仓库的 `ts/`，现在本仓库 `packages/easy-query/`，包名暂用 `@zerodep-dev/easy-query-ts*`（发布前再定）。Node 24+、ESM、TypeScript 最新稳定版。
+- 位置：原在 easy-query 仓库的 `ts/`，现在本仓库 `packages/`，包名暂用 `@zerodep-dev/easy-query-ts*`（发布前再定）。Node 24+、ESM、TypeScript 最新稳定版。
 
 ## 1. 定义实体与关系
 

@@ -12,4 +12,4 @@ const pool = await dmdb.createPool({
 const db = createDb({ schema, adapter: dameng(pool) });
 ```
 
-详见仓库 `packages/easy-query/docs/features/ts-dameng.md`。需要同时安装核心包与 `dmdb`。许可证：Apache-2.0。
+详见仓库 [easy-query-ts](https://github.com/kenconnet666/easy-query-ts) 的 `docs/features/ts-dameng.md`。需要同时安装核心包与 `dmdb`。许可证：Apache-2.0。

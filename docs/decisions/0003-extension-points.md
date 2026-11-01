@@ -2,7 +2,7 @@
 
 2026-10-29 调研。对照的是官方：`dromara/easy-query`（801aba8）与官方文档 `xuejmnet/easy-query-doc`（021c59e，下文"adv/interceptor"这类写法指它 src 下的文档），本地克隆在
 `IdeaProjects/orm-references/easy-query`、`easy-query-doc`。fork 的 Java 版已不维护，不再作对照。
-TS 版的现状按 `packages/easy-query/core/src` 核过。第 1–3 节是调研时的对照与可行性；第 4 节是随后补上的（按 TS 的写法，不照搬接口），第 5 节是回头看已有实现时值得改的。
+TS 版的现状按 `packages/core/src` 核过。第 1–3 节是调研时的对照与可行性；第 4 节是随后补上的（按 TS 的写法，不照搬接口），第 5 节是回头看已有实现时值得改的。
 不做的几项里，实体追踪与聚合保存可以换成不需要追踪上下文的写法来做，分库分表只建议做单库分表，二级缓存与反向生成实体等真实需要时再做。
 
 ## 1. 拦截器（官方 adv/interceptor）

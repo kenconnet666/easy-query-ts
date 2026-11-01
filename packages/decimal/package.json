@@ -1,17 +1,17 @@
 {
   "name": "@zerodep-dev/easy-query-ts-decimal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "decimal.js column type for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
-  "homepage": "https://github.com/kenconnet666/vue-tsx-pro/tree/master/packages/easy-query#readme",
+  "homepage": "https://github.com/kenconnet666/easy-query-ts#readme",
   "bugs": {
-    "url": "https://github.com/kenconnet666/vue-tsx-pro/issues"
+    "url": "https://github.com/kenconnet666/easy-query-ts/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kenconnet666/vue-tsx-pro.git",
-    "directory": "packages/easy-query/decimal"
+    "url": "git+https://github.com/kenconnet666/easy-query-ts.git",
+    "directory": "packages/decimal"
   },
   "keywords": [
     "decimal",
@@ -21,7 +21,7 @@
   ],
   "exports": {
     ".": {
-      "@vue-tsx-pro/source": "./src/index.ts",
+      "@easy-query-ts/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }

@@ -1,23 +1,23 @@
 {
-  // pnpm run build：按依赖顺序构建所有要发布的包
+  // pnpm build：按依赖顺序构建所有要发布的包
   "files": [],
   "references": [
-    { "path": "core/tsconfig.build.json" },
-    { "path": "sqlite/tsconfig.build.json" },
-    { "path": "mysql/tsconfig.build.json" },
-    { "path": "pg/tsconfig.build.json" },
-    { "path": "hana/tsconfig.build.json" },
-    { "path": "mssql/tsconfig.build.json" },
-    { "path": "oracle/tsconfig.build.json" },
-    { "path": "dameng/tsconfig.build.json" },
-    { "path": "clickhouse/tsconfig.build.json" },
-    { "path": "db2/tsconfig.build.json" },
-    { "path": "tdengine/tsconfig.build.json" },
-    { "path": "duckdb/tsconfig.build.json" },
-    { "path": "decimal/tsconfig.build.json" },
-    { "path": "date/tsconfig.build.json" },
-    { "path": "crypto/tsconfig.build.json" },
-    { "path": "cli/tsconfig.build.json" },
-    { "path": "cache/tsconfig.build.json" }
+    { "path": "packages/core/tsconfig.build.json" },
+    { "path": "packages/sqlite/tsconfig.build.json" },
+    { "path": "packages/mysql/tsconfig.build.json" },
+    { "path": "packages/pg/tsconfig.build.json" },
+    { "path": "packages/hana/tsconfig.build.json" },
+    { "path": "packages/mssql/tsconfig.build.json" },
+    { "path": "packages/oracle/tsconfig.build.json" },
+    { "path": "packages/dameng/tsconfig.build.json" },
+    { "path": "packages/clickhouse/tsconfig.build.json" },
+    { "path": "packages/db2/tsconfig.build.json" },
+    { "path": "packages/tdengine/tsconfig.build.json" },
+    { "path": "packages/duckdb/tsconfig.build.json" },
+    { "path": "packages/decimal/tsconfig.build.json" },
+    { "path": "packages/date/tsconfig.build.json" },
+    { "path": "packages/crypto/tsconfig.build.json" },
+    { "path": "packages/cli/tsconfig.build.json" },
+    { "path": "packages/cache/tsconfig.build.json" }
   ]
 }

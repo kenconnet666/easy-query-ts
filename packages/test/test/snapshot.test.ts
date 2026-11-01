@@ -16,7 +16,7 @@ afterAll(() => rmSync(out, { recursive: true, force: true }));
 /** 按源码跑 CLI（同 vitest 的解析条件）；失败时返回 stderr */
 function eqts(...args: string[]): { ok: boolean; stderr: string } {
   try {
-    execFileSync(process.execPath, ['--conditions=@vue-tsx-pro/source', bin, ...args], {
+    execFileSync(process.execPath, ['--conditions=@easy-query-ts/source', bin, ...args], {
       stdio: 'pipe',
     });
     return { ok: true, stderr: '' };

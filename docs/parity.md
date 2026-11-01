@@ -1,7 +1,7 @@
 # easy-query TS 与 Java 版的对照
 
 2026-10-28 初版（ROADMAP 11b.1），2026-10-29 补齐缺口后重核。Java 版的能力取自 `easy-query` 仓库 `EntityQueryable`、`ClientQueryable` 的方法清单与 `sql-test` 用例；
-TS 版的状态按 `packages/easy-query/core/src` 的实现核过。"写法不同"指能力有、只是按 TS 的长处换了写法（多半更短）。
+TS 版的状态按 `packages/core/src` 的实现核过。"写法不同"指能力有、只是按 TS 的长处换了写法（多半更短）。
 状态：✓ 已有｜≈ 写法不同｜✗ 缺｜— 不做。
 
 ## 查询与执行

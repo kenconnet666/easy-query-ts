@@ -1,2 +1,17 @@
 /.idea/
 easy-query-ts.iml
+node_modules
+**/dist/
+*.tsbuildinfo
+coverage/
+*.log
+# @tdengine/websocket 的日志（winston 按天滚动，在运行目录下建 logs/）
+*-audit.json
+logs/
+.env
+.env.*
+# 本机的数据库密码与连接（infra/dev/db.sh 生成）
+/.local/
+# SQLite 测试库文件
+*.db
+packages/test/.generated/

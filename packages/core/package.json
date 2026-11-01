@@ -1,17 +1,17 @@
 {
   "name": "@zerodep-dev/easy-query-ts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Type-safe query builder with implicit joins and subqueries, inferred result types and object-tree results (TypeScript port of easy-query)",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
-  "homepage": "https://github.com/kenconnet666/vue-tsx-pro/tree/master/packages/easy-query#readme",
+  "homepage": "https://github.com/kenconnet666/easy-query-ts#readme",
   "bugs": {
-    "url": "https://github.com/kenconnet666/vue-tsx-pro/issues"
+    "url": "https://github.com/kenconnet666/easy-query-ts/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kenconnet666/vue-tsx-pro.git",
-    "directory": "packages/easy-query/core"
+    "url": "git+https://github.com/kenconnet666/easy-query-ts.git",
+    "directory": "packages/core"
   },
   "keywords": [
     "orm",
@@ -22,17 +22,17 @@
   ],
   "exports": {
     ".": {
-      "@vue-tsx-pro/source": "./src/index.ts",
+      "@easy-query-ts/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./context": {
-      "@vue-tsx-pro/source": "./src/context.ts",
+      "@easy-query-ts/source": "./src/context.ts",
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
     },
     "./observe": {
-      "@vue-tsx-pro/source": "./src/observe.ts",
+      "@easy-query-ts/source": "./src/observe.ts",
       "types": "./dist/observe.d.ts",
       "default": "./dist/observe.js"
     }

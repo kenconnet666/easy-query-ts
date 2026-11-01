@@ -2,7 +2,7 @@
  * 官方 easy-query 单元测试的对照清单（ROADMAP 16.1）：扫描官方仓库 sql-test 里每个 @Test 用例，按方法体里用到的 API 归到一种能力，
  * 能力表（capabilities.mjs）记着 TS 侧的状态与对应的测试，生成 docs/parity-tests.md。
  *
- *   node packages/easy-query/tools/parity-tests.mjs [官方仓库路径]
+ *   node tools/parity-tests.mjs [官方仓库路径]
  *
  * 官方仓库默认在仓库旁边的 orm-references/easy-query（本地克隆，不进 CI）；清单生成后提交，CI 不重新生成。
  */
@@ -13,7 +13,7 @@ import { format, resolveConfig } from 'prettier';
 import { capabilities, fileRules, rules } from './capabilities.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
-const repo = join(here, '../../..');
+const repo = join(here, '..');
 const official = process.argv[2] ?? join(repo, '../orm-references/easy-query');
 const testRoot = join(official, 'sql-test/src');
 
@@ -93,7 +93,7 @@ const cell = (text) => text.replaceAll('|', '\\|');
 const lines = [
   '# 官方 easy-query 单元测试的逐条对照',
   '',
-  '由 `packages/easy-query/tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。',
+  '由 `tools/parity-tests.mjs` 生成，不要手改：改能力的状态在 `tools/capabilities.mjs` 里改，再重新生成。',
   `对照的是官方 \`dromara/easy-query\` 的 sql-test（${rows.length} 个用例）。每个用例按方法体里用到的 API 归到一种能力，状态取能力的状态。`,
   '',
   `合计：已对应 ${count('done')}、写法不同 ${count('different')}、待做 ${count('todo')}、不适用 ${count('na')}。`,

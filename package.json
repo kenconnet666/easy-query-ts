@@ -1,0 +1,32 @@
+{
+  "name": "easy-query-ts-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "engines": {
+    "node": ">=24.11 <25",
+    "pnpm": "12.14.0"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "typecheck": "tsc -p . --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo",
+    "test": "vitest run --configLoader native",
+    "test:consumer": "node tests/consumer/run.mjs",
+    "check": "pnpm lint && pnpm format:check && pnpm refs:check && pnpm text:check",
+    "lint": "oxlint . --deny-warnings",
+    "format": "prettier --write . --cache --cache-strategy content",
+    "format:check": "prettier --check . --cache --cache-strategy content",
+    "refs:check": "node scripts/structure/doc-refs.mjs",
+    "text:check": "node scripts/text/check.mjs"
+  },
+  "devDependencies": {
+    "@prettier/plugin-oxc": "catalog:",
+    "@types/node": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "prettier": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

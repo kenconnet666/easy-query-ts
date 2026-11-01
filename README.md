@@ -1,7 +1,7 @@
-# easy-query TS 版（@zerodep-dev/easy-query-ts*）
+# easy-query TS 版（@zerodep-dev/easy-query-ts\*）
 
 与 Java 版 easy-query 同一套思路：实体 + 导航、lambda 里写条件、隐式 join、隐式子查询、对象树结果；结果类型全由 TS 推导，不需要代码生成。
-设计与取舍见 [docs/decisions/0002-ts-design.md](docs/decisions/0002-ts-design.md)。2026-10-28 从 easy-query 仓库的 `ts/` 迁到这里（带历史）。
+设计与取舍见 [docs/decisions/0002-ts-design.md](docs/decisions/0002-ts-design.md)，现状与上手见 [HANDOFF.md](HANDOFF.md)。
 
 ```ts
 import { DatabaseSync } from 'node:sqlite';
@@ -37,26 +37,34 @@ const rows = await db
 // rows: { name: string; users: { id: number; name: string }[] }[]
 ```
 
-| 包                                   | 内容                                                                                                                         |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `@zerodep-dev/easy-query-ts`         | 实体、关系、表达式、语法树、方言基类、查询/写入构建器、结果拼装                                                              |
-| `@zerodep-dev/easy-query-ts-sqlite`  | `node:sqlite`（Node 自带，测试零依赖）                                                                                       |
-| `@zerodep-dev/easy-query-ts-mysql`   | `mysql2/promise` 连接池；MySQL 8.0.18（PolarDB）起                                                                           |
-| `@zerodep-dev/easy-query-ts-pg`      | `pg`（node-postgres）连接池；PG 12+，自增主键用 RETURNING 取回                                                               |
-| `@zerodep-dev/easy-query-ts-hana`    | `hdb`（SAP 的纯 JS 驱动，免原生编译）+ 自带小连接池；HANA 2.0，upsert 写成 MERGE，多行插入写成 SELECT … FROM DUMMY UNION ALL |
-| `@zerodep-dev/easy-query-ts-decimal` | decimal.js 的 `Decimal` 列（`decimalJs()`）；decimal.js 是 peer 依赖                                                         |
-| `@zerodep-dev/easy-query-ts-date`    | `@internationalized/date` 的 `CalendarDate / CalendarDateTime / ZonedDateTime / Time` 列；该库是 peer 依赖                   |
-| `@zerodep-dev/easy-query-ts-test`    | 独立测试模块：共用夹具、跨方言套件、类型检查、SQLite 测试（见 [test/README.md](test/README.md)）                             |
+## 包
+
+包名都以 `@zerodep-dev/` 开头。核心零依赖，驱动是各方言包的 peer 依赖，要同时安装。
+
+| 包                                                           | 内容                                                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `easy-query-ts`                                              | 实体、关系、表达式、语法树、方言基类、查询与写入构建器、结果拼装                           |
+| `easy-query-ts-sqlite`                                       | `node:sqlite`（Node 自带），也支持 `bun:sqlite`、Cloudflare D1、libSQL / Turso             |
+| `easy-query-ts-mysql`                                        | `mysql2`：MySQL 8.0.18（PolarDB）起，以及 MariaDB、Doris                                   |
+| `easy-query-ts-pg`                                           | `pg`：PG 12 起，以及 openGauss、人大金仓、PGlite、Neon                                     |
+| `easy-query-ts-mssql`、`-oracle`、`-dameng`、`-db2`、`-hana` | SQL Server、Oracle、达梦、Db2、SAP HANA                                                    |
+| `easy-query-ts-clickhouse`、`-duckdb`、`-tdengine`           | 分析型与时序库                                                                             |
+| `easy-query-ts-decimal`、`-date`                             | decimal.js 与 `@internationalized/date` 的列类型                                           |
+| `easy-query-ts-crypto`                                       | 列加密（AES、SM4，可分段搜索）                                                             |
+| `easy-query-ts-cache`                                        | 二级缓存：本机缓存与 Redis 接口，见 [docs/features/ts-cache.md](docs/features/ts-cache.md) |
+| `easy-query-ts-cli`                                          | `eqts`：由库生成实体、SQL 快照                                                             |
+
+`packages/test` 是不发布的测试模块：共用夹具、跨方言套件、类型检查（见 [packages/test/README.md](packages/test/README.md)）。
 
 ## 开发
 
 ```bash
 pnpm install
-pnpm --filter @zerodep-dev/easy-query-ts-test typecheck   # tsc（含 50 实体类型样板与类型正负例，在 test/test）
-pnpm exec vitest run --configLoader native --project easy-query   # SQLite 与 SQL 文本的用例
+pnpm typecheck
+pnpm test
+pnpm check
 ```
 
-实库套件在设了 `EQTS_MYSQL_URLS` / `EQTS_PG_URLS` / `EQTS_HANA_URL` 时才跑：本机用仓库自己的测试库（`infra/dev/db.sh`，见根目录 HANDOFF 的上手一节），
-先 `set -a; . ./.local/db.env; set +a` 再跑上面的命令；CI 的 db 任务用服务容器跑 MySQL 与 PG。
+实库套件在设了 `EQTS_*` 环境变量时才跑，容器与连接见 [HANDOFF.md](HANDOFF.md)。发布见 [RELEASE.md](RELEASE.md)。
 
-源码只用可擦除的 TS 语法（`erasableSyntaxOnly`），Node 不经编译直接运行。各方言共用的实库用例在 `test/src/suite.ts`。
+许可证：Apache-2.0。

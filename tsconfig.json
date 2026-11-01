@@ -14,8 +14,13 @@
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["node"],
-    // 仓库内按源码解析各包（exports 里的 @vue-tsx-pro/source 条件）
-    "customConditions": ["@vue-tsx-pro/source"]
+    // 仓库内按源码解析各包（exports 里的 @easy-query-ts/source 条件）
+    "customConditions": ["@easy-query-ts/source"]
   },
-  "include": ["*/src/**/*.ts", "*/test/**/*.ts", "tools/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/test/**/*.ts",
+    "tools/**/*.ts",
+    "vitest.config.ts"
+  ]
 }
