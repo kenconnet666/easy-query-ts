@@ -1,6 +1,7 @@
-/** 查询：分组、窗口、子查询、CTE 与原生 SQL */
+/** 查询：分组、窗口、子查询、CTE */
 import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
-import { DocPage, P, Points, Section } from '../../site/content';
+import { CodeBlock } from '@zerodep-dev/vue-tsx-pro-ui';
+import { DocPage, P, Section } from '../../site/content';
 import { SqlExample } from '../../site/SqlExample';
 import {
   caseExpr,
@@ -8,10 +9,10 @@ import {
   cte,
   group,
   groupAggregates,
+  groupByMonth,
   having,
   inSubquery,
-  rawFragment,
-  rawStatement,
+  ntile,
   recursive,
   rowNumber,
   salesByProduct,
@@ -20,6 +21,25 @@ import {
   union,
   window,
 } from './advanced.examples.ts';
+
+const rollup = `db.queryable(Order)
+  .groupBy((o) => ({ status: o.status }))
+  .rollup()
+  .select((g) => ({
+    status: g.key.status,         // rollup 之后键的类型可空：小计行是 null
+    isTotal: g.grouping((o) => o.status),
+    orders: g.count(),
+  }))
+  .toList();
+// PostgreSQL：GROUP BY ROLLUP (t0."status")
+// MySQL：    GROUP BY t0.\`status\` WITH ROLLUP`;
+
+const distinctOn = `// 每位作者最新的一篇：键自动排在 ORDER BY 最前面，后面接你写的排序
+db.queryable(Post)
+  .distinctOn((p) => p.authorId)
+  .orderBy((p) => p.publishedAt.desc())
+  .toList();
+// SELECT DISTINCT ON (t0."author_id") ... ORDER BY t0."author_id", t0."published_at" DESC`;
 
 export default _component(() => () => (
   <DocPage>
@@ -32,7 +52,8 @@ export default _component(() => () => (
       <SqlExample example={having} title="发过两篇以上的作者和他们的标题" />
       <P text="再复杂一点：跨订单和商品两张表，只算已付款的订单，表达式 `price * quantity` 放进聚合。" />
       <SqlExample example={salesByProduct} title="商品销量榜：卖出两件以上的" />
-      <Points items={['`rollup()`、`cube()` 按方言渲染，MySQL 是 `WITH ROLLUP`。']} />
+      <P text="`dateTrunc` 把时间截到月、周、天，按月统计就是按它分组。周从星期一开始。" />
+      <SqlExample example={groupByMonth} title="按月统计订单" />
     </Section>
     <Section id="case" title="CASE">
       <P text="`caseWhen` 是表达式，能放进 `select`、`where`、`orderBy`，也能当分组键。结果类型是各分支值类型的并集。" />
@@ -44,6 +65,8 @@ export default _component(() => () => (
       <SqlExample example={window} title="分作者：排名、总阅读量、上一篇的阅读量" />
       <P text="想按窗口函数的结果过滤，先 `asTable()` 变成派生表，外层再 `where`。这是“每组取前几名”的通用写法。" />
       <SqlExample example={topPerGroup} title="每位作者阅读量最高的一篇" />
+      <P text="`win.ntile` 把行分成几等份，算分位数、分档时用。" />
+      <SqlExample example={ntile} title="按阅读量把帖子分成三档" />
     </Section>
     <Section id="subquery" title="子查询与联合">
       <P text="查询对象可以直接当子查询用。对多的导航上的 `any`、`count` 也是子查询，写起来更短，见“导航”一章。" />
@@ -58,11 +81,11 @@ export default _component(() => () => (
       <P text="`withRecursive` 给起点和递归的一步。树形数据有更简单的 `descendantsOf`，见“对象树与树形数据”。" />
       <SqlExample example={recursive} title="递归：研发部的全部下级部门和深度" />
     </Section>
-    <Section id="native" title="原生 SQL">
-      <P text="`sql` 模板把库里有、这里没封装的写法插进表达式：列和值都能放进去，值绑定成参数，结果类型写在类型参数里。" />
-      <SqlExample example={rawFragment} title="条件里写一段 SQL" />
-      <P text="整条语句用 `db.sql`。这时写的就是库的原生语法，换数据库不会帮你改写。" />
-      <SqlExample example={rawStatement} title="一整条原生 SQL" />
+    <Section id="pg-only" title="小计、总计与每组一行">
+      <P text="`rollup`、`cube` 算小计和总计，`g.grouping` 在小计行为 1，用来区分“小计行的 NULL”和“数据本身的 NULL”。MySQL 是 `WITH ROLLUP`，MySQL 没有 `cube`；SQLite 都不支持，渲染时报错，所以这里没有做成能运行的卡片。" />
+      <CodeBlock code={rollup} lang="ts" />
+      <P text="`distinctOn` 是 PostgreSQL 的 DISTINCT ON：按键每组只留一行，留哪行由排序决定。别的库用上面的“每位作者阅读量最高的一篇”。" />
+      <CodeBlock code={distinctOn} lang="ts" />
     </Section>
   </DocPage>
 ));

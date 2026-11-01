@@ -1,8 +1,20 @@
 /** 列表页查询：filterBy、sortBy、table */
 import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
+import { CodeBlock } from '@zerodep-dev/vue-tsx-pro-ui';
 import { DocPage, Note, P, Points, Section, SimpleTable } from '../../site/content';
 import { SqlExample } from '../../site/SqlExample';
 import { filterBy, range, sortBy, table, whitelist } from './table.examples.ts';
+
+const search = `// GET /users?name=林&name-op=lml&joinedAt-1=2026-01-01&joinedAt-2=2026-02-01&joinedAt-op=rco&sort=joinedAt:desc&current=2
+const request = parseSearchRequest(query, {
+  fields: ['name', 'joinedAt'],
+  defaultSort: ['joinedAt:desc'],
+});
+
+const page = await db
+  .queryable(User)
+  .select((u) => ({ name: u.name, joinedAt: u.joinedAt }))
+  .table(request);`;
 
 export default _component(() => () => (
   <DocPage>
@@ -39,6 +51,21 @@ export default _component(() => () => (
         ]}
       />
       <Note text="这份参数格式和 vue-tsx-pro 组件库 `useTableQuery` 发出的一致，前后端可以直接对上。" />
+    </Section>
+    <Section id="search" title="另一套参数：search">
+      <P text="已有的前端按官方 search 扩展（Bean Searcher 风格）传参时，`parseSearchRequest` 把它解析成 `table` 认的请求，白名单、整天的日期区间都沿用 `table`。" />
+      <CodeBlock code={search} lang="ts" />
+      <SimpleTable
+        head={['参数', '含义']}
+        rows={[
+          ['`name=v`、`name-op=eq`', '比较方式默认 eq'],
+          ['`name=a&name=b`、`name-0`、`name-1`', '多个值，配合 `in`、`ni`'],
+          ['`name-1`、`name-2`', '区间的两端，缺一端不限'],
+          ['`sort=name:desc`', '排序，可以多个；没给时用 `defaultSort`'],
+          ['`current`、`pageSize`', '分页'],
+        ]}
+      />
+      <P text="比较方式：`eq ne gt ge lt le`、`in ni`、`lk nl`（包含、不包含）、`lml nlml`（开头）、`lmr nlmr`（结尾）、`rc ro roc rco`（闭、开、左开右闭、左闭右开区间）和对应的 `nrc nro nroc nrco`、`inn`（非空）。严格模式（默认）下不认识的字段和比较方式报错，`{ strict: false }` 时忽略。" />
     </Section>
   </DocPage>
 ));

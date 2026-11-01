@@ -79,6 +79,14 @@ export default _component(() => () => (
       <P text="要看已删除的数据用 `noInterceptor`；真的要从库里删掉用 `hard()`。" />
       <SqlExample example={seeDeleted} title="看到已删除的行" />
       <SqlExample example={hardDelete} title="物理删除" />
+      <Points
+        items={[
+          '布尔列默认 `false`、`true`，整数列默认 `0`、`1`；别的类型显式给：`col.datetime().nullable().softDelete({ active: null, deleted: () => new Date() })`。',
+          '删除人、删除时间用 `$onDelete(() => currentUser())`：逻辑删除时一并写入，物理删除不写。',
+          '只在一个导航上看已删除的：`u.roles.noInterceptor("softDelete").any()`。',
+          '`createDb({ hardDelete: "forbid" })`：没有逻辑删除列的实体 delete 要显式 `.hard()` 才执行，防止误删。',
+        ]}
+      />
     </Section>
     <Section id="version" title="乐观锁">
       <P text="`withVersion` 带上手里的版本：条件里比较版本，同时写入下一个版本。一行都没改到，说明被别人抢先了，直接抛错。" />
@@ -99,6 +107,15 @@ export default _component(() => () => (
     <Section id="interceptor" title="自己写拦截器">
       <P text="拦截器可以加条件、在写入前改值、在写入后记审计。名字登记之后，开关 `{ use, skip }` 在语句、Db、导航、join 上都能用，写错名字编译不过。" />
       <CodeBlock code={audit} lang="ts" />
+      <Points
+        items={[
+          '`afterWrite` 在 `insert`、`update`、`delete` 成功之后调用，和这条语句在同一个事务里；抛错会让写入失败、事务回滚，可以当否决用。',
+          '声明 `before` 后，update、delete 执行前按同样的条件先读一次整行，放进 `event.before`，审计要前后对比时用。多一条查询，所以只在有声明时才读。',
+          '`event.afterCommit(task)` 登记提交之后做的事；不在事务里时在这条语句之后马上做。',
+          '单条语句上用 `noInterceptor(name)`、`useInterceptor(name)`、`interceptors({ use, skip })` 开关，`db.withInterceptors` 管一段；join 的第三个参数管这张表。',
+          '内置的 `tenant`（多租户）和 `touch`（写入时补时间、操作人）也是拦截器。',
+        ]}
+      />
     </Section>
   </DocPage>
 ));

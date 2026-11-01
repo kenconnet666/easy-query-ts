@@ -48,6 +48,18 @@ export const sections: readonly NavSection[] = [
         component: () => import('../pages/guide/Practice'),
       },
       {
+        path: '/guide/config',
+        title: '创建 Db 与配置',
+        description: '`createDb` 的选项、派生的 Db、请求上下文，以及各个包的入口。',
+        component: () => import('../pages/guide/Config'),
+      },
+      {
+        path: '/guide/testing',
+        title: '测试',
+        description: 'SQLite 内存库、PGlite、断言 SQL、SQL 快照和类型测试，不用 mock Db。',
+        component: () => import('../pages/guide/Testing'),
+      },
+      {
         path: '/guide/terms',
         title: '术语',
         description: '隐式 join、对象树、聚合根、方言……文档里的词都是什么意思。',
@@ -58,6 +70,35 @@ export const sections: readonly NavSection[] = [
         title: '最佳实践与常见问题',
         description: '实体怎么设计、什么时候用什么写法，以及大家常问的问题。',
         component: () => import('../pages/guide/BestPractices'),
+      },
+      {
+        path: '/guide/java',
+        title: '与 Java 版的对应',
+        description: '从 easy-query（Java）过来：注解、方法分别对应这里的什么写法，在哪一章。',
+        component: () => import('../pages/guide/Java'),
+      },
+    ],
+  },
+  {
+    label: '模型',
+    pages: [
+      {
+        path: '/model/entity',
+        title: '实体与列',
+        description: '声明表和列：修饰器、索引、外键、值对象、品牌类型，以及从实体取类型。',
+        component: () => import('../pages/model/Entity'),
+      },
+      {
+        path: '/model/types',
+        title: '列类型',
+        description: '内置类型和它们在各库的映射；金额、日期、枚举、JSON、UUID，以及自定义类型。',
+        component: () => import('../pages/model/ColumnTypes'),
+      },
+      {
+        path: '/model/union',
+        title: '多态实体',
+        description: '几种子类型共用一张表：`entity.union`，结果类型按判别列收窄。',
+        component: () => import('../pages/model/Union'),
       },
     ],
   },
@@ -115,6 +156,12 @@ export const sections: readonly NavSection[] = [
         description: '字符串、日期、数学、JSON：写在列上，按方言渲染，类型跟着列走。',
         component: () => import('../pages/func/Functions'),
       },
+      {
+        path: '/query/raw',
+        title: '原生 SQL',
+        description: '`sql` 片段、`db.sql` 整条语句、`toSQL` 看语句、`explain`、优化器提示。',
+        component: () => import('../pages/query/Raw'),
+      },
     ],
   },
   {
@@ -145,9 +192,16 @@ export const sections: readonly NavSection[] = [
       },
       {
         path: '/write/save',
-        title: '聚合保存与事务',
-        description: '`db.save` 保存一棵对象树；事务、提交后的动作和行锁。',
+        title: '聚合保存',
+        description:
+          '`db.save` 保存一棵对象树：各种关系怎么存、移除的子项怎么办、没有主键时怎么认。',
         component: () => import('../pages/write/Save'),
+      },
+      {
+        path: '/write/transaction',
+        title: '事务与锁',
+        description: '回调式与手动事务、保存点、提交后的动作、行锁、咨询锁。',
+        component: () => import('../pages/write/Transaction'),
       },
       {
         path: '/write/validate',
@@ -191,10 +245,28 @@ export const sections: readonly NavSection[] = [
         component: () => import('../pages/scale/Runtime'),
       },
       {
+        path: '/scale/performance',
+        title: '性能',
+        description: '先看 SQL，再按症状选写法：N+1、子表统计、流式读取、批量写入和护栏。',
+        component: () => import('../pages/scale/Performance'),
+      },
+      {
+        path: '/scale/tables',
+        title: '动态表名与模块',
+        description: '换表、换 schema、跨库链接；大项目按模块组合 schema，运行时再挂载。',
+        component: () => import('../pages/scale/Tables'),
+      },
+      {
         path: '/scale/databases',
         title: '支持的数据库',
         description: '十几种数据库的方言包和驱动，一套代码部署到不同版本。',
         component: () => import('../pages/scale/Databases'),
+      },
+      {
+        path: '/scale/dialects',
+        title: '方言差异',
+        description: '能力写进类型、按版本渲染、各库的连接方式和要注意的地方。',
+        component: () => import('../pages/scale/Dialects'),
       },
     ],
   },

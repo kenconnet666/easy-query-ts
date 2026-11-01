@@ -54,7 +54,10 @@ export default _component(() => () => (
             '数学',
             '`plus`、`minus`、`times`、`div`、`abs`、`floor`、`ceil`、`round`、`truncate`、`mod`、`power`、`sqrt`、`exp`、`log`、`sign`、三角函数',
           ],
-          ['条件', '`orElse`、`nullIf`、`caseWhen`、`greatest`、`least`'],
+          [
+            '条件',
+            '`orElse`、`nullIf`、`caseWhen`、`greatest`、`least`、`compare`（比大小，-1、0、1）',
+          ],
           [
             '转换',
             "`cast('string' | 'int' | 'bigint' | 'double' | 'decimal' | 'date' | 'datetime')`",

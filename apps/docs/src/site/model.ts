@@ -8,6 +8,7 @@ import {
   defineComputed,
   defineSchema,
   entity,
+  embed,
   text,
   type Db,
 } from '@zerodep-dev/easy-query-ts';
@@ -118,6 +119,30 @@ export const Doc = entity('t_doc', {
     .$onUpdate(() => new Date('2026-11-01T08:00:00Z')),
 });
 
+/** 门店：地址是值对象，在库里展开成几列（“实体与列”一章） */
+export const Shop = entity('t_shop', {
+  id: col.bigint().primaryKey().generated(),
+  name: col.string(50),
+  address: embed({
+    city: col.string(20),
+    street: col.string(100).nullable(),
+    geo: embed({ lat: col.double(), lng: col.double() }, { prefix: 'geo_' }),
+  }),
+});
+
+/** 支付记录：几种支付方式共用一张表，kind 区分（“多态实体”一章） */
+export const Payment = entity.union('t_payment', 'kind', {
+  base: {
+    id: col.bigint().primaryKey().generated(),
+    orderId: col.bigint(),
+    amount: col.decimal(10, 2),
+  },
+  variants: {
+    card: { cardNo: col.string(19), holder: col.string(50).nullable() },
+    wechat: { openId: col.string(40) },
+  },
+});
+
 const relations = defineSchema(
   {
     Company,
@@ -134,6 +159,8 @@ const relations = defineSchema(
     Order,
     OrderItem,
     Doc,
+    Shop,
+    Payment,
   },
   {
     Company: (r) => ({
@@ -152,6 +179,8 @@ const relations = defineSchema(
     User: (r) => ({
       company: r.one('Company', { from: 'companyId', to: 'id' }),
       department: r.one('Department', { from: 'departmentId', to: 'id' }),
+      // 全是多对一的直达关系：等同于 u.department.company
+      departmentCompany: r.pathOne('Company', ['department', 'company']),
       // 一对一：资料表的主键就是用户 id
       profile: r.one('Profile', { from: 'id', to: 'userId' }),
       // 自关联：上级和直属下属
@@ -211,6 +240,7 @@ const relations = defineSchema(
     Order: (r) => ({
       user: r.one('User', { from: 'userId', to: 'id' }),
       items: r.many('OrderItem', { from: 'id', to: 'orderId' }),
+      payments: r.many('Payment', { from: 'id', to: 'orderId' }),
       products: r.manyToMany('Product', {
         through: 'OrderItem',
         throughFrom: 'orderId',
@@ -220,6 +250,9 @@ const relations = defineSchema(
     OrderItem: (r) => ({
       order: r.one('Order', { from: 'orderId', to: 'id' }),
       product: r.one('Product', { from: 'productId', to: 'id' }),
+    }),
+    Payment: (r) => ({
+      order: r.one('Order', { from: 'orderId', to: 'id' }),
     }),
   },
 );
@@ -288,5 +321,13 @@ export async function seed(db: Db<typeof schema>): Promise<void> {
   await db
     .insert(Doc)
     .values([...seedData.Doc])
+    .execute();
+  await db
+    .insert(Shop)
+    .values([...seedData.Shop])
+    .execute();
+  await db
+    .insert(Payment)
+    .values([...seedData.Payment])
     .execute();
 }

@@ -1,7 +1,7 @@
 /** 基础查询的示例：从查一行到动态条件 */
 import { and, not, or } from '@zerodep-dev/easy-query-ts';
 import { example } from '../../site/example.ts';
-import { Post, User } from '../../site/model.ts';
+import { OrderItem, Post, User } from '../../site/model.ts';
 
 export const all = example((db) =>
   db.queryable(User).limit(3).toList(),
@@ -9,6 +9,75 @@ export const all = example((db) =>
 
 export const find = example((db) =>
   db.queryable(User).find(1),
+);
+
+export const whereKey = example((db) =>
+  db
+    .queryable(User)
+    .whereKey(2)
+    .select((u) => u.name)
+    .first(),
+);
+
+export const whereKeys = example((db) =>
+  db
+    .queryable(User)
+    .whereKeys([1, 2, 3])
+    .select((u) => u.name)
+    .toList(),
+);
+
+export const compositeKey = example((db) =>
+  db
+    .queryable(OrderItem)
+    .whereKey({ orderId: 1, productId: 6 })
+    .first(),
+);
+
+export const rootAggregates = example(async (db) => {
+  const published = db
+    .queryable(Post)
+    .where((p) => p.status.eq('published'));
+
+  return {
+    total: await published.sum((p) => p.views),
+    average: await published.avg((p) => p.views),
+    top: await published.max((p) => p.views),
+    bottom: await published.min((p) => p.views),
+    authors: await published.countDistinct(
+      (p) => p.authorId,
+    ),
+  };
+});
+
+export const notInList = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.level.notIn(['lead']))
+    .select((u) => u.name)
+    .limit(3)
+    .toList(),
+);
+
+export const nullSafe = example((db) => {
+  const expected: number | null = null;
+
+  return db
+    .queryable(User)
+    .where((u) => u.age.eqNullSafe(expected))
+    .select((u) => u.name)
+    .toList();
+});
+
+export const orElse = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.id.in([5, 6]))
+    .select((u) => ({
+      name: u.name,
+      age: u.age.orElse(0),
+    }))
+    .toList(),
 );
 
 export const pickColumns = example((db) =>

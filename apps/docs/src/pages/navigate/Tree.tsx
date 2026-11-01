@@ -7,6 +7,8 @@ import {
   commentThread,
   deepTree,
   descendants,
+  fillManyRows,
+  fillOneRow,
   firstOfMany,
   limitPerParent,
   nestedView,
@@ -40,6 +42,12 @@ export default _component(() => () => (
       <P text="一个详情页要的东西：对一的导航、多对多、自关联的回复，各自几层都能放在一段 `select` 里。" />
       <SqlExample example={deepTree} title="帖子详情：作者、标签、评论和每条评论的回复" />
       <SqlExample example={orderTree} title="用户 → 订单 → 明细（带商品名）" />
+    </Section>
+    <Section id="fill" title="没声明关系时：按键填充">
+      <P text="`fillMany`、`fillOne` 不需要声明关系，按键从另一条查询填一个数组或一行。那条查询可以来自另一个 Db，也就是另一个库。主查询读完后按一批键（每批 500 个）查一次。" />
+      <SqlExample example={fillManyRows} title="fillMany：每家公司的部门" />
+      <SqlExample example={fillOneRow} title="fillOne：帖子所属的分类" />
+      <Note text="被填充的查询的 `where`、`orderBy`、`select`（含嵌套的 `toList`）照常生效，但不能带 `limit`、`offset`，那是对整批的；键为 NULL 的行填不到东西。" />
     </Section>
     <Section id="view" title="复用形状：视图">
       <P text="结果形状就是 DTO 的类型，不需要另写 VO 类。常用的形状用 `defineView` 存下来，别处直接 `select`。" />

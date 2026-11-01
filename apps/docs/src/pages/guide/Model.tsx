@@ -50,15 +50,21 @@ const tables: readonly {
   { entity: 'Order', table: 't_order', title: '订单', generatedId: true },
   { entity: 'OrderItem', table: 't_order_item', title: '订单明细', generatedId: false },
   { entity: 'Doc', table: 't_doc', title: '文档（列规则）', generatedId: true },
+  { entity: 'Shop', table: 't_shop', title: '门店（值对象）', generatedId: true },
+  { entity: 'Payment', table: 't_payment', title: '支付记录（多态）', generatedId: true },
 ];
 
-/** 单元格的文字：数组用顿号连起来，时间只留到分钟 */
+/** 单元格的文字：数组用顿号连起来，值对象写成一串，时间只留到分钟；这种支付方式没有的列是 null */
 function cellText(value: unknown): string {
+  if (value === undefined) return 'null';
   if (Array.isArray(value)) return value.join('、');
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).map(cellText).join(' ');
+  }
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
     return value.slice(0, 16).replace('T', ' ');
   }
-  return String(value);
+  return String(value as string | number | boolean | null);
 }
 
 /** 一张示例数据表 */
@@ -66,7 +72,7 @@ const DataTable = _component(
   ({ entity, table, title, generatedId }: (typeof tables)[number]) =>
     () => {
       const rows: readonly Record<string, unknown>[] = seedData[entity];
-      const columns = Object.keys(rows[0]!);
+      const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
       return (
         <Flex direction="column" gap="sm">
           <Flex gap="sm" align="baseline">
@@ -94,7 +100,7 @@ const DataTable = _component(
                     {columns.map((column) => (
                       <TableCell
                         key={column}
-                        sx={[styles.cell, row[column] === null && styles.empty]}
+                        sx={[styles.cell, (row[column] ?? null) === null && styles.empty]}
                       >
                         {cellText(row[column])}
                       </TableCell>

@@ -237,6 +237,88 @@ export const pathProducts = example((db) =>
     .toList(),
 );
 
+// ---- 取第几个、去重计数、全是多对一的直达
+
+export const nthChild = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.posts.any())
+    .select((u) => ({
+      name: u.name,
+      top: u.posts.orderBy((p) => p.views.desc()).at(0)
+        .title,
+    }))
+    .toList(),
+);
+
+export const nthInWhere = example((db) =>
+  db
+    .queryable(User)
+    .where((u) =>
+      u.posts
+        .orderBy((p) => p.views.desc())
+        .at(0)
+        .views.ge(2000),
+    )
+    .select((u) => u.name)
+    .toList(),
+);
+
+export const countDistinctNav = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.posts.any())
+    .select((u) => ({
+      name: u.name,
+      categories: u.posts.countDistinct(
+        (p) => p.categoryId,
+      ),
+    }))
+    .toList(),
+);
+
+export const pathOne = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.departmentId.isNotNull())
+    .select((u) => ({
+      name: u.name,
+      company: u.departmentCompany.name,
+    }))
+    .limit(3)
+    .toList(),
+);
+
+// ---- 按键填充
+
+export const fillManyRows = example((db) =>
+  db
+    .queryable(Company)
+    .where((c) => c.id.le(2))
+    .select((c) => ({
+      name: c.name,
+      departments: db
+        .queryable(Department)
+        .orderBy((d) => d.id)
+        .select((d) => ({ name: d.name }))
+        .fillMany((d) => d.companyId, c.id),
+    }))
+    .toList(),
+);
+
+export const fillOneRow = example((db) =>
+  db
+    .queryable(Post)
+    .where((p) => p.id.le(3))
+    .select((p) => ({
+      title: p.title,
+      category: db
+        .queryable(Category)
+        .fillOne((c) => c.id, p.categoryId),
+    }))
+    .toList(),
+);
+
 // ---- 对象树
 
 export const treeOneLevel = example((db) =>

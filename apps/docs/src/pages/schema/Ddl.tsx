@@ -36,8 +36,8 @@ export default _component(() => () => (
       <SqlExample example={createOne} title="一张新表：注释、JSON、可空列" />
       <Points
         items={[
-          '`unique()`、`index()`、`dbDefault()`、`comment()`、生成列都声明在列上。',
-          '外键、索引可以在实体的第三个参数里写组合的。',
+          '`unique()`、`dbDefault()`、`comment()`、生成列声明在列上，索引在实体的第三个参数里，外键在多对一导航上，见“实体与列”。',
+          '`createTables` 只建库里还没有的表，已有的不动；`dropTables` 删表，`tableExists` 查有没有，`introspect` 读库里的结构。',
         ]}
       />
     </Section>

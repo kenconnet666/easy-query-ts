@@ -7,6 +7,7 @@ import {
   aggregates,
   any,
   conditionalCount,
+  countDistinctNav,
   fixedCondition,
   groupJoin,
   manyToMany,
@@ -14,8 +15,11 @@ import {
   mutual,
   nestedAny,
   none,
+  nthChild,
+  nthInWhere,
   oneToOne,
   path,
+  pathOne,
   pathProducts,
   required,
   reverseManyToMany,
@@ -43,6 +47,22 @@ const relations = `defineSchema({ User, Company, Post, Tag, PostTag, Follow, ...
     user: r.one('User', { from: 'userId', to: 'id' }, { required: true }), // 必有：INNER JOIN
   }),
 });`;
+
+const composite = `Member: (r) => ({
+  notes: r.many('Note', { from: ['tenantId', 'id'], to: ['tenantId', 'memberId'] }),
+}),
+Note: (r) => ({
+  member: r.one('Member', { from: ['tenantId', 'memberId'], to: ['tenantId', 'id'] }),
+}),`;
+
+const anyCondition = `User: (r) => ({
+  // users.book_ids 存的是 '1,3,7'
+  books: r.manyOn('Book', (u, b) => b.id.inCsv(u.bookIds)),
+}),
+Dept: (r) => ({
+  // 路径前缀：/1/2/ 的下级都以它开头
+  subtree: r.manyOn('Dept', (d, child) => child.path.startsWith(d.path)),
+}),`;
 
 export default _component(() => () => (
   <DocPage>
@@ -77,6 +97,10 @@ export default _component(() => () => (
       <SqlExample example={nestedAny} title="有员工写过“架构”标签帖子的公司" />
       <SqlExample example={aggregates} title="阅读量最高的三位作者" />
       <SqlExample example={conditionalCount} title="分别数已发布和草稿" />
+      <SqlExample example={countDistinctNav} title="countDistinct：写过几个分类" />
+      <P text="`at(i)` 按排序取第几行，每一列是一条标量子查询，条件和结果里都能用；没有这一行时列为 NULL。对应 Java 版的 `element`、`firstElement`。要整行或多列时用 `first`，见“对象树与视图”。" />
+      <SqlExample example={nthChild} title="阅读量最高那篇的标题" />
+      <SqlExample example={nthInWhere} title="最高的一篇过了 2000 阅读的作者" />
       <Sub id="fixed-condition" title="带固定条件的关系" />
       <P text="`hotPosts` 声明时就带了 `views >= 1000`，用的时候不用再写。" />
       <SqlExample example={fixedCondition} title="热门帖子" />
@@ -97,6 +121,20 @@ export default _component(() => () => (
       <P text="`r.path` 沿已有的导航走到目标，之后当一个普通的对多导航用。中间自动去重：同一篇帖子不会因为经过两条路径算两次。" />
       <SqlExample example={path} title="公司的全部帖子：经员工到帖子" />
       <SqlExample example={pathProducts} title="用户买过的商品：经订单、订单明细" />
+      <P text="全程都是多对一时用 `r.pathOne`：不建桥，等同于一段段点下去，和直接写 `u.department.company` 共用同样的 JOIN。" />
+      <SqlExample example={pathOne} title="用户所在部门的公司" />
+      <Points
+        items={[
+          '导航名、终点、种类（经过一对多就必须用 `path`）在 `defineSchema` 时核对。',
+          '直达关系不能再引用直达关系，也不能写进 `save` 的 `include`。',
+        ]}
+      />
+    </Section>
+    <Section id="special" title="复合外键与任意条件的关系">
+      <P text="复合外键把 `from`、`to` 写成数组，按位置一一对应。JOIN、子查询、`toList` 的第二条查询都按整组列匹配。" />
+      <CodeBlock code={composite} lang="ts" />
+      <P text="外键不是等值关系时，比如逗号分隔的列、路径前缀，用 `r.manyOn`、`r.oneOn` 写任意条件，之后还是普通的导航。这种关系不能写进 `save` 的 `include`。" />
+      <CodeBlock code={anyCondition} lang="ts" />
     </Section>
     <Note text="导航表达不了的（把一对多展平、连没声明关系的表、自连接）用显式 join，见“查询”分组的“显式 join 与表别名”。" />
   </DocPage>

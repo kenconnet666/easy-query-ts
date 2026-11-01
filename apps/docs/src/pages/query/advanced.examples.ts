@@ -7,6 +7,7 @@ import {
 import { example } from '../../site/example.ts';
 import {
   Department,
+  Order,
   OrderItem,
   Post,
   User,
@@ -234,18 +235,28 @@ export const recursive = example(async (db) => {
     .toList();
 });
 
-export const rawFragment = example((db) =>
+export const groupByMonth = example((db) =>
   db
-    .queryable(Post)
-    .where((p) => sql<boolean>`${p.views} % 2 = 0`)
-    .select((p) => p.title)
+    .queryable(Order)
+    .groupBy((o) => ({
+      month: o.createdAt.dateTrunc('month'),
+    }))
+    .orderBy((g) => g.key.month)
+    .select((g) => ({
+      month: g.key.month,
+      orders: g.count(),
+    }))
     .toList(),
 );
 
-export const rawStatement = example(async (db) => {
-  const minViews = 2000;
-
-  return db.sql<{ title: string }>`
-    SELECT title FROM t_post WHERE views >= ${minViews} ORDER BY id
-  `;
-});
+export const ntile = example((db) =>
+  db
+    .queryable(Post)
+    .where((p) => p.status.eq('published'))
+    .select((p) => ({
+      title: p.title,
+      views: p.views,
+      tier: win.ntile(3, (w) => w.orderBy(p.views.desc())),
+    }))
+    .toList(),
+);

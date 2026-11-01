@@ -344,4 +344,28 @@ export const seedData = {
     { title: '接入指南', createdBy: '林晓' },
     { title: '发布清单', createdBy: '周航' },
   ],
+  /** 门店：地址是值对象；街道可空 */
+  Shop: [
+    {
+      name: '西湖店',
+      address: { city: '杭州', street: '文三路 90 号', geo: { lat: 30.28, lng: 120.13 } },
+    },
+    {
+      name: '滨江店',
+      address: { city: '杭州', street: null, geo: { lat: 30.21, lng: 120.21 } },
+    },
+    {
+      name: '静安店',
+      address: { city: '上海', street: '南京西路 1266 号', geo: { lat: 31.23, lng: 121.45 } },
+    },
+  ],
+  /** 支付记录：kind 区分支付方式，各方式的列不同。多行插入按写的列分组，同一种方式写在一起，主键才和这里的序号一致 */
+  Payment: [
+    { kind: 'card', orderId: 1, amount: '358.80', cardNo: '6222 0001', holder: '林晓' },
+    { kind: 'card', orderId: 3, amount: '2298.00', cardNo: '6222 0002', holder: null },
+    { kind: 'card', orderId: 8, amount: '298.00', cardNo: '6222 0003', holder: '李雷' },
+    { kind: 'wechat', orderId: 2, amount: '199.00', openId: 'wx-linxiao' },
+    { kind: 'wechat', orderId: 4, amount: '398.00', openId: 'wx-chenmo' },
+    { kind: 'wechat', orderId: 7, amount: '328.50', openId: 'wx-hanmei' },
+  ],
 } as const;

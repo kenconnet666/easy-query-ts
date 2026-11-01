@@ -1,7 +1,7 @@
 /** 最佳实践与常见问题 */
 import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
 import { CodeBlock } from '@zerodep-dev/vue-tsx-pro-ui';
-import { DocPage, P, Points, Section, Sub } from '../../site/content';
+import { DocPage, P, Points, Section, SimpleTable, Sub } from '../../site/content';
 
 const brand = `const Order = entity('t_order', {
   id: col.bigint().primaryKey().generated().brand<'OrderId'>(),
@@ -51,6 +51,26 @@ export default _component(() => () => (
           '状态流转：`where` 里带上当前状态，再加 `expectRows(1)`，比先查再改可靠。',
         ]}
       />
+    </Section>
+    <Section id="errors" title="错误怎么处理">
+      <SimpleTable
+        head={['错误', '什么时候', '怎么办']}
+        rows={[
+          ['`NotFoundError`', '`findOrThrow` 找不到', '接口层翻译成 404'],
+          ['`optimistic lock failed`', '带版本的写入没改到行', '提示刷新后重试，或重读再试一次'],
+          ['`expectRows` 给的错误', '改到的行数不对', '自己抛业务错误，事务回滚'],
+          ['`TimeoutError`', '`withTimeout` 到点', '语句已被取消，按超时处理'],
+          ['信号的 `reason`', '`withSignal` 取消', '客户端断开时通常不用处理'],
+          [
+            '渲染时的 `... is not supported by ...`',
+            '方言不支持这种写法',
+            '开发阶段就会碰到，换写法或换方言',
+          ],
+          ['`the query returned more than N rows`', '超过 `maxRows`', '加分页或改 `stream`'],
+          ['驱动的错误', '唯一约束、外键、断连', '原样抛出，按驱动的错误码判断'],
+        ]}
+      />
+      <P text="错误都原样抛给调用方，不吞错。事务里抛错就回滚；`onExecute` 的 `error` 能看到失败的语句，错误仍会照常抛出。" />
     </Section>
     <Section id="faq" title="常见问题">
       <Sub id="faq-select" title="为什么结果里的类型是 string | null？" />
