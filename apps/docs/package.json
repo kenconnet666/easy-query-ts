@@ -1,0 +1,44 @@
+{
+  "name": "@easy-query-ts/docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "文档站：用 vue-tsx-pro 组件库写的网站，代码卡片里的 SQL 在构建时从真实查询渲染",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader native",
+    "build": "vite build --configLoader native && vite build --configLoader native --ssr src/entry-server.ts --outDir dist-ssr && node build/prerender.ts",
+    "preview": "vite preview --configLoader native",
+    "test:site": "node test/site.mjs",
+    "typecheck": "tsc -p . --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "catalog:",
+    "@lucide/icons": "catalog:",
+    "@shikijs/langs": "catalog:",
+    "@sqlite.org/sqlite-wasm": "catalog:",
+    "@zerodep-dev/easy-query-ts": "workspace:*",
+    "@zerodep-dev/easy-query-ts-pg": "workspace:*",
+    "@zerodep-dev/easy-query-ts-sqlite": "workspace:*",
+    "@zerodep-dev/vue-tsx-pro-tsx": "catalog:",
+    "@zerodep-dev/vue-tsx-pro-ui": "catalog:",
+    "pinyin-pro": "catalog:",
+    "shiki": "catalog:",
+    "vue": "catalog:",
+    "vue-router": "catalog:"
+  },
+  "devDependencies": {
+    "@internationalized/date": "catalog:",
+    "@types/node": "catalog:",
+    "@zerodep-dev/easy-query-ts-clickhouse": "workspace:*",
+    "@zerodep-dev/easy-query-ts-dameng": "workspace:*",
+    "@zerodep-dev/easy-query-ts-db2": "workspace:*",
+    "@zerodep-dev/easy-query-ts-duckdb": "workspace:*",
+    "@zerodep-dev/easy-query-ts-hana": "workspace:*",
+    "@zerodep-dev/easy-query-ts-mssql": "workspace:*",
+    "@zerodep-dev/easy-query-ts-mysql": "workspace:*",
+    "@zerodep-dev/easy-query-ts-oracle": "workspace:*",
+    "playwright": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - apps/*
 
 # 依赖的安装脚本：oracledb 的 install 只检查 Thick 模式的原生模块，easy-query-ts-oracle 用 Thin 模式（纯 JS），不运行；
 # ibm_db 的 install 要下载上百 MB 的 IBM CLI 驱动，只在跑 Db2 实库测试时手动执行（pnpm --filter @zerodep-dev/easy-query-ts-db2 driver）
@@ -37,6 +38,20 @@ catalog:
   '@neondatabase/serverless': 1.2.0
   # 只在测试里：二级缓存接 Redis 的示例实现（缓存包不依赖它）
   ioredis: 6.0.0
+  # 文档站（apps/docs）：用发布到 npm 的组件库写
+  '@zerodep-dev/vue-tsx-pro-tsx': 0.4.1
+  '@zerodep-dev/vue-tsx-pro-ui': 0.4.1
+  vue: 3.5.44
+  vue-router: 5.4.0
+  vite: 8.3.4
+  '@lucide/icons': 1.59.0
+  shiki: 4.5.0
+  '@shikijs/langs': 4.5.0
+  pinyin-pro: 3.29.5
+  # 文档站在浏览器里真实运行示例的 WASM 数据库（PGlite 在上面）
+  '@sqlite.org/sqlite-wasm': 3.54.1-build1
+  # 文档站的整站检查（apps/docs/test/site.mjs）
+  playwright: 1.64.1
   # 语言与工具
   typescript: 7.1.0-beta
   '@types/node': 24.19.2
@@ -45,6 +60,12 @@ catalog:
   oxlint-tsgolint: 7.0.2004
   prettier: 3.9.10
   '@prettier/plugin-oxc': 0.2.3
+
+minimumReleaseAgeExclude:
+  - '@lucide/icons@1.59.0'
+  # 自己的包（vue-tsx-pro 仓库），发布即用
+  - '@zerodep-dev/vue-tsx-pro-tsx@0.4.1'
+  - '@zerodep-dev/vue-tsx-pro-ui@0.4.1'
 
 # 仓库内的 Node 进程（Vitest 配置、脚本）直接解析各包源码，不用先构建。
 # 配置文件要用 --configLoader native 加载（Node 自己去掉类型），默认的打包加载会绕过这个条件、去读 dist

@@ -2,6 +2,8 @@
 easy-query-ts.iml
 node_modules
 **/dist/
+# 文档站预渲染用的服务端产物：正常构建完就删
+**/dist-ssr/
 *.tsbuildinfo
 coverage/
 *.log

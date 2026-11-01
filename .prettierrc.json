@@ -6,11 +6,21 @@
   "overrides": [
     {
       "files": ["*.js", "*.jsx", "*.mjs", "*.cjs"],
-      "options": { "parser": "oxc" }
+      "options": {
+        "parser": "oxc"
+      }
     },
     {
       "files": ["*.ts", "*.tsx", "*.mts", "*.cts"],
-      "options": { "parser": "oxc-ts" }
+      "options": {
+        "parser": "oxc-ts"
+      }
+    },
+    {
+      "files": ["apps/docs/src/**/*.examples.ts"],
+      "options": {
+        "printWidth": 60
+      }
     }
   ]
 }

@@ -10,7 +10,9 @@
   },
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
-    "typecheck": "tsc -p . --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo",
+    "dev:docs": "pnpm --filter @easy-query-ts/docs dev",
+    "build:docs": "pnpm --filter @easy-query-ts/docs build",
+    "typecheck": "tsc -p . --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo && pnpm --filter @easy-query-ts/docs typecheck",
     "test": "vitest run --configLoader native",
     "test:consumer": "node tests/consumer/run.mjs",
     "check": "pnpm lint && pnpm format:check && pnpm refs:check && pnpm text:check",

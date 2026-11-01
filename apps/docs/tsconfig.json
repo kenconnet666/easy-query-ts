@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    // 仓库内的 ORM 包按源码解析
+    "customConditions": ["@easy-query-ts/source"],
+    "allowImportingTsExtensions": true,
+    "jsx": "preserve",
+    "jsxImportSource": "@zerodep-dev/vue-tsx-pro-tsx",
+    "types": ["node", "vite/client", "@zerodep-dev/vue-tsx-pro-tsx/runes"],
+    "strict": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src", "build", "vite.config.ts", "../../packages/hana/src/hdb.d.ts"]
+}
