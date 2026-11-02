@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-decimal",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "decimal.js column type for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
