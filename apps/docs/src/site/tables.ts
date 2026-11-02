@@ -11,7 +11,10 @@ export type CellKind = 'text' | 'number' | 'boolean' | 'json';
 
 /** 一列 */
 export interface TableColumn {
+  /** 库里的列名 */
   readonly name: string;
+  /** 实体上的属性路径：代码里的名字 */
+  readonly property: string;
   readonly kind: CellKind;
   readonly nullable: boolean;
   /** 主键：用它定位行，不能编辑 */
@@ -85,6 +88,20 @@ export function diffRows(current: TableData, baseline: TableData | undefined): D
     change: 'deleted',
   }));
   return [...rows, ...deleted];
+}
+
+/** “新增 1 行，修改 2 行”；没有改动时为空 */
+export function summarize(rows: readonly DiffedRow[]): string {
+  const count = (change: RowChange) => rows.filter((row) => row.change === change).length;
+  const parts = [
+    ['新增', count('inserted')],
+    ['修改', count('updated')],
+    ['删除', count('deleted')],
+  ] as const;
+  return parts
+    .filter(([, n]) => n > 0)
+    .map(([label, n]) => `${label} ${n} 行`)
+    .join('，');
 }
 
 /** 输入的值不合法时的原因 */

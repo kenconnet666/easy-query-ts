@@ -143,6 +143,7 @@ const CELL_KINDS: Readonly<Record<string, CellKind>> = {
 function columnsOf(entity: Entity): TableColumn[] {
   return Object.entries(entity.columns).map(([path, column]) => ({
     name: entity.columnNames[path]!,
+    property: path,
     kind: CELL_KINDS[column.codec.kind] ?? 'text',
     nullable: column.options.nullable,
     primaryKey: column.options.primaryKey,

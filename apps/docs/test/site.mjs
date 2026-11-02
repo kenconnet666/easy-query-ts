@@ -82,6 +82,20 @@ async function checkDataPanel(page, engine) {
   await page.getByRole('gridcell', { name: '1280', exact: true }).waitFor({ timeout: 30_000 });
 }
 
+/** “示例模型”页：同样的表格，单击改一格，重置放回 */
+async function checkModelTables(page) {
+  await page.goto(`${base}/guide/model`, { waitUntil: 'networkidle' });
+  const cell = page.getByRole('gridcell', { name: '星河科技', exact: true });
+  await cell.waitFor({ timeout: 90_000 });
+  await cell.click();
+  const input = page.locator('tbody input');
+  await input.fill('星河');
+  await input.press('Enter');
+  await page.getByText('和打开这一页时比：修改 1 行').waitFor({ timeout: 30_000 });
+  await page.getByRole('button', { name: '重置数据' }).click();
+  await cell.waitFor({ timeout: 30_000 });
+}
+
 const problems = [];
 let runs = 0;
 const browser = await chromium.launch();
@@ -112,6 +126,16 @@ try {
         if (await failed.count()) problems.push(`${current} 第 ${index + 1} 张卡片运行失败`);
         else runs++;
       }
+    }
+  }
+
+  if (pages.includes('/guide/model')) {
+    current = '示例模型的表格';
+    try {
+      await checkModelTables(page);
+      runs++;
+    } catch (error) {
+      problems.push(`${current}：${String(error).slice(0, 300)}`);
     }
   }
 

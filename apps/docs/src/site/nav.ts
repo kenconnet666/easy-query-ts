@@ -31,7 +31,7 @@ export const sections: readonly NavSection[] = [
         path: '/guide/model',
         title: '示例模型',
         description:
-          '全站示例共用的模型和数据：公司、部门、用户、帖子、评论、标签、关注、订单，关系一览和全部数据。',
+          '全站示例共用的模型和数据：公司、部门、用户、帖子、评论、标签、关注、订单，关系一览和全部数据，数据能直接改。',
         component: () => import('../pages/guide/Model'),
       },
       {

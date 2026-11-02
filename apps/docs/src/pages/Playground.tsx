@@ -23,8 +23,8 @@ import { useRoute } from 'vue-router';
 import { DataPanel } from '../site/DataPanel';
 import { dialects, type LiveEngine } from '../site/dialects';
 import type { LiveResult } from '../site/live';
+import { useLiveData } from '../site/live-data';
 import { sqlText } from '../site/sql-text';
-import { cellText, cellValue, keyOf, type DiffedRow, type TableData } from '../site/tables';
 
 const styles = css.create({
   wide: { maxWidth: '100rem' },
@@ -61,9 +61,7 @@ export default _component(() => {
   let running = _state(false);
   let failure = _state<string | undefined>(undefined);
   let live = _state.raw<LiveResult | undefined>(undefined);
-  let tables = _state.raw<readonly TableData[]>([]);
-  let baseline = _state.raw<readonly TableData[]>([]);
-  let loading = _state(false);
+  const data = useLiveData();
 
   // 卡片带过来的代码在地址的 #code= 里。放在挂载之后读：预渲染的页面没有这段
   _effect(() => {
@@ -71,40 +69,22 @@ export default _component(() => {
     if (match) code = decodeURIComponent(match[1]!);
   });
 
-  /** 换引擎时：读这个引擎现在的数据，它就是下一次比较的基线 */
-  async function open(selected: LiveEngine) {
-    loading = true;
-    tables = [];
-    try {
-      const { readTables } = await import('../site/live');
-      const data = await readTables(selected);
-      // 读的时候又换了引擎：这份数据已经不是当前的了
-      if (selected !== engine) return;
-      tables = data;
-      baseline = data;
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    } finally {
-      loading = false;
-    }
-  }
-
-  _effect(() => void open(engine));
+  _effect(() => void data.open(engine));
 
   async function run() {
     if (running) return;
     running = true;
     failure = undefined;
-    const { readTables, runSource } = await import('../site/live');
+    const { runSource } = await import('../site/live');
     try {
-      baseline = await readTables(engine);
+      await data.markBaseline();
       live = await runSource(asFunctionBody(code), engine);
     } catch (error) {
       live = undefined;
       failure = error instanceof Error ? error.message : String(error);
     } finally {
       // 失败了也重新读：报错之前的写入已经生效了
-      tables = await readTables(engine);
+      await data.refresh();
       running = false;
     }
   }
@@ -112,42 +92,7 @@ export default _component(() => {
   async function reset() {
     failure = undefined;
     live = undefined;
-    loading = true;
-    try {
-      const { resetData } = await import('../site/live');
-      tables = await resetData(engine);
-      baseline = tables;
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    } finally {
-      loading = false;
-    }
-  }
-
-  /** 改一格。失败时把库的报错留在编辑器上 */
-  async function editCell(table: TableData, row: DiffedRow, name: string, input: unknown) {
-    const column = table.columns.find((candidate) => candidate.name === name)!;
-    const value = cellValue(column, input);
-    if (cellText(value) === cellText(row.values[name])) return undefined;
-    const { readTables, updateCell } = await import('../site/live');
-    try {
-      await updateCell(engine, table.table, keyOf(table, row.values), name, value);
-      tables = await readTables(engine);
-      return undefined;
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
-    }
-  }
-
-  async function removeRow(table: TableData, row: DiffedRow) {
-    failure = undefined;
-    const { deleteRow, readTables } = await import('../site/live');
-    try {
-      await deleteRow(engine, table.table, keyOf(table, row.values));
-      tables = await readTables(engine);
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    }
+    await data.reset();
   }
 
   return () => (
@@ -171,9 +116,9 @@ export default _component(() => {
           {running && !live && <Small tone="muted">第一次要下载 WASM，稍等……</Small>}
         </Flex>
         <CodeEditor _value={code} aria-label="代码" sx={styles.editor} />
-        {failure && (
+        {(failure ?? data.failure.value) && (
           <Alert tone="danger" title="运行失败">
-            {failure}
+            {failure ?? data.failure.value}
           </Alert>
         )}
         {live && (
@@ -188,11 +133,11 @@ export default _component(() => {
           </Grid>
         )}
         <DataPanel
-          tables={tables}
-          baseline={baseline}
-          busy={running || loading}
-          onEdit={editCell}
-          onDelete={(table, row) => void removeRow(table, row)}
+          tables={data.tables.value}
+          baseline={data.baseline.value}
+          busy={running || data.loading.value}
+          onEdit={data.edit}
+          onDelete={(table, row) => void data.remove(table, row)}
           onReset={() => void reset()}
         />
       </Flex>
