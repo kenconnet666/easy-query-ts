@@ -90,8 +90,13 @@ export class MariaDbDialect extends MySqlDialect {
   }
 
   protected override functions(): Record<string, FunctionRenderer> {
-    // 没有 GROUPING()（WITH ROLLUP 能用）：删掉它，用到时报不支持
-    const { grouping: _grouping, ...functions } = super.functions();
+    // 没有 GROUPING()（WITH ROLLUP 能用）、没有 MEMBER OF（11.4）：删掉它们，用到时报不支持
+    const {
+      grouping: _grouping,
+      'mysql.member_of': _memberOf,
+      'mysql.member_of_path': _memberOfPath,
+      ...functions
+    } = super.functions();
     return {
       ...functions,
       // 'c' 区分大小写：转成二进制再匹配；'i' 用默认（不区分大小写）的排序规则

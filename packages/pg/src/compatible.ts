@@ -3,7 +3,7 @@
  * - openGauss / GaussDB：没有 IDENTITY 列（用 BIGSERIAL）、没有 ON CONFLICT（upsert 写成 ON DUPLICATE KEY UPDATE）、没有多参数的 unnest
  * - 人大金仓 KingbaseES（PG 模式初始化）：语法与 PG 一致，IDENTITY、ON CONFLICT 都有
  */
-import type { ColumnOptions, ConflictNode } from '@zerodep-dev/easy-query-ts';
+import type { ColumnOptions, ConflictNode, FunctionRenderer } from '@zerodep-dev/easy-query-ts';
 import { PostgresDialect } from './dialect.ts';
 
 export class OpenGaussDialect extends PostgresDialect {
@@ -29,6 +29,12 @@ export class OpenGaussDialect extends PostgresDialect {
   override onConflict(c: ConflictNode): string {
     if (c.update.length === 0) return ' ON DUPLICATE KEY UPDATE NOTHING';
     return ` ON DUPLICATE KEY UPDATE ${c.update.map((u) => `${this.quote(u)} = VALUES(${this.quote(u)})`).join(', ')}`;
+  }
+
+  /** 7.0 没有 websearch_to_tsquery 和 cardinality：全文检索用到时报不支持，数组长度换成 array_length（空数组是 NULL） */
+  protected override functions(): Record<string, FunctionRenderer> {
+    const { 'pg.ts_match': _match, 'pg.ts_rank': _rank, ...functions } = super.functions();
+    return { ...functions, array_length: (a) => `coalesce(array_length(${a[0]}, 1), 0)` };
   }
 
   /** 没有 attidentity：默认值取序列的就是自增列 */

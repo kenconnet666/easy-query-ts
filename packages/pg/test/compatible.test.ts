@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { createDb } from '@zerodep-dev/easy-query-ts';
+import { createDb, sql } from '@zerodep-dev/easy-query-ts';
 import { Gadget, Post, schema } from '@zerodep-dev/easy-query-ts-test/fixture';
-import { kingbase, opengauss, postgres } from '../src/index.ts';
+import { kingbase, opengauss, Pg, postgres } from '../src/index.ts';
 
 const pool = {} as never;
 
@@ -25,6 +25,28 @@ describe('PG 协议的兼容库: SQL text', () => {
     assert.match(
       gauss.createTableSql(Gadget),
       /^CREATE TABLE IF NOT EXISTS "t_gadget" \("id" BIGSERIAL NOT NULL, /,
+    );
+  });
+
+  it('openGauss：没有 websearch_to_tsquery，全文检索报不支持；数组长度不用 cardinality', () => {
+    assert.throws(
+      () =>
+        gauss
+          .queryable(Post)
+          .where((p) => Pg.fulltext(p.title).matches('a'))
+          .toSQL(),
+      /function 'pg\.ts_match' is not supported by the opengauss dialect/,
+    );
+    assert.match(
+      gauss
+        .queryable(Post)
+        .where(() =>
+          Pg.array(sql<string[]>`ARRAY['a']`)
+            .length()
+            .eq(1),
+        )
+        .toSQL().sql,
+      /coalesce\(array_length\(ARRAY\['a'\], 1\), 0\) = \$1$/,
     );
   });
 

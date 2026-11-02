@@ -301,6 +301,24 @@ describe('mysql: rendering by server version', () => {
 describe('mariadb: SQL text', () => {
   const db = createDb({ schema, adapter: mariadb({} as Pool) });
 
+  it('没有 MEMBER OF：hasMember 渲染时报不支持，JSON_CONTAINS 照常', () => {
+    assert.throws(
+      () =>
+        db
+          .queryable(User)
+          .where((u) => MySQL.json(u.attrs).hasMember('vip'))
+          .toSQL(),
+      /function 'mysql\.member_of' is not supported by the mariadb dialect/,
+    );
+    assert.match(
+      db
+        .queryable(User)
+        .where((u) => MySQL.json(u.attrs).contains('"vip"'))
+        .toSQL().sql,
+      /JSON_CONTAINS\(t0\.`attrs`, \?\)$/,
+    );
+  });
+
   it('deletes without a table alias, binds uuids as text, and uses REGEXP and LOCK IN SHARE MODE', () => {
     assert.equal(
       db

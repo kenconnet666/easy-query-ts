@@ -29,6 +29,11 @@ function config(name: string): Node {
   return { k: 'lit', sql: `'${name}'` };
 }
 
+function nonEmpty<T>(items: T[]): T[] {
+  if (items.length === 0) throw new Error('at least one key is required');
+  return items;
+}
+
 export const Pg = {
   jsonb: (column: Expr<unknown>) => ({
     /** 包含 document（JSON 文字）：{@code col::jsonb @> ?::jsonb} */
@@ -36,6 +41,10 @@ export const Pg = {
     containedBy: (document: string) => pred('pg.jsonb_contained_by', [column, document]),
     /** 顶层有这个键：{@code jsonb_exists(col::jsonb, ?)}（不用 ? 运算符，避免与占位符混淆） */
     hasKey: (key: string) => pred('pg.jsonb_exists', [column, key]),
+    /** 这些键至少有一个：{@code jsonb_exists_any(col::jsonb, ARRAY[?, …]::text[])} */
+    hasAnyKey: (...keys: string[]) => pred('pg.jsonb_exists_any', [column, ...nonEmpty(keys)]),
+    /** 这些键全都有：{@code jsonb_exists_all(col::jsonb, ARRAY[?, …]::text[])} */
+    hasAllKeys: (...keys: string[]) => pred('pg.jsonb_exists_all', [column, ...nonEmpty(keys)]),
     /** JSONPath 找得到值：{@code jsonb_path_exists(col::jsonb, ?::jsonpath)}，如 {@code '$.items[*] ? (@.qty > 2)'} */
     pathExists: (path: string) => pred('pg.jsonb_path_exists', [column, path]),
     /** JSONPath 谓词为真：{@code col::jsonb @@ ?::jsonpath}，如 {@code '$.level > 2'} */
@@ -67,6 +76,10 @@ export const pgFunctions: Record<string, FunctionRenderer> = {
   'pg.jsonb_contains': (a) => `(${a[0]})::jsonb @> (${a[1]})::jsonb`,
   'pg.jsonb_contained_by': (a) => `(${a[0]})::jsonb <@ (${a[1]})::jsonb`,
   'pg.jsonb_exists': (a) => `jsonb_exists((${a[0]})::jsonb, ${a[1]})`,
+  'pg.jsonb_exists_any': (a) =>
+    `jsonb_exists_any((${a[0]})::jsonb, ARRAY[${a.slice(1).join(', ')}]::text[])`,
+  'pg.jsonb_exists_all': (a) =>
+    `jsonb_exists_all((${a[0]})::jsonb, ARRAY[${a.slice(1).join(', ')}]::text[])`,
   'pg.jsonb_path_exists': (a) => `jsonb_path_exists((${a[0]})::jsonb, CAST(${a[1]} AS jsonpath))`,
   'pg.jsonb_path_match': (a) => `((${a[0]})::jsonb @@ CAST(${a[1]} AS jsonpath))`,
   // JSON 的更新写法（Expr.jsonSet / jsonRemove / jsonMerge / jsonAppend）：值是 JSON 文字的参数
