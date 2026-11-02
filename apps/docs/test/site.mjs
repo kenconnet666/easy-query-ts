@@ -111,6 +111,26 @@ async function checkModelTables(page) {
   await cell.waitFor({ timeout: 30_000 });
 }
 
+/** 页面上显示系统滚动条的元素：全站都该是浮层滚动条（多行输入框没法换，除外） */
+const nativeScrollbars = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('body *')]
+      .filter((element) => {
+        if (element.tagName === 'TEXTAREA') return false;
+        const style = getComputedStyle(element);
+        if (style.scrollbarWidth === 'none') return false;
+        return (
+          (/auto|scroll/.test(style.overflowY) &&
+            element.scrollHeight > element.clientHeight + 1) ||
+          (/auto|scroll/.test(style.overflowX) && element.scrollWidth > element.clientWidth + 1)
+        );
+      })
+      .map(
+        (element) =>
+          `${element.tagName.toLowerCase()} “${element.textContent?.trim().slice(0, 24)}”`,
+      ),
+  );
+
 const problems = [];
 let runs = 0;
 const browser = await chromium.launch();
@@ -130,6 +150,8 @@ try {
     for (const path of pages) {
       current = `${engine} ${path}`;
       await page.goto(`${base}${path}`, { waitUntil: 'networkidle' });
+      for (const element of await nativeScrollbars(page))
+        problems.push(`${path}：系统滚动条 ${element}`);
       const cards = page.locator('section:has(> div button:has-text("运行"))');
       const count = await cards.count();
       for (let index = 0; index < count; index++) {

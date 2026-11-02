@@ -9,6 +9,7 @@ import {
   CommandPalette,
   Container,
   IconLinkButton,
+  LinkButton,
   LoadingBar,
   NavItem,
   NavList,
@@ -60,7 +61,7 @@ export const App = _component(() => {
   // 浏览器标签上的标题（_effect 不在服务端执行：预渲染时 build/prerender.ts 直接写进 <title>）
   _effect(() => {
     const title = route.meta['title'] as string | undefined;
-    document.title = title ? `${title} · easy-query TS` : 'easy-query TS';
+    document.title = title ? `${title} · easy-query-ts` : 'easy-query-ts';
   });
 
   const neighbors = () => {
@@ -79,23 +80,34 @@ export const App = _component(() => {
         <AppShell
           brand={
             <AppShellBrand href="/" icon={DatabaseZap}>
-              easy-query TS
+              easy-query-ts
             </AppShellBrand>
           }
           header={
-            <div {...css.attrs(styles.tools)}>
-              <CommandPalette
-                items={searchItems}
-                onAction={(item) => void router.push(item.value)}
-              />
-              <ThemeSwitcher preference={preference} />
-              <IconLinkButton
-                href="https://github.com/kenconnet666/easy-query-ts"
+            <>
+              <LinkButton
+                href="https://vue-tsx-pro.zerodep.dpdns.org"
                 external
-                icon={GithubIcon}
-                aria-label="GitHub 仓库"
-              />
-            </div>
+                size="sm"
+                variant="ghost"
+                tone="neutral"
+              >
+                vue-tsx-pro
+              </LinkButton>
+              <div {...css.attrs(styles.tools)}>
+                <CommandPalette
+                  items={searchItems}
+                  onAction={(item) => void router.push(item.value)}
+                />
+                <ThemeSwitcher preference={preference} />
+                <IconLinkButton
+                  href="https://github.com/kenconnet666/easy-query-ts"
+                  external
+                  icon={GithubIcon}
+                  aria-label="GitHub 仓库"
+                />
+              </div>
+            </>
           }
           sidebar={
             <NavList aria-label="文档">

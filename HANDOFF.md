@@ -44,9 +44,11 @@ wsl -d Debian -- bash -lc 'cd /mnt/c/Users/lionheart/IdeaProjects/easy-query-ts 
 
 ## 文档站
 
+线上：https://easy-query-ts.zerodep.dpdns.org（Cloudflare Workers 静态资源，`apps/docs/wrangler.jsonc`；CI 的 `deploy-docs` 任务上传，要配 `CLOUDFLARE_API_TOKEN`）。
+
 `apps/docs`：`pnpm dev:docs`（端口 5175）。页面是 TSX，用 npm 上的组件库写；示例写在 `*.examples.ts`，由 `build/render-examples.ts` 算出各方言的 SQL 与结果，浏览器里点“运行”走 `src/site/live.ts`。
 `pnpm build:docs && pnpm --filter @easy-query-ts/docs test:site`：逐页水合，每张卡片在 PGlite、SQLite WASM 上各跑一遍。
 
 ## 下一步
 
-文档站：全文搜索与对账（ROADMAP 25.6）、部署（25.7）。
+文档站：全文搜索与对账（ROADMAP 25.6）。

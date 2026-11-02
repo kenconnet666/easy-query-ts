@@ -55,7 +55,7 @@ function page({ body, teleports, title, attrs, styles, themeBootScript }: Render
       .replace('</head>', () => `<script>${themeBootScript}</script>\n  </head>`)
       .replace(
         /<title>[^<]*<\/title>/,
-        () => `<title>${escape(title ? `${title} · easy-query TS` : 'easy-query TS')}</title>`,
+        () => `<title>${escape(title ? `${title} · easy-query-ts` : 'easy-query-ts')}</title>`,
       )
       // Teleport 到 body 的内容紧挨着 <body> 放在最前：Vue 水合时从 body 的第一个子节点开始找它（中间不能有空白文字）
       .replace(

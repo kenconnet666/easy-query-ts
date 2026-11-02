@@ -241,4 +241,4 @@ easy-query 的 TS 版。阶段编号沿用迁移前 vue-tsx-pro 的 ROADMAP，�
 - [ ] 25.5.1 站点部署（25.7）之后删掉 `docs/features/`，各包 README 改链到文档站；部署之前它们还是仓库里唯一能直接看的说明
 - [x] 25.5.2 “方言专属函数”一章：`Pg`、`MySQL`、`MsSql`、`Hana` 的完整列表和卡片（写明方言的卡片固定在它上面，PG 在 PGlite 上真跑，别的只渲染 SQL），兼容库的差别在 MariaDB、openGauss 容器上核对过；补上 Java 版有的 `Pg.jsonb().hasAnyKey / hasAllKeys`，`pglite` 入口也导出 `Pg`
 - [ ] 25.6 全文搜索：现在只搜标题与简介；脚本检查每个公开导出都有文档、与 `docs/parity-docs.md` 对账
-- [ ] 25.7 部署（需要域名）；vue-tsx-pro 文档站的 `/stack/orm/*` 换成外链
+- [x] 25.7 部署到 Cloudflare Workers 静态资源：https://easy-query-ts.zerodep.dpdns.org，CI 的 `deploy-docs` 上传

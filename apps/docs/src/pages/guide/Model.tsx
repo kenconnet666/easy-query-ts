@@ -8,6 +8,7 @@ import {
   CodeBlock,
   Flex,
   H3,
+  ScrollArea,
   Small,
   Table,
   TableBody,
@@ -25,7 +26,6 @@ import { seedData } from '../../site/seed-data';
 import { diffTable, summarize } from '../../site/tables';
 
 const styles = css.create({
-  scroll: { overflowX: 'auto' },
   cell: { whiteSpace: 'nowrap' },
   empty: { color: '_textMuted' },
   item: { minWidth: 0 },
@@ -84,7 +84,7 @@ const SeedTable = _component(
       const rows: readonly Record<string, unknown>[] = seedData[entity];
       const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
       return (
-        <div {...css.attrs(styles.scroll)}>
+        <ScrollArea axis="x">
           <Table>
             <TableHead>
               <TableRow>
@@ -110,7 +110,7 @@ const SeedTable = _component(
               ))}
             </TableBody>
           </Table>
-        </div>
+        </ScrollArea>
       );
     },
 );

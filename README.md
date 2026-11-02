@@ -1,4 +1,4 @@
-# easy-query TS 版（@zerodep-dev/easy-query-ts\*）
+# easy-query-ts 版（@zerodep-dev/easy-query-ts\*）
 
 与 Java 版 easy-query 同一套思路：实体 + 导航、lambda 里写条件、隐式 join、隐式子查询、对象树结果；结果类型全由 TS 推导，不需要代码生成。
 文档站在 `apps/docs`（`pnpm dev:docs`），每段代码都能看到各方言的 SQL、在浏览器里运行。设计与取舍见 [docs/decisions/0002-ts-design.md](docs/decisions/0002-ts-design.md)，现状与上手见 [HANDOFF.md](HANDOFF.md)。

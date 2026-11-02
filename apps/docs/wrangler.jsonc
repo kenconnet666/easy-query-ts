@@ -1,0 +1,14 @@
+{
+  // 文档站部署到 Cloudflare Workers 的静态资源：纯静态文件，访问不限量也不计费。上传由 CI 的 deploy-docs 任务做
+  "$schema": "https://www.unpkg.com/wrangler@4.156.1/config-schema.json",
+  "name": "easy-query-ts-docs",
+  "account_id": "8a86512a720965d45283b05a276608e8",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    // 没有对应文件的地址：dist/404.html（CI 从 spa.html 复制）。不用 single-page-application：它固定回 index.html，
+    // 那是预渲染的首页，拿它水合别的地址处处对不上
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "easy-query-ts.zerodep.dpdns.org", "custom_domain": true }]
+}
