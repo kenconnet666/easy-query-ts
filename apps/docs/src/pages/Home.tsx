@@ -17,7 +17,6 @@ import {
   Small,
   type IconData,
 } from '@zerodep-dev/vue-tsx-pro-ui';
-import { dialects } from '../site/dialects';
 import { SqlExample } from '../site/SqlExample';
 import { hero } from './home.examples.ts';
 
@@ -75,6 +74,26 @@ const features: { icon: IconData; title: string; text: string }[] = [
   },
 ];
 
+/** 支持的数据库：和“支持的数据库”一章一致 */
+const DATABASES = [
+  'PostgreSQL',
+  'MySQL',
+  'SQLite',
+  'MariaDB',
+  'SQL Server',
+  'Oracle',
+  '达梦',
+  '人大金仓',
+  'openGauss',
+  'Db2',
+  'SAP HANA',
+  'ClickHouse',
+  'DuckDB',
+  'Doris',
+  'TDengine',
+  'PGlite',
+];
+
 export default _component(() => () => (
   <Container size="xl" padding="none" sx={styles.wide}>
     <Flex direction="column" sx={styles.page}>
@@ -118,9 +137,9 @@ export default _component(() => () => (
           支持的数据库
         </H2>
         <Flex gap="sm" wrap>
-          {dialects.map((dialect) => (
-            <Badge key={dialect.id} size="md" tone={dialect.live ? 'accent' : 'neutral'}>
-              {dialect.label}
+          {DATABASES.map((name) => (
+            <Badge key={name} size="md" tone="accent">
+              {name}
             </Badge>
           ))}
         </Flex>

@@ -43,6 +43,7 @@ export default _component(() => () => (
     <Section id="install" title="安装">
       <P text="核心包不依赖任何驱动，按数据库再装一个方言包和它的驱动。" />
       <CodeBlock code={install} lang="bash" />
+      <P text="有金额、日期的业务系统，建议同时引入 `-decimal` 和 `-date`，见“安装哪些包”。" />
     </Section>
     <Section id="define" title="定义实体，建 Db">
       <P text="实体就是列的声明，关系写在 `defineSchema` 的第二个参数里。不需要注解、不需要生成代理类。" />

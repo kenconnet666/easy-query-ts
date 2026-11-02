@@ -28,6 +28,12 @@ export const sections: readonly NavSection[] = [
         component: () => import('../pages/guide/QuickStart'),
       },
       {
+        path: '/guide/packages',
+        title: '安装哪些包',
+        description: '最少装什么，以及建议引入的日期、精确小数、加密、缓存和命令行。',
+        component: () => import('../pages/guide/Packages'),
+      },
+      {
         path: '/guide/model',
         title: '示例模型',
         description:

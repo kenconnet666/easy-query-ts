@@ -2,7 +2,7 @@
  * 文档站的外壳：AppShell 的顶栏（站点名、搜索、主题切换、仓库链接、全屏）、左侧的站点导航、右侧的本页目录，
  * 正文是当前路由的页面，末尾是上一篇 / 下一篇。
  */
-import { DatabaseZap } from '@lucide/icons';
+import { Box, DatabaseZap } from '@lucide/icons';
 import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
 import { css } from '@zerodep-dev/vue-tsx-pro-tsx/styles';
 import {
@@ -88,6 +88,7 @@ export const App = _component(() => {
               <LinkButton
                 href="https://vue-tsx-pro.zerodep.dpdns.org"
                 external
+                icon={Box}
                 size="sm"
                 variant="ghost"
                 tone="neutral"

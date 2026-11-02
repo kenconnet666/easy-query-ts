@@ -8,7 +8,7 @@
     "directory": "./dist",
     // 没有对应文件的地址：dist/404.html（CI 从 spa.html 复制）。不用 single-page-application：它固定回 index.html，
     // 那是预渲染的首页，拿它水合别的地址处处对不上
-    "not_found_handling": "404-page"
+    "not_found_handling": "404-page",
   },
-  "routes": [{ "pattern": "easy-query-ts.zerodep.dpdns.org", "custom_domain": true }]
+  "routes": [{ "pattern": "easy-query-ts.zerodep.dpdns.org", "custom_domain": true }],
 }
