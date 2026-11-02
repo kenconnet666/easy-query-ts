@@ -49,7 +49,8 @@ const styles = css.create({
     backgroundColor: '_surfaceMuted',
   },
   title: { flexGrow: 1, minWidth: 0 },
-  select: { width: '9.5rem' },
+  // 窄卡片上和两个按钮挤一行，选项文字放不下时省略
+  select: { flexGrow: 1, flexShrink: 1, flexBasis: '7rem', minWidth: 0, maxWidth: '9.5rem' },
   panes: {
     display: 'grid',
     gridTemplateColumns: {

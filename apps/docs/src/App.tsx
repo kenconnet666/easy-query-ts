@@ -20,6 +20,7 @@ import {
 } from '@zerodep-dev/vue-tsx-pro-ui';
 import { GithubIcon } from '@zerodep-dev/vue-tsx-pro-ui/docs-kit';
 import { AppShell, AppShellBrand, ThemeSwitcher } from '@zerodep-dev/vue-tsx-pro-ui/patterns';
+import { breakpoints } from '@zerodep-dev/vue-tsx-pro-ui/tokens';
 import { RouterView, useRoute, useRouter } from 'vue-router';
 import { loadingBar } from './site/loading-bar';
 import { allPages, sectionOf, sections } from './site/nav';
@@ -40,6 +41,9 @@ const styles = css.create({
   },
   main: { paddingBlockStart: '2.5rem', paddingBlockEnd: '4rem' },
   pager: { marginBlockStart: '_xl' },
+  // 手机宽度顶栏放不下：外部链接只在顶栏或抽屉里出现一处
+  wideOnly: { display: { default: 'none', [breakpoints.md]: 'inline-flex' } },
+  narrowOnly: { display: { default: 'block', [breakpoints.md]: 'none' } },
   // 与正文同宽
   wide: { maxWidth: '100rem' },
 });
@@ -92,6 +96,7 @@ export const App = _component(() => {
                 size="sm"
                 variant="ghost"
                 tone="neutral"
+                sx={styles.wideOnly}
               >
                 vue-tsx-pro
               </LinkButton>
@@ -106,6 +111,7 @@ export const App = _component(() => {
                   external
                   icon={GithubIcon}
                   aria-label="GitHub 仓库"
+                  sx={styles.wideOnly}
                 />
               </div>
             </>
@@ -121,6 +127,18 @@ export const App = _component(() => {
                   ))}
                 </NavSection>
               ))}
+              <NavSection label="链接" sx={styles.narrowOnly}>
+                <NavItem href="https://vue-tsx-pro.zerodep.dpdns.org" target="_blank" icon={Box}>
+                  vue-tsx-pro
+                </NavItem>
+                <NavItem
+                  href="https://github.com/kenconnet666/easy-query-ts"
+                  target="_blank"
+                  icon={GithubIcon}
+                >
+                  GitHub
+                </NavItem>
+              </NavSection>
             </NavList>
           }
           aside={!isHome && headings.value.length > 0 && <TableOfContents items={headings.value} />}

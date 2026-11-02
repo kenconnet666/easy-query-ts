@@ -131,11 +131,26 @@ const nativeScrollbars = (page) =>
       ),
   );
 
+/** 手机宽度：页面不能横向滚动（调用后视口留在手机宽度） */
+async function phoneOverflow(page) {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const width = await page.evaluate(() => document.documentElement.scrollWidth);
+  return width > 375 ? [`手机宽度下页面宽 ${width}px`] : [];
+}
+
+/** 手机宽度：水合后的页面点菜单按钮，抽屉里要有导航链接 */
+async function phoneDrawerLinks(page) {
+  await page.locator('button[aria-label="打开导航"]').click();
+  await page.locator('dialog[open]').waitFor();
+  return page.locator('dialog[open] a[href]').count();
+}
+
 const problems = [];
 let runs = 0;
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 2000, height: 1100 } });
+  const desktop = { width: 2000, height: 1100 };
+  const page = await browser.newPage({ viewport: desktop });
   let current = '';
   page.on('console', (message) => {
     if (message.type() === 'error' || /hydrat/i.test(message.text()))
@@ -163,8 +178,16 @@ try {
         if (await failed.count()) problems.push(`${current} 第 ${index + 1} 张卡片运行失败`);
         else runs++;
       }
+      for (const problem of await phoneOverflow(page)) problems.push(`${path}：${problem}`);
+      await page.setViewportSize(desktop);
     }
   }
+
+  current = '手机宽度的抽屉';
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(`${base}${pages[0]}`, { waitUntil: 'networkidle' });
+  if (!(await phoneDrawerLinks(page))) problems.push('手机宽度下抽屉里没有导航链接');
+  await page.setViewportSize(desktop);
 
   if (pages.includes('/guide/model')) {
     current = '全屏';
