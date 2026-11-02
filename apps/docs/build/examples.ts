@@ -51,11 +51,14 @@ export function examples(): Plugin {
       const rendered = (await render())[key];
       if (!rendered) throw new Error(`${key} 没有渲染结果`);
       const live = `const live = () => import(${JSON.stringify(`${id}?live`)});`;
-      const exports = Object.entries(rendered).map(
-        ([name, value]) =>
-          `export const ${name} = { ...${JSON.stringify(value)}, load: () => live().then((module) => module.${name}.build) };`,
+      // 只渲染 SQL 的示例（MySQL、SQL Server、HANA）不留 load：它们的 ?live 模块要驱动，不能打进浏览器
+      const runnable = (value: unknown) => !(value as { sqlOnly?: boolean }).sqlOnly;
+      const exports = Object.entries(rendered).map(([name, value]) =>
+        runnable(value)
+          ? `export const ${name} = { ...${JSON.stringify(value)}, load: () => live().then((module) => module.${name}.build) };`
+          : `export const ${name} = ${JSON.stringify(value)};`,
       );
-      return [live, ...exports].join('\n');
+      return [...(Object.values(rendered).some(runnable) ? [live] : []), ...exports].join('\n');
     },
     handleHotUpdate({ file, server }) {
       if (!isSource(file)) return;

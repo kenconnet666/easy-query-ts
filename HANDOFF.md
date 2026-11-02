@@ -49,4 +49,4 @@ wsl -d Debian -- bash -lc 'cd /mnt/c/Users/lionheart/IdeaProjects/easy-query-ts 
 
 ## 下一步
 
-文档站：全文搜索与对账（ROADMAP 25.6）、部署（25.7）、方言专属函数的完整列表（25.5.2）。
+文档站：全文搜索与对账（ROADMAP 25.6）、部署（25.7）。

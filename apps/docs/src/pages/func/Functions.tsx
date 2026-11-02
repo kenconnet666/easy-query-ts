@@ -65,7 +65,7 @@ export default _component(() => () => (
       />
     </Section>
     <Section id="dialect" title="方言专属函数">
-      <P text="库的专有能力从方言入口包装列：用到别的方言上，渲染时报出是哪个函数、哪个方言不支持。库里有、这里没有的函数用 `sql` 模板写片段，见“原生 SQL”。" />
+      <P text="库的专有能力从方言入口包装列：用到别的方言上，渲染时报出是哪个函数、哪个方言不支持。完整列表见“方言专属函数”一章；库里有、这里没有的函数用 `sql` 模板写片段，见“原生 SQL”。" />
       <CodeBlock code={dialect} lang="ts" />
     </Section>
   </DocPage>

@@ -9,6 +9,7 @@ import { _component } from '@zerodep-dev/vue-tsx-pro-tsx';
 import { css } from '@zerodep-dev/vue-tsx-pro-tsx/styles';
 import {
   Alert,
+  Badge,
   Button,
   CodeBlock,
   LinkButton,
@@ -100,14 +101,15 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
   let failure = _state<string | undefined>(undefined);
   let live = _state.raw<LiveResult | undefined>(undefined);
 
-  const dialect = _derived(dialectInfo(currentDialect.value));
+  // 写明了方言的示例固定显示它，不跟着全站切换
+  const dialect = _derived(dialectInfo(example.only ?? currentDialect.value));
   // 上次运行的结果属于当时的引擎：换了方言就回到这个方言渲染的内容
   const shown = _derived(live && live.engine === dialect.live ? live : undefined);
   const rendering = _derived(example.dialects[dialect.id]);
 
   async function run() {
     const engine = dialect.live;
-    if (!engine || running) return;
+    if (!engine || running || !example.load) return;
     running = true;
     failure = undefined;
     try {
@@ -129,35 +131,43 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
           <Text weight="semibold" sx={styles.title}>
             {title}
           </Text>
-          <Select
-            size="sm"
-            aria-label="SQL 方言"
-            items={dialectOptions}
-            _value={currentDialect.value}
-            sx={styles.select}
-          />
-          <LinkButton
-            size="sm"
-            variant="soft"
-            icon={PencilLine}
-            href={`/guide/playground#code=${encodeURIComponent(example.js)}`}
-          >
-            改一改
-          </LinkButton>
-          <Button
-            size="sm"
-            icon={Play}
-            loading={running}
-            disabled={!dialect.live}
-            title={
-              dialect.live
-                ? `在浏览器里的 ${dialect.label} 上运行`
-                : `${dialect.label} 没有 WASM 版本，这里只显示 SQL；切到 PostgreSQL 或 SQLite 可以运行`
-            }
-            onClick={() => void run()}
-          >
-            运行
-          </Button>
+          {example.only ? (
+            <Badge>{dialect.label} 专属</Badge>
+          ) : (
+            <Select
+              size="sm"
+              aria-label="SQL 方言"
+              items={dialectOptions}
+              _value={currentDialect.value}
+              sx={styles.select}
+            />
+          )}
+          {example.load && (
+            <LinkButton
+              size="sm"
+              variant="soft"
+              icon={PencilLine}
+              href={`/guide/playground#code=${encodeURIComponent(example.js)}`}
+            >
+              改一改
+            </LinkButton>
+          )}
+          {example.load && (
+            <Button
+              size="sm"
+              icon={Play}
+              loading={running}
+              disabled={!dialect.live}
+              title={
+                dialect.live
+                  ? `在浏览器里的 ${dialect.label} 上运行`
+                  : `${dialect.label} 没有 WASM 版本，这里只显示 SQL；切到 PostgreSQL 或 SQLite 可以运行`
+              }
+              onClick={() => void run()}
+            >
+              运行
+            </Button>
+          )}
         </div>
         <div {...css.attrs(styles.panes)}>
           <div {...css.attrs(styles.pane)}>
@@ -192,6 +202,10 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
               <Alert tone="danger" title="运行失败" sx={styles.error}>
                 {failure}
               </Alert>
+            ) : !example.load ? (
+              <Small tone="muted" sx={styles.empty}>
+                文档站不连 {dialect.label}，这里只看 SQL
+              </Small>
             ) : result === undefined ? (
               <Small tone="muted" sx={styles.empty}>
                 这段代码不返回数据
@@ -215,7 +229,9 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
               ? '正在加载浏览器里的数据库，第一次要下载 WASM……'
               : dialect.live
                 ? '构建时渲染的 SQL 与示例数据上的结果；点“运行”在浏览器里真实执行'
-                : `${dialect.label} 的 SQL 由同一段代码在构建时渲染，不连库；结果来自示例数据`}
+                : example.load
+                  ? `${dialect.label} 的 SQL 由同一段代码在构建时渲染，不连库；结果来自示例数据`
+                  : `${dialect.label} 的 SQL 由这段代码在构建时渲染，不连库`}
         </Small>
       </section>
     );

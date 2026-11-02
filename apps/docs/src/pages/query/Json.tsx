@@ -51,7 +51,7 @@ db.queryable(Order).where((o) =>
 const dialect = `// 方言专属的写法从入口取
 Pg.jsonb(u.attrs).hasKey('vip');
 Pg.jsonb(o.payload).pathExists('$.items[*] ? (@.qty > 2)');
-MySQL.json(u.attrs).contains({ vip: true });`;
+MySQL.json(u.attrs).contains('{"vip":true}');`;
 
 export default _component(() => () => (
   <DocPage>
@@ -101,6 +101,7 @@ export default _component(() => () => (
       />
     </Section>
     <Section id="dialect" title="方言专属">
+      <P text="这些入口的完整列表和能运行的例子见“方言专属函数”一章。" />
       <CodeBlock code={dialect} lang="ts" />
       <Note text="能用普通列就用普通列：JSON 适合结构不固定、不常按它查询的数据。要按它查询时，记得按方言建索引：PG 的 GIN，MySQL 的多值索引，见“实体与列”。Db2 没有 `jsonLength`，渲染时报错，不会悄悄变成别的语义。" />
     </Section>

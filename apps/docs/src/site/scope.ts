@@ -3,11 +3,12 @@
  * 构建时 build/render-examples.ts 也用它跑一遍每段示例，少了名字当场报错，不用等到有人点“改一改”。
  */
 import * as easyQuery from '@zerodep-dev/easy-query-ts';
+import { Pg } from '@zerodep-dev/easy-query-ts-pg/pglite';
 import type { ExampleBuild } from './example.ts';
 import * as model from './model.ts';
 
-/** 模型在后：实体 Order 盖过核心的同名类 */
-const SCOPE: Readonly<Record<string, unknown>> = { ...easyQuery, ...model };
+/** 模型在后：实体 Order 盖过核心的同名类。方言入口只放能在浏览器里跑的 Pg */
+const SCOPE: Readonly<Record<string, unknown>> = { ...easyQuery, ...model, Pg };
 
 const AsyncFunction = (async () => {}).constructor as new (
   ...args: string[]

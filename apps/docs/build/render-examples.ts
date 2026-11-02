@@ -2,7 +2,8 @@
  * 算出所有示例的 SQL 与结果，JSON 写到标准输出（build/examples.ts 调用）。在 Node 里跑，才能加载各方言包。
  *
  * 每段示例先在 SQLite 上真的执行，记下驱动返回的每个结果；别的方言不连库，用“回放驱动”把这些结果按顺序还给它：
- * 代码照常走完，toList 带出的第二条查询、事务里的几条写入都发得出来，记下的就是这种方言实际会发的语句
+ * 代码照常走完，toList 带出的第二条查询、事务里的几条写入都发得出来，记下的就是这种方言实际会发的语句。
+ * 写明了方言的示例（见 src/site/example.ts）：'pg' 改在 PGlite 上执行；别的只渲染 SQL，没有结果
  *
  * 用法：node --conditions=@easy-query-ts/source build/render-examples.ts
  */
@@ -11,8 +12,10 @@ import { stripTypeScriptTypes } from 'node:module';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
 import {
   createDb,
+  type Adapter,
   type Dialect,
   type Driver,
   type ExecuteResult,
@@ -27,8 +30,14 @@ import { MsSqlDialect } from '@zerodep-dev/easy-query-ts-mssql';
 import { MariaDbDialect, MySqlDialect } from '@zerodep-dev/easy-query-ts-mysql';
 import { OracleDialect } from '@zerodep-dev/easy-query-ts-oracle';
 import { PostgresDialect } from '@zerodep-dev/easy-query-ts-pg';
+import { pglite } from '@zerodep-dev/easy-query-ts-pg/pglite';
 import { sqlite, SqliteDialect } from '@zerodep-dev/easy-query-ts-sqlite';
-import type { DialectRendering, ExampleBuild, RenderedStatement } from '../src/site/example.ts';
+import type {
+  DialectOnly,
+  DialectRendering,
+  ExampleBuild,
+  RenderedStatement,
+} from '../src/site/example.ts';
 import {
   formatParams,
   formatResult,
@@ -99,12 +108,60 @@ function replaying(log: Recording, statements: RenderedStatement[]): Driver {
   return { ...session, transaction: (work) => work(session) };
 }
 
-async function render(build: ExampleBuild) {
-  const database = new DatabaseSync(':memory:');
-  const real = sqlite(database);
-  const setup = createDb({ schema, adapter: real });
+/** 一个放好示例数据的真实数据库，close 之后不再用 */
+interface SeededDatabase {
+  readonly adapter: Adapter;
+  close(): void;
+}
+
+async function seedInto(adapter: Adapter): Promise<void> {
+  const setup = createDb({ schema, adapter });
+  await setup.dropTables().catch(() => undefined);
   await setup.createTables();
   await seed(setup);
+}
+
+async function seededSqlite(): Promise<SeededDatabase> {
+  const database = new DatabaseSync(':memory:');
+  const adapter = sqlite(database);
+  await seedInto(adapter);
+  return { adapter, close: () => database.close() };
+}
+
+/** PGlite 启动要一两秒：全部 'pg' 示例共用一个，每次重建表 */
+let sharedPglite: Adapter | undefined;
+
+async function seededPglite(): Promise<SeededDatabase> {
+  sharedPglite ??= pglite(new PGlite());
+  await seedInto(sharedPglite);
+  return { adapter: sharedPglite, close: () => undefined };
+}
+
+/** 这段示例真的在哪儿执行：写明了 'pg' 的在 PGlite 上，其余在 SQLite 上 */
+const seededFor = (only: DialectOnly | undefined) =>
+  only === 'pg' ? seededPglite() : seededSqlite();
+
+/** 只渲染 SQL 的示例：这个方言没有能在构建时跑的版本 */
+const isSqlOnly = (only: DialectOnly | undefined) => only !== undefined && only !== 'pg';
+
+async function renderSqlOnly(build: ExampleBuild, only: DialectOnly) {
+  const statements: RenderedStatement[] = [];
+  const log: Recording = { queries: [], executes: [] };
+  const returned = await build(
+    createDb({
+      schema,
+      interceptors,
+      adapter: { dialect: DIALECTS[only]!, driver: replaying(log, statements) },
+    }),
+  );
+  const shown = generatedStatements(statements.length, returned) ?? statements;
+  return { sqlOnly: true, only, dialects: { [only]: { statements: shown } } };
+}
+
+async function render(build: ExampleBuild, only: DialectOnly | undefined) {
+  if (only && isSqlOnly(only)) return renderSqlOnly(build, only);
+  const database = await seededFor(only);
+  const real = database.adapter;
   const log: Recording = { queries: [], executes: [] };
   const value = await build(
     createDb({ schema, interceptors, adapter: { ...real, driver: recording(real.driver, log) } }),
@@ -132,17 +189,17 @@ async function render(build: ExampleBuild) {
     }
   }
   const generated = generatedStatements(log.queries.length + log.executes.length, value);
-  return { dialects, result: generated ? undefined : formatResult(value) };
+  return {
+    ...(only ? { only } : {}),
+    dialects,
+    result: generated ? undefined : formatResult(value),
+  };
 }
 
 /** 按演练场的方式跑一遍：示例用了 scope.ts 里没有的名字时，“改一改”带过去就跑不起来 */
-async function runInPlayground(js: string): Promise<void> {
-  const database = new DatabaseSync(':memory:');
-  const adapter = sqlite(database);
-  const setup = createDb({ schema, adapter });
-  await setup.createTables();
-  await seed(setup);
-  await compileSource(js)(createDb({ schema, interceptors, adapter }));
+async function runInPlayground(js: string, only: DialectOnly | undefined): Promise<void> {
+  const database = await seededFor(only);
+  await compileSource(js)(createDb({ schema, interceptors, adapter: database.adapter }));
   database.close();
 }
 
@@ -162,7 +219,9 @@ function bodies(source: string): Map<string, string> {
   const result = new Map<string, string>();
   const parts = source.split(/^(?=export const \w+ = example\()/m);
   for (const part of parts) {
-    const head = /^export const (\w+) = example\(\s*(async\s*)?\(_?db\)\s*=>\s*/.exec(part);
+    const head = /^export const (\w+) = example\(\s*(?:'\w+',\s*)?(async\s*)?\(_?db\)\s*=>\s*/.exec(
+      part,
+    );
     if (!head) continue;
     // 示例到顶格的 ); 为止，后面可能跟着不属于它的代码
     const end = part.search(/^\);/m);
@@ -191,7 +250,7 @@ for (const path of globSync('src/**/*.examples.ts', { cwd: root })) {
   const key = path.split('\\').join('/');
   const module = (await import(pathToFileURL(file).href)) as Record<
     string,
-    { build: ExampleBuild }
+    { build: ExampleBuild; only?: DialectOnly }
   >;
   const code = bodies(readFileSync(file, 'utf8'));
   output[key] = {};
@@ -204,10 +263,11 @@ for (const path of globSync('src/**/*.examples.ts', { cwd: root })) {
       );
     try {
       const js = toJs(text);
-      output[key][name] = { code: text, js, ...(await render(value.build)) };
-      await runInPlayground(js);
+      output[key][name] = { code: text, js, ...(await render(value.build, value.only)) };
+      if (!isSqlOnly(value.only)) await runInPlayground(js, value.only);
     } catch (error) {
-      throw new Error(`${key} 的示例 ${name} 在 SQLite 上执行失败：${String(error)}`, {
+      const engine = value.only ?? 'SQLite';
+      throw new Error(`${key} 的示例 ${name} 在 ${engine} 上执行失败：${String(error)}`, {
         cause: error,
       });
     }

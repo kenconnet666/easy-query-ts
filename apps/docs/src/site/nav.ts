@@ -205,7 +205,7 @@ export const sections: readonly NavSection[] = [
       {
         path: '/func',
         title: '函数总览',
-        description: '写在列上，按方言渲染，类型跟着列走。全部函数和方言专属的写法。',
+        description: '写在列上，按方言渲染，类型跟着列走。全部函数一览。',
         component: () => import('../pages/func/Functions'),
       },
       {
@@ -231,6 +231,13 @@ export const sections: readonly NavSection[] = [
         title: '空值与条件',
         description: '`orElse`、`nullIf`、`caseWhen`、`compare`、`cast`。',
         component: () => import('../pages/func/Conditional'),
+      },
+      {
+        path: '/func/dialect',
+        title: '方言专属函数',
+        description:
+          '`Pg`、`MySQL`、`MsSql`、`Hana` 四个入口的完整列表，别的库怎么办，自己怎么加。',
+        component: () => import('../pages/func/Dialect'),
       },
     ],
   },
