@@ -8,30 +8,29 @@ import { css } from '@zerodep-dev/vue-tsx-pro-tsx/styles';
 import {
   DataTable,
   IconButton,
-  isCellEditable,
+  ValueChange,
   type DataTableColumn,
+  type RowChanges,
   type RowTone,
 } from '@zerodep-dev/vue-tsx-pro-ui';
 import {
-  cellChanged,
   cellError,
   cellText,
-  diffRows,
+  diffTable,
   type DiffedRow,
-  type RowChange,
   type TableColumn,
   type TableData,
 } from './tables';
 
 const styles = css.create({
   table: { maxHeight: '40rem' },
-  editable: { cursor: 'text' },
-  old: { textDecorationLine: 'line-through', opacity: 0.65, marginInlineEnd: '_xs' },
+  // 改过的格不折行：表格的行高一样
+  change: { flexWrap: 'nowrap' },
   gone: { textDecorationLine: 'line-through' },
   null: { opacity: 0.5, fontStyle: 'italic' },
 });
 
-const TONES: Readonly<Record<RowChange, RowTone>> = {
+const TONES: Readonly<Record<keyof RowChanges, RowTone>> = {
   inserted: 'success',
   updated: 'warning',
   deleted: 'danger',
@@ -39,12 +38,12 @@ const TONES: Readonly<Record<RowChange, RowTone>> = {
 
 /** 一列的值：排序和编辑器的初始值。数字列按数字排 */
 function editValue(column: TableColumn, row: DiffedRow): string | number | null {
-  const text = cellText(row.values[column.name]);
+  const text = cellText(row.row[column.name]);
   return column.kind === 'number' && text !== null ? Number(text) : text;
 }
 
 function renderCell(column: TableColumn, row: DiffedRow) {
-  const text = cellText(row.values[column.name]);
+  const text = cellText(row.row[column.name]);
   const shown =
     text === null ? (
       <span {...css.attrs(styles.null)}>NULL</span>
@@ -53,21 +52,14 @@ function renderCell(column: TableColumn, row: DiffedRow) {
     ) : (
       text
     );
-  if (!cellChanged(row, column.name)) return shown;
-  const previous = cellText(row.previous?.[column.name]) ?? 'NULL';
+  if (!row.changedFields?.includes(column.name)) return shown;
   return (
-    <span title={`之前是 ${previous}`}>
-      <span {...css.attrs(styles.old)}>{previous}</span>
-      {shown}
-    </span>
+    <ValueChange
+      before={cellText(row.before?.[column.name]) ?? 'NULL'}
+      after={shown}
+      sx={styles.change}
+    />
   );
-}
-
-/** 单击进入行内编辑：DataTable 只认双击，开始编辑的方法也没有公开，所以转发成双击。点在编辑器里时不转发 */
-function editOnClick(event: MouseEvent) {
-  const cell = event.currentTarget as HTMLElement;
-  if ((event.target as HTMLElement).closest('input, textarea, select, button')) return;
-  cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
 }
 
 /** LiveTable 的属性 */
@@ -89,7 +81,7 @@ export interface LiveTableProps {
 /** 一张能改的表 */
 export const LiveTable = _component(
   ({ table, baseline, busy, propertyHeaders = false, onEdit, onDelete }: LiveTableProps) => {
-    const rows = _derived(diffRows(table, baseline));
+    const rows = _derived(diffTable(table, baseline));
 
     const columns = _derived.by((): DataTableColumn<DiffedRow>[] => [
       ...table.columns.map((column): DataTableColumn<DiffedRow> => ({
@@ -106,8 +98,8 @@ export const LiveTable = _component(
       })),
       {
         key: '__delete',
-        header: '',
-        width: 56,
+        header: '操作',
+        width: 72,
         sticky: 'end',
         cell: (row) =>
           row.change === 'deleted' ? null : (
@@ -132,10 +124,8 @@ export const LiveTable = _component(
         getKey={(row) => row.key}
         rowTone={(row) => (row.change ? TONES[row.change] : undefined)}
         onCellChange={(row, key, value) => onEdit(table, row, key, value)}
+        editTrigger="click"
         propsRoot={{ sx: styles.table }}
-        propsCell={(row, column) =>
-          isCellEditable(column, row) ? { sx: styles.editable, onClick: editOnClick } : {}
-        }
       />
     );
   },

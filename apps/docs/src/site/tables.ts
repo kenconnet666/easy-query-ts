@@ -2,6 +2,7 @@
  * 演练场的数据面板：库里的表和行，以及和基线（上次运行前的样子）比出来的改动。
  * 行是库里的原始值，不经过列的 codec：加密列看到的是密文，逻辑删除的行也在。这个文件不依赖 ORM
  */
+import { diffRows, type RowChanges, type RowDiff } from '@zerodep-dev/vue-tsx-pro-ui';
 
 /** 一行：库里的列名 → 原始值 */
 export type RawRow = Readonly<Record<string, unknown>>;
@@ -31,17 +32,8 @@ export interface TableData {
   readonly error?: string;
 }
 
-/** 这一行和基线比怎么了 */
-export type RowChange = 'inserted' | 'updated' | 'deleted';
-
 /** 显示用的一行：删除了的行也留着，标出来 */
-export interface DiffedRow {
-  readonly key: string;
-  readonly values: RawRow;
-  readonly change?: RowChange;
-  /** 修改了的行在基线里的样子 */
-  readonly previous?: RawRow;
-}
+export type DiffedRow = RowDiff<RawRow>;
 
 /** 单元格的文字；NULL 是 null */
 export function cellText(value: unknown): string | null {
@@ -61,38 +53,14 @@ export function keyOf(table: TableData, row: RawRow): RawRow {
   return Object.fromEntries(key.map((name) => [name, row[name]]));
 }
 
-/** 这一列的值变了 */
-export function cellChanged(row: DiffedRow, column: string): boolean {
-  return (
-    row.change === 'updated' && cellText(row.previous?.[column]) !== cellText(row.values[column])
-  );
-}
-
-/** 现在的行，每行标上和基线比的改动；删除了的行排在最后 */
-export function diffRows(current: TableData, baseline: TableData | undefined): DiffedRow[] {
-  const before = new Map((baseline?.rows ?? []).map((row) => [rowKey(current, row), row]));
-  const rows = current.rows.map((values): DiffedRow => {
-    const key = rowKey(current, values);
-    const previous = before.get(key);
-    before.delete(key);
-    if (!baseline) return { key, values };
-    if (!previous) return { key, values, change: 'inserted' };
-    const same = current.columns.every(
-      (column) => cellText(previous[column.name]) === cellText(values[column.name]),
-    );
-    return same ? { key, values } : { key, values, change: 'updated', previous };
-  });
-  const deleted = [...before].map(([key, values]): DiffedRow => ({
-    key,
-    values,
-    change: 'deleted',
-  }));
-  return [...rows, ...deleted];
+/** 现在的行，每行标上和基线比的改动；删除了的行排在最后。没有基线时都算没变 */
+export function diffTable(current: TableData, baseline: TableData | undefined): DiffedRow[] {
+  return diffRows(baseline?.rows ?? current.rows, current.rows, (row) => rowKey(current, row));
 }
 
 /** “新增 1 行，修改 2 行”；没有改动时为空 */
 export function summarize(rows: readonly DiffedRow[]): string {
-  const count = (change: RowChange) => rows.filter((row) => row.change === change).length;
+  const count = (change: keyof RowChanges) => rows.filter((row) => row.change === change).length;
   const parts = [
     ['新增', count('inserted')],
     ['修改', count('updated')],

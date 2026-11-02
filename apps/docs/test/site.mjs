@@ -82,6 +82,21 @@ async function checkDataPanel(page, engine) {
   await page.getByRole('gridcell', { name: '1280', exact: true }).waitFor({ timeout: 30_000 });
 }
 
+/** 右上角的全屏：真实点击能进浏览器全屏，顶栏和左侧菜单不显示；退出后都回来 */
+async function checkFullscreen(page) {
+  await page.goto(`${base}/guide/model`, { waitUntil: 'networkidle' });
+  const header = page.locator('header').first();
+  await page.getByRole('button', { name: '全屏', exact: true }).click();
+  await page.getByRole('button', { name: '退出全屏' }).waitFor({ timeout: 10_000 });
+  await page.waitForFunction(() => !!document.fullscreenElement, null, { timeout: 10_000 });
+  if (await header.isVisible()) throw new Error('全屏时顶栏还在');
+  if (await page.getByRole('navigation', { name: '文档' }).isVisible())
+    throw new Error('全屏时左侧菜单还在');
+  await page.getByRole('button', { name: '退出全屏' }).click();
+  await header.waitFor({ state: 'visible', timeout: 10_000 });
+  await page.waitForFunction(() => !document.fullscreenElement, null, { timeout: 10_000 });
+}
+
 /** “示例模型”页：同样的表格，单击改一格，重置放回 */
 async function checkModelTables(page) {
   await page.goto(`${base}/guide/model`, { waitUntil: 'networkidle' });
@@ -130,6 +145,13 @@ try {
   }
 
   if (pages.includes('/guide/model')) {
+    current = '全屏';
+    try {
+      await checkFullscreen(page);
+      runs++;
+    } catch (error) {
+      problems.push(`${current}：${String(error).slice(0, 300)}`);
+    }
     current = '示例模型的表格';
     try {
       await checkModelTables(page);

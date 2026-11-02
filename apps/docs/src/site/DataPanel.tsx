@@ -16,7 +16,7 @@ import {
   Tabs,
 } from '@zerodep-dev/vue-tsx-pro-ui';
 import { LiveTable } from './LiveTable';
-import { diffRows, summarize, type DiffedRow, type TableData } from './tables';
+import { diffTable, summarize, type DiffedRow, type TableData } from './tables';
 
 const styles = css.create({
   panel: { gap: '_md', minWidth: 0 },
@@ -52,7 +52,7 @@ export const DataPanel = _component(
 
     const before = (table: TableData) => baseline.find((item) => item.table === table.table);
     const diffs = _derived(
-      new Map(tables.map((table) => [table.table, diffRows(table, before(table))])),
+      new Map(tables.map((table) => [table.table, diffTable(table, before(table))])),
     );
     const current = _derived(tables.find((table) => table.table === active) ?? tables[0]);
     const changed = _derived(summarize([...diffs.values()].flat()));

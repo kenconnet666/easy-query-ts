@@ -22,7 +22,7 @@ import { currentDialect, dialectInfo } from '../../site/dialects';
 import { useLiveData } from '../../site/live-data';
 import { LiveTable } from '../../site/LiveTable';
 import { seedData } from '../../site/seed-data';
-import { diffRows, summarize } from '../../site/tables';
+import { diffTable, summarize } from '../../site/tables';
 
 const styles = css.create({
   scroll: { overflowX: 'auto' },
@@ -123,7 +123,7 @@ export default _component(() => {
   const liveOf = (table: string) => data.tables.value.find((item) => item.table === table);
   const baselineOf = (table: string) => data.baseline.value.find((item) => item.table === table);
   const changed = _derived(
-    summarize(data.tables.value.flatMap((table) => diffRows(table, baselineOf(table.table)))),
+    summarize(data.tables.value.flatMap((table) => diffTable(table, baselineOf(table.table)))),
   );
 
   return () => (

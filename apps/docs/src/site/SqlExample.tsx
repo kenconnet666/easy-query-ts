@@ -68,8 +68,8 @@ const styles = css.create({
     borderBlockStartStyle: 'solid',
     borderBlockStartColor: '_borderMuted',
   },
-  // 三栏共用卡片的外框，代码块自己不再画框；撑满这一栏，标题栏对齐
-  code: { flexGrow: 1, borderWidth: 0, borderRadius: 0, backgroundColor: 'transparent' },
+  // 撑满这一栏，标题栏对齐
+  code: { flexGrow: 1 },
   empty: { padding: '_lg' },
   error: { margin: '_md' },
   footer: {
@@ -175,6 +175,7 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
               code={example.code}
               lang="ts"
               title="TypeScript"
+              flush
               propsRoot={{ sx: styles.code }}
             />
           </div>
@@ -193,6 +194,7 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
                 lang="sql"
                 wrap
                 title={`SQL · ${dialect.label}`}
+                flush
                 propsRoot={{ sx: styles.code }}
               />
             )}
@@ -217,6 +219,7 @@ export const SqlExample = _component(({ example, title }: SqlExampleProps) => {
                 wrap
                 title="结果"
                 maxLines={24}
+                flush
                 propsRoot={{ sx: styles.code }}
               />
             )}

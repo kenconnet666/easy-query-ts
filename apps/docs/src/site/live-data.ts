@@ -63,10 +63,10 @@ export function useLiveData() {
   async function edit(table: TableData, row: DiffedRow, name: string, input: unknown) {
     const column = table.columns.find((candidate) => candidate.name === name)!;
     const value = cellValue(column, input);
-    if (cellText(value) === cellText(row.values[name])) return undefined;
+    if (cellText(value) === cellText(row.row[name])) return undefined;
     const { updateCell } = await live();
     try {
-      await updateCell(engine!, table.table, keyOf(table, row.values), name, value);
+      await updateCell(engine!, table.table, keyOf(table, row.row), name, value);
       await refresh();
       return undefined;
     } catch (error) {
@@ -79,7 +79,7 @@ export function useLiveData() {
     failure.value = undefined;
     const { deleteRow } = await live();
     try {
-      await deleteRow(engine!, table.table, keyOf(table, row.values));
+      await deleteRow(engine!, table.table, keyOf(table, row.row));
       await refresh();
     } catch (error) {
       failure.value = message(error);
