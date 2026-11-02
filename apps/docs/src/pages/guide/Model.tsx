@@ -7,7 +7,6 @@ import {
   Button,
   CodeBlock,
   Flex,
-  Grid,
   H3,
   Small,
   Table,
@@ -190,7 +189,7 @@ export default _component(() => {
             {data.failure.value}
           </Alert>
         )}
-        <Grid minItemWidth="34rem" gap="xl">
+        <Flex direction="column" gap="xl">
           {tables.map(({ entity, table, title, generatedId }) => {
             const live = liveOf(table);
             return (
@@ -218,7 +217,7 @@ export default _component(() => {
               </Flex>
             );
           })}
-        </Grid>
+        </Flex>
       </Section>
     </DocPage>
   );
