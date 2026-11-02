@@ -238,6 +238,10 @@ function joinOne(
   const target = scope.schema.entities[rel.target]!;
   const alias = scope.nextAlias();
   const ref = makeRef(scope, rel.target, alias, parentNullable || rel.nullable);
+  if (rel.ofMany) {
+    scope.joins.push(pickedRowJoin(parent, rel, alias));
+    return ref;
+  }
   // 复合外键：每对列一个等式，用 AND 连起来；任意条件的关系（oneOn）用它的条件
   const custom = rel.on ? condNode(rel.on(parent as never, ref as never)) : undefined;
   if (rel.on && !custom) throw new Error(`relation ${info.key}.${prop} needs a condition`);
@@ -261,6 +265,74 @@ function joinOne(
     on: extra.length === 0 ? on : { k: 'and', items: [on, ...extra] },
   });
   return ref;
+}
+
+/**
+ * oneOfMany 的 JOIN：把目标表按关联列分区编号，只连每个父行的第 1 条。ON 里不放子查询（Oracle、Db2、分析型库不支持），
+ * 导航的固定条件、拦截器都在编号之前过滤。排序后面补上主键，顺序相同的行每次取到同一条
+ */
+function pickedRowJoin(parent: AnyRef, rel: One, alias: string) {
+  const { navigation, orderBy } = rel.ofMany!;
+  const nav = (parent as unknown as Record<string, ManyRef<AnySchema, string>>)[navigation]!;
+  const toggles = rel.interceptors ? [...nav.toggles, rel.interceptors] : nav.toggles;
+  const scope = nav.scope.child(toggles);
+  const target = scope.schema.entities[rel.target]!;
+  const root = scope.root(rel.target);
+  const rootAlias = root[REF].alias;
+  const link = linkColumns(scope, nav.relation, root);
+  const where = scope.filters(root);
+  for (const filter of rel.where ? [...nav.filters, rel.where] : nav.filters) {
+    const condition = condNode(filter(root));
+    if (condition) where.push(condition);
+  }
+  const order = orderNodes(orderBy(root as never));
+  // 已经按某个主键列排序时不再补它：SQL Server 不许同一列在 ORDER BY 里出现两次
+  const ordered = new Set(order.map((o) => (o.e.k === 'col' ? o.e.name : undefined)));
+  const tieBreak = orderNodes(target.primaryKey.map((c) => refColumn(root, c))).filter(
+    (o) => !(o.e.k === 'col' && ordered.has(o.e.name)),
+  );
+  const rowNumber: Node = {
+    k: 'over',
+    fn: { k: 'lit', sql: 'ROW_NUMBER()' },
+    partition: link,
+    order: [...order, ...tieBreak],
+    frame: undefined,
+  };
+  const sub: SelectNode = {
+    from: scope.tableRef(target, rootAlias),
+    joins: scope.joins,
+    where,
+    groupBy: [],
+    having: [],
+    orderBy: [],
+    columns: [
+      ...Object.values(target.columnNames).map((name) => ({
+        e: { k: 'col', alias: rootAlias, name } as Node,
+        as: name,
+      })),
+      ...link.map((e, i) => ({ e, as: `eq_key${i}` })),
+      { e: rowNumber, as: 'eq_rn' },
+    ],
+    distinct: false,
+    limit: undefined,
+    offset: undefined,
+    forUpdate: false,
+  };
+  const on = [
+    ...nav.relation.from.map((c, i): Node => ({
+      k: 'op',
+      op: '=',
+      l: columnNode(scope, parent[REF], c),
+      r: { k: 'col', alias, name: `eq_key${i}` },
+    })),
+    {
+      k: 'op',
+      op: '=',
+      l: { k: 'col', alias, name: 'eq_rn' },
+      r: { k: 'lit', sql: '1' },
+    } as Node,
+  ];
+  return { table: '', alias, sub, kind: 'left' as const, on: allOf(on) };
 }
 
 /** 多个条件用 AND 连起来；只有一个时原样返回 */

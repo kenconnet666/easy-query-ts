@@ -19,6 +19,9 @@ import {
   reverseOne,
   selfManager,
   toOne,
+  oneOfMany,
+  oneOfManyRow,
+  oneOfManyWhere,
 } from './navigate.examples.ts';
 
 export default _component(() => () => (
@@ -46,6 +49,13 @@ export default _component(() => () => (
       <P text="一对一和多对一写法一样，区别只在外键在哪边。" />
       <SqlExample example={oneToOne} title="从用户到资料" />
       <SqlExample example={reverseOne} title="从资料反过来到用户，再到公司" />
+    </Section>
+    <Section id="one-of-many" title="一对多里取一条">
+      <P text="`latestPost`、`topPost` 声明时是 `r.oneOfMany`，用起来就是对一：点列、放条件、排序都只 join 一次，不把父行乘出好几倍。SQL 是给目标表按关联列开窗编号，再 LEFT JOIN 编号为 1 的那条。" />
+      <SqlExample example={oneOfMany} title="每个作者最新的和阅读最高的帖子" />
+      <SqlExample example={oneOfManyWhere} title="条件和排序里用" />
+      <SqlExample example={oneOfManyRow} title="取整行" />
+      <Note text="开窗要给整张目标表编号（固定条件先过滤）。目标表很大、只查少数几行时，`u.posts.orderBy(...).at(0)` 的相关子查询走索引更快。TDengine 不支持这种 JOIN。" />
     </Section>
     <Section id="multi-level" title="连续点好几层">
       <P text="每一层一个 JOIN，别名由框架管。" />

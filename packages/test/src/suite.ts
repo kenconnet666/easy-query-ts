@@ -1510,7 +1510,7 @@ export function liveSuite(
       );
       await assert.rejects(
         () => db.save(User, { id: 1, bigPosts: [] } as never, { include: { bigPosts: true } }),
-        /path \/ on relation/,
+        /path \/ on \/ oneOfMany relation/,
       );
       // 什么都没改
       assert.equal(await db.queryable(Post).count(), 4);
@@ -3162,6 +3162,33 @@ export function liveSuite(
             .toSQL(),
         /only applies to toList/,
       );
+    });
+
+    it('oneOfMany: a to-many navigation picks one row and reads like a to-one', async () => {
+      const { db } = await seeded();
+      const rows = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .select((u) => ({ name: u.name, latest: u.latestPost.title }))
+        .toList();
+      assert.deepEqual(rows, [
+        { name: 'alice', latest: 'sql 100%' },
+        { name: 'bob', latest: 'hello' },
+        { name: 'carol', latest: null },
+      ]);
+      const names = await db
+        .queryable(User)
+        .where((u) => u.latestPost.title.eq('hello'))
+        .select((u) => u.name)
+        .toList();
+      assert.deepEqual(names, ['bob']);
+      const included = await db
+        .queryable(User)
+        .orderBy((u) => u.id)
+        .include((u) => ({ latestPost: u.latestPost }))
+        .toList();
+      assert.equal(included[0]!.latestPost?.title, 'sql 100%');
+      assert.equal(included[2]!.latestPost, null);
     });
 
     it('uses a subquery in in(...) and as a scalar', async () => {

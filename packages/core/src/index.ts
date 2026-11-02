@@ -69,6 +69,7 @@ export type {
   RelationFilter,
   RelationOn,
   RelationOptions,
+  RelationOrder,
   WithComputed,
 } from './relations.ts';
 export type {

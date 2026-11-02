@@ -264,6 +264,9 @@ const relations = defineSchema(
       products: r.path('Product', ['orders', 'products']),
       // 固定条件的一对多：只算阅读量过千的帖子
       hotPosts: r.many('Post', { from: 'id', to: 'authorId' }, { where: (p) => p.views.ge(1000) }),
+      // 一对多里取一条当一对一：最新的帖子、阅读量最高的帖子
+      latestPost: r.oneOfMany('Post', 'posts', { orderBy: (p) => p.id.desc() }),
+      topPost: r.oneOfMany('Post', 'posts', { orderBy: (p) => p.views.desc() }),
     }),
     Profile: (r) => ({
       // 资料一定属于某个用户。写了 required 才是 INNER JOIN，结果类型不可空；不写都是 LEFT JOIN

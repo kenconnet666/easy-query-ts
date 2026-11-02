@@ -151,6 +151,7 @@ export const schema = defineSchema(
     User: (r) => ({
       company: r.one('Company', { from: 'companyId', to: 'id' }),
       posts: r.many('Post', { from: 'id', to: 'userId' }),
+      latestPost: r.oneOfMany('Post', 'posts', { orderBy: (p) => p.id.desc() }),
       roles: r.manyToMany('Role', {
         through: 'UserRole',
         throughFrom: 'userId',

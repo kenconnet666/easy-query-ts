@@ -59,6 +59,18 @@ Dept: (r) => ({
   subtree: r.manyOn('Dept', (d, child) => child.path.startsWith(d.path)),
 }),`;
 
+const oneOfMany = `User: (r) => ({
+  posts: r.many('Post', { from: 'id', to: 'authorId' }),
+  // 最新的帖子、阅读量最高的帖子
+  latestPost: r.oneOfMany('Post', 'posts', { orderBy: (p) => p.id.desc() }),
+  topPost: r.oneOfMany('Post', 'posts', { orderBy: (p) => p.views.desc() }),
+  // where 在取之前过滤：最新的已发布帖子
+  latestPublished: r.oneOfMany('Post', 'posts', {
+    orderBy: (p) => p.id.desc(),
+    where: (p) => p.status.eq('published'),
+  }),
+}),`;
+
 const fk = `shelf: r.one('Shelf', { from: 'shelfId', to: 'id' }, {
   foreignKey: { onDelete: 'cascade' }, // 建表时加外键，名字默认 fk_表_列
 }),`;
@@ -72,6 +84,7 @@ export default _component(() => () => (
         head={['写法', '关系', '查询时']}
         rows={[
           ['`r.one`', '多对一、一对一', '点下去，隐式 JOIN，见“对一”'],
+          ['`r.oneOfMany`', '一对多里取一条：最新的、最贵的', '和 `r.one` 一样，见下'],
           ['`r.many`', '一对多', '`any`、`count`、`toList`，见“对多”'],
           ['`r.manyToMany`', '多对多，经中间表', '和一对多一样，见“多对多”'],
           ['`r.path`、`r.pathOne`', '沿已有的导航走', '和对多、对一一样，见“直达关系”'],
@@ -87,6 +100,18 @@ export default _component(() => () => (
     </Section>
     <Section id="fixed" title="固定条件">
       <P text="关系的第三个参数 `where` 给导航带上固定条件，用的时候不用再写。常用来声明“已发布的帖子”“有效的订单”这类子集。见“对多”里的 `hotPosts`。" />
+    </Section>
+    <Section id="one-of-many" title="一对多里取一条">
+      <P text="一个人有多本书，常常只关心最新的一本或最贵的一本。`r.oneOfMany` 在已有的对多导航上按 `orderBy` 取第一条，之后和 `r.one` 一样点列、放条件、排序、`include`，结果可空。查询写法见“对一”。" />
+      <CodeBlock code={oneOfMany} lang="ts" />
+      <Points
+        items={[
+          '第二个参数是本实体上已有的一对多、多对多或直达关系，它的固定条件和拦截器照常生效。',
+          '`where` 在取之前过滤。写在查询的条件里是取完再筛，结果不一样。',
+          '排序相同时按目标的主键定下唯一的一条，每次查询结果一致。',
+          '不能写进 `save` 的 `include`：它是从数据里算出来的，不是一个外键。',
+        ]}
+      />
     </Section>
     <Section id="many-to-many" title="多对多">
       <P text="中间表也是 schema 里的一个实体，常常是复合主键。`throughFrom`、`throughTo` 是中间表上的列；`from`、`to` 是两边被引用的列，省略时用各自的主键。拦截器（租户、逻辑删除）也作用在中间表上。" />

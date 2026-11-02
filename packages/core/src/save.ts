@@ -311,10 +311,10 @@ export class AggregateSaver {
         throw new Error(`save: '${name}' is not a navigation of ${this.entity(key).name}`);
       if (
         (rel.kind === 'many' && (rel.hops || rel.on)) ||
-        (rel.kind === 'one' && (rel.path || rel.on))
+        (rel.kind === 'one' && (rel.path || rel.on || rel.ofMany))
       )
         throw new Error(
-          `save: '${name}' of ${this.entity(key).name} is a path / on relation and cannot be saved`,
+          `save: '${name}' of ${this.entity(key).name} is a path / on / oneOfMany relation and cannot be saved`,
         );
       return [name, rel, option === true ? {} : option];
     });

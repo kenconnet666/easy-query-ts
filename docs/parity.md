@@ -43,24 +43,24 @@ TS 版的状态按 `packages/core/src` 的实现核过。"写法不同"指能力
 
 ## 导航、DTO / VO、对象树
 
-| Java                                                        | TS                                                                             | 状态 | 说明                                                   |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------ | ---- | ------------------------------------------------------ |
-| `@Navigate`（一对一、多对一、一对多、多对多）、复合键       | `r.one` / `r.many` / `r.manyToMany`，`from` / `to` 可以是列元组                | ✓    |                                                        |
-| 隐式 join（`u.company().name()`）                           | `u.company.name`                                                               | ✓    |                                                        |
-| 隐式子查询（`any` / `none` / `count` / `sum` …）            | `u.posts.any(…)` 等                                                            | ✓    |                                                        |
-| 隐式分区（每组取第一条）                                    | `u.posts.orderBy(…).first(…)`、`limit(n).toList(…)`                            | ✓    |                                                        |
-| 导航上写固定条件（`extraFilter`）                           | `r.many('Post', …, { where: (p) => … })`                                       | ✓    |                                                        |
-| `@Navigate(directMapping)`（跨几段导航的直达关系）          | `r.path('Menu', ['roles', 'menus'])`、`r.pathOne('City', ['company', 'city'])` | ✓    | 经几条路径到达同一目标只算一次；导航名与终点定义时核对 |
-| `include` / `includes`（带出导航，可嵌套）                  | `include(u => ({ posts: u.posts.toList() }))`，嵌套在 `toList` 里继续选        | ✓    |                                                        |
-| `selectAutoInclude(DTO.class)`（按 DTO 的结构自动带出导航） | `select(View)`：`defineView` 声明列与导航，类型自动推出                        | ≈    | 不用写 DTO 类与注解；视图可以嵌套、复用                |
-| `@NavigateFlat`（把导航上的列平铺进 DTO）                   | 在形状里直接写 `company: u.company.name`                                       | ≈    |                                                        |
-| VO 映射（`select(VO.class)`，同名属性对应）                 | `select(u => ({ … }))` 或 `defineView`；结果类型由形状推出                     | ≈    |                                                        |
-| 对象树（一对多多层带出）                                    | 形状里嵌套 `toList`，一次查询拼成对象树                                        | ✓    |                                                        |
-| 对象树的 VO（树上每层都是投影）                             | 嵌套视图：`posts: u.posts.toList(PostCard)`                                    | ✓    |                                                        |
-| `toTreeList`（自关联的表拼成树）                            | `toTree({ id, parent })`                                                       | ✓    |                                                        |
-| `asTreeCTE`（递归取子树 / 祖先）                            | `db.descendantsOf(...)` / `db.ancestorsOf(...)`                                | ✓    | 递归 CTE；HANA 没有 WITH RECURSIVE                     |
-| `fillOne` / `fillMany`（填充不是导航的关联）                | `query.fillMany((l) => l.orderNo, o.no)` / `fillOne(...)`，放在 select 里      | ✓    | 被填充的查询可以来自另一个 Db（另一个库）              |
-| `subQueryToGroupJoin`（每行一个子查询改成分组 join）        | `u.posts.groupJoin().count()` / `.sum(…)`                                      | ✓    | 同一个导航上的几个聚合共用一个分组 join                |
+| Java                                                        | TS                                                                              | 状态 | 说明                                                   |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------- | ---- | ------------------------------------------------------ |
+| `@Navigate`（一对一、多对一、一对多、多对多）、复合键       | `r.one` / `r.many` / `r.manyToMany`，`from` / `to` 可以是列元组                 | ✓    |                                                        |
+| 隐式 join（`u.company().name()`）                           | `u.company.name`                                                                | ✓    |                                                        |
+| 隐式子查询（`any` / `none` / `count` / `sum` …）            | `u.posts.any(…)` 等                                                             | ✓    |                                                        |
+| 隐式分区（每组取第一条）                                    | `u.posts.orderBy(…).first(…)`、`limit(n).toList(…)`、声明成关系的 `r.oneOfMany` | ✓    |                                                        |
+| 导航上写固定条件（`extraFilter`）                           | `r.many('Post', …, { where: (p) => … })`                                        | ✓    |                                                        |
+| `@Navigate(directMapping)`（跨几段导航的直达关系）          | `r.path('Menu', ['roles', 'menus'])`、`r.pathOne('City', ['company', 'city'])`  | ✓    | 经几条路径到达同一目标只算一次；导航名与终点定义时核对 |
+| `include` / `includes`（带出导航，可嵌套）                  | `include(u => ({ posts: u.posts.toList() }))`，嵌套在 `toList` 里继续选         | ✓    |                                                        |
+| `selectAutoInclude(DTO.class)`（按 DTO 的结构自动带出导航） | `select(View)`：`defineView` 声明列与导航，类型自动推出                         | ≈    | 不用写 DTO 类与注解；视图可以嵌套、复用                |
+| `@NavigateFlat`（把导航上的列平铺进 DTO）                   | 在形状里直接写 `company: u.company.name`                                        | ≈    |                                                        |
+| VO 映射（`select(VO.class)`，同名属性对应）                 | `select(u => ({ … }))` 或 `defineView`；结果类型由形状推出                      | ≈    |                                                        |
+| 对象树（一对多多层带出）                                    | 形状里嵌套 `toList`，一次查询拼成对象树                                         | ✓    |                                                        |
+| 对象树的 VO（树上每层都是投影）                             | 嵌套视图：`posts: u.posts.toList(PostCard)`                                     | ✓    |                                                        |
+| `toTreeList`（自关联的表拼成树）                            | `toTree({ id, parent })`                                                        | ✓    |                                                        |
+| `asTreeCTE`（递归取子树 / 祖先）                            | `db.descendantsOf(...)` / `db.ancestorsOf(...)`                                 | ✓    | 递归 CTE；HANA 没有 WITH RECURSIVE                     |
+| `fillOne` / `fillMany`（填充不是导航的关联）                | `query.fillMany((l) => l.orderNo, o.no)` / `fillOne(...)`，放在 select 里       | ✓    | 被填充的查询可以来自另一个 Db（另一个库）              |
+| `subQueryToGroupJoin`（每行一个子查询改成分组 join）        | `u.posts.groupJoin().count()` / `.sum(…)`                                       | ✓    | 同一个导航上的几个聚合共用一个分组 join                |
 
 ## 列与写入
 

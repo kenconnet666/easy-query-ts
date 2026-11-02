@@ -13,13 +13,24 @@
  * ```
  * 复合外键把 from / to 写成列的数组：`{ from: ['tenantId', 'userId'], to: ['tenantId', 'id'] }`，两边个数必须相同。
  */
-import type { Cond, Expr } from './expr.ts';
+import type { Cond, Expr, OrderItem } from './expr.ts';
 import type { InterceptorToggle } from './interceptor.ts';
 import type { ColumnRefs, Ref } from './ref.ts';
 import type { BrandOf, Column, Embedded, Entity } from './schema.ts';
 
 /** 关系上固定的条件（对应 Java 版导航的 extraFilter）：拿到目标表各列的表达式，返回条件；每次用到这个导航都带上 */
 export type RelationFilter<E extends Entity = Entity> = (target: ColumnRefs<E['fields']>) => Cond;
+
+/** 一对多里取一条时的排序：拿到目标表各列的表达式 */
+export type RelationOrder<E extends Entity = Entity> = (
+  target: ColumnRefs<E['fields']>,
+) => OrderItem | readonly OrderItem[];
+
+/** oneOfMany：从哪个对多导航里、按什么顺序取第一条 */
+export interface OfMany {
+  readonly navigation: string;
+  readonly orderBy: RelationOrder;
+}
 
 /** 多对一 / 一对一：from 是本表的列，to 是目标表的列（按位置一一对应）。N 为 true 时目标可能不存在，导航出来的列都可空 */
 export interface One<T extends string = string, N extends boolean = boolean> {
@@ -40,6 +51,8 @@ export interface One<T extends string = string, N extends boolean = boolean> {
   readonly interceptors?: InterceptorToggle;
   /** oneOn / manyOn 的本表（条件要拿本表的列） */
   readonly source?: string;
+  /** 对多导航里取一条的关系（oneOfMany）：where 是取之前的过滤，不是 JOIN 的条件 */
+  readonly ofMany?: OfMany;
   /** 建表时在 from 列上加外键约束，引用目标的 to 列 */
   readonly foreignKey?: ForeignKey;
 }
@@ -224,6 +237,20 @@ export interface RelationBuilder<E extends Record<string, Entity>, S extends key
     target: T,
     on: RelationOn<E[S], E[T]>,
     options?: RelationOptions<E[T]>,
+  ): One<T, true>;
+  /**
+   * 对多导航里按顺序取一条，当一对一用：最新的帖子、最贵的订单。navigation 是本实体上已有的一对多 / 多对多 / 直达关系，
+   * 它的固定条件照常生效；options.where 在取之前过滤（“最新的已发布帖子”）；排序相同时按目标的主键定下唯一的一条。
+   * 渲染成 LEFT JOIN 一张用 ROW_NUMBER 编号的派生表，结果可空，不能保存。
+   * ```ts
+   * latestPost: r.oneOfMany('Post', 'posts', { orderBy: (p) => p.createdAt.desc() }),
+   * ```
+   * 之后和 r.one 一样用：`u.latestPost.title`、`include((u) => ({ latestPost: u.latestPost }))`
+   */
+  oneOfMany<T extends keyof E & string>(
+    target: T,
+    navigation: string,
+    options: RelationOptions<E[T]> & { orderBy: RelationOrder<E[T]> },
   ): One<T, true>;
 }
 
@@ -455,6 +482,7 @@ function attachRelations(
       if (base[key] && name in base[key])
         throw new Error(`relation ${key}.${name}: ${key} already has a navigation named '${name}'`);
       const relation = rel.path ? resolvePath(lookup, key, name, rel) : rel;
+      if (relation.kind === 'one' && relation.ofMany) checkOfMany(lookup, key, name, relation);
       check(entities, key, name, relation);
       result[key]![name] = relation;
     }
@@ -504,6 +532,23 @@ function resolvePath(
   };
 }
 
+/** oneOfMany：导航要存在、是对多、终点就是目标 */
+function checkOfMany(
+  relations: Record<string, Record<string, Relation>>,
+  key: string,
+  name: string,
+  rel: One,
+): void {
+  const where = `relation ${key}.${name}`;
+  const navigation = rel.ofMany!.navigation;
+  const many = relations[key]?.[navigation];
+  if (!many) throw new Error(`${where}: ${key} has no navigation '${navigation}'`);
+  if (many.kind !== 'many')
+    throw new Error(`${where}: '${navigation}' is not a to-many navigation`);
+  if (many.target !== rel.target)
+    throw new Error(`${where}: '${navigation}' leads to ${many.target}, not ${rel.target}`);
+}
+
 /** 定义时就把写错的列名、个数对不上的复合外键报出来，而不是等到第一次查询 */
 function check(entities: Record<string, Entity>, key: string, name: string, rel: Relation): void {
   const where = `relation ${key}.${name}`;
@@ -512,7 +557,7 @@ function check(entities: Record<string, Entity>, key: string, name: string, rel:
   if (!target) throw new Error(`${where}: unknown entity '${rel.target}'`);
   if (name in source.columns) throw new Error(`${where} has the same name as a column`);
   // 直达关系的各段在定义它们的地方已经核对过；任意条件的关系没有关联列要核对
-  if (rel.path || rel.on) return;
+  if (rel.path || rel.on || (rel.kind === 'one' && rel.ofMany)) return;
   const columns = (entity: Entity, entityKey: string, names: readonly string[], what: string) => {
     if (names.length === 0) throw new Error(`${where}: ${what} must name at least one column`);
     for (const c of names)
@@ -618,6 +663,17 @@ function builderFor<E extends Record<string, Entity>>(
         nullable: true,
         on: on as RelationOn,
         source,
+        ...where(options),
+      } as never;
+    },
+    oneOfMany(target, navigation, options) {
+      return {
+        kind: 'one',
+        target,
+        from: [],
+        to: [],
+        nullable: true,
+        ofMany: { navigation, orderBy: options.orderBy as RelationOrder },
         ...where(options),
       } as never;
     },

@@ -144,6 +144,11 @@ export default _component(() => {
               '`r.one(..., { required: true })`，INNER JOIN，结果不可空',
             ],
             ['一对一', '用户的资料：`u.profile`', '`r.one(...)`，对方的主键就是外键'],
+            [
+              '一对一（一对多取一条）',
+              '最新的帖子 `u.latestPost`、阅读最高的帖子 `u.topPost`',
+              '`r.oneOfMany(..., { orderBy })`',
+            ],
             ['一对多', '用户的帖子：`u.posts`', '`r.many(...)`'],
             ['一对多（带条件）', '用户的热门帖子：`u.hotPosts`', '`r.many(..., { where })`'],
             ['多对多', '帖子的标签：`p.tags`', '`r.manyToMany(...)`，经 `PostTag`'],

@@ -13,6 +13,48 @@ import {
   User,
 } from '../../site/model.ts';
 
+// ---- 一对多里取一条
+
+export const oneOfMany = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.posts.any())
+    .orderBy((u) => u.id)
+    .select((u) => ({
+      name: u.name,
+      latest: u.latestPost.title,
+      top: u.topPost.title,
+      topViews: u.topPost.views,
+    }))
+    .limit(5)
+    .toList(),
+);
+
+export const oneOfManyWhere = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.topPost.views.ge(2000))
+    .orderBy((u) => u.topPost.views.desc())
+    .select((u) => ({
+      name: u.name,
+      top: u.topPost.title,
+      views: u.topPost.views,
+    }))
+    .toList(),
+);
+
+export const oneOfManyRow = example((db) =>
+  db
+    .queryable(User)
+    .where((u) => u.id.le(2))
+    .orderBy((u) => u.id)
+    .select((u) => ({
+      name: u.name,
+      latestPost: u.latestPost,
+    }))
+    .toList(),
+);
+
 // ---- 对一
 
 export const toOne = example((db) =>
