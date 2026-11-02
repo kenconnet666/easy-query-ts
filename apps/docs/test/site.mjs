@@ -43,6 +43,45 @@ await new Promise((resolve, reject) => {
   server.on('exit', (code) => reject(new Error(`预览服务器退出了（${code}）`)));
 });
 
+/** 演练场：运行之后标出改动，单击单元格行内编辑（数字、布尔），删行，重置放回示例数据 */
+async function checkDataPanel(page, engine) {
+  const code = 'await db.update(Post).set({ views: 1 }).where((p) => p.id.eq(1)).execute();';
+  await page.goto(`${base}/guide/playground#code=${encodeURIComponent(code)}`, {
+    waitUntil: 'networkidle',
+  });
+  await page.getByRole('combobox', { name: '数据库' }).click();
+  await page.getByRole('option', { name: engine }).click();
+  const tab = (name) => page.getByRole('tab', { name, exact: false });
+  const seen = (text) => page.getByText(text).first().waitFor({ timeout: 30_000 });
+  const editCell = async (cell, value) => {
+    await cell.click();
+    const input = page.locator('tbody input');
+    await input.fill(value);
+    await input.press('Enter');
+  };
+
+  await tab('t_company').waitFor({ timeout: 90_000 });
+  await seen('和上次运行前比没有改动');
+  await page.getByRole('button', { name: '运行', exact: true }).click();
+  await seen('和上次运行前比：修改 1 行');
+
+  await tab('t_post').first().click();
+  await editCell(page.getByRole('gridcell', { name: '860', exact: true }), '861');
+  await seen('和上次运行前比：修改 2 行');
+  await page.getByRole('button', { name: '删除这一行' }).last().click();
+  await seen('和上次运行前比：修改 2 行，删除 1 行');
+
+  await tab('t_doc').click();
+  const deleted = engine === 'SQLite' ? '0' : 'false';
+  await editCell(page.getByRole('gridcell', { name: deleted, exact: true }).first(), 'true');
+  await seen('和上次运行前比：修改 3 行，删除 1 行');
+
+  await page.getByRole('button', { name: '重置数据' }).click();
+  await seen('和上次运行前比没有改动');
+  await tab('t_post').first().click();
+  await page.getByRole('gridcell', { name: '1280', exact: true }).waitFor({ timeout: 30_000 });
+}
+
 const problems = [];
 let runs = 0;
 const browser = await chromium.launch();
@@ -72,6 +111,18 @@ try {
         await done.or(failed).first().waitFor({ timeout: 90_000 });
         if (await failed.count()) problems.push(`${current} 第 ${index + 1} 张卡片运行失败`);
         else runs++;
+      }
+    }
+  }
+
+  if (pages.includes('/guide/playground')) {
+    for (const engine of ['PostgreSQL', 'SQLite']) {
+      current = `演练场的数据面板 ${engine}`;
+      try {
+        await checkDataPanel(page, engine);
+        runs++;
+      } catch (error) {
+        problems.push(`${current}：${String(error).slice(0, 300)}`);
       }
     }
   }

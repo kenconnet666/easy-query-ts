@@ -38,7 +38,7 @@ export const sections: readonly NavSection[] = [
         path: '/guide/playground',
         title: '演练场',
         description:
-          '自己改代码，在浏览器里的 PostgreSQL、SQLite 上运行。卡片右上角的“改一改”把示例带到这里。',
+          '自己改代码，在浏览器里的 PostgreSQL、SQLite 上运行，看表里的数据怎么变，也能直接改。卡片右上角的“改一改”把示例带到这里。',
         component: () => import('../pages/Playground'),
       },
       {
