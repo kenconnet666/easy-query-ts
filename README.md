@@ -1,7 +1,7 @@
 # easy-query-ts 版（@zerodep-dev/easy-query-ts\*）
 
 与 Java 版 easy-query 同一套思路：实体 + 导航、lambda 里写条件、隐式 join、隐式子查询、对象树结果；结果类型全由 TS 推导，不需要代码生成。
-文档站：https://easy-query-ts.zerodep.dpdns.org（源码在 `apps/docs`，`pnpm dev:docs`），每段代码都能看到各方言的 SQL、在浏览器里运行。设计与取舍见 [docs/decisions/0002-ts-design.md](docs/decisions/0002-ts-design.md)，现状与上手见 [HANDOFF.md](HANDOFF.md)。
+文档站：[easy-query-ts.zerodep.dpdns.org](https://easy-query-ts.zerodep.dpdns.org)，每段代码都能看到各方言的 SQL、在浏览器里运行（源码在 `apps/docs`，`pnpm dev:docs`）。设计与取舍见 [docs/decisions/0002-ts-design.md](docs/decisions/0002-ts-design.md)，现状与上手见 [HANDOFF.md](HANDOFF.md)。
 
 ```ts
 import { DatabaseSync } from 'node:sqlite';
@@ -36,6 +36,31 @@ const rows = await db
   .toList();
 // rows: { name: string; users: { id: number; name: string }[] }[]
 ```
+
+## 安装
+
+最少要装三个：核心包、一个方言包、方言对应的驱动。
+
+```bash
+pnpm add @zerodep-dev/easy-query-ts @zerodep-dev/easy-query-ts-pg pg
+```
+
+核心不依赖任何日期、小数库，默认的列类型只用 JS 自带的类型。业务里有金额和日期时，建议建表之前就引入下面两个包，之后再换要改实体和用到它们的代码：
+
+```bash
+pnpm add @zerodep-dev/easy-query-ts-decimal decimal.js
+pnpm add @zerodep-dev/easy-query-ts-date @internationalized/date
+```
+
+| 包         | 什么时候装                         | 解决什么                                                       | 还要装                    |
+| ---------- | ---------------------------------- | -------------------------------------------------------------- | ------------------------- |
+| `-decimal` | 有金额、数量、费率，要做运算       | `decimalJs()` 读成 `Decimal`，运算不经过浮点                   | `decimal.js`              |
+| `-date`    | 有日期、时区、营业时间这类业务含义 | `calendarDate()` 等读成带语义的日期类型，不用 JS `Date` 猜时区 | `@internationalized/date` |
+| `-crypto`  | 手机号、证件号要加密存储           | 现成的 AES、国密 SM4，密文还能搜索，能读 Java 版写的数据       | 只能在 Node 里用          |
+| `-cache`   | 读多写少，要二级缓存               | 本机缓存和 Redis 接口，写入后自动失效                          | Redis 驱动你自己接        |
+| `-cli`     | 由库生成实体、做迁移、存 SQL 快照  | `eqts` 命令行                                                  | 放进开发依赖              |
+
+各包的用法见文档站的[快速开始](https://easy-query-ts.zerodep.dpdns.org/guide/quick-start#install)。
 
 ## 包
 
