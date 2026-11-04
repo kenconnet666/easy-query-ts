@@ -141,7 +141,8 @@ export const App = _component(() => {
               </NavSection>
             </NavList>
           }
-          aside={!isHome && headings.value.length > 0 && <TableOfContents items={headings.value} />}
+          // 目录要挂载后才收集得到：右栏一直留着，不按有没有标题决定，刷新时正文不会跳一下
+          aside={!isHome && <TableOfContents items={headings.value} />}
           propsMain={{ sx: styles.main }}
         >
           <div ref={_toRef(content)} {...css.attrs(styles.page)}>
