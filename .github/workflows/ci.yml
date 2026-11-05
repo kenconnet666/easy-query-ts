@@ -208,11 +208,15 @@ jobs:
         env:
           EQTS_DB2_URL: DATABASE=eqts;HOSTNAME=127.0.0.1;PORT=50000;PROTOCOL=TCPIP;UID=db2inst1;PWD=Ci_Db2pass1
 
-  # 把通过检查的产物上传到 Cloudflare：内容没变的文件不会重传，所以每次推送都跑也不费事
+  # 把通过检查的产物上传到 Cloudflare：内容没变的文件不会重传，所以每次推送都跑也不费事。
+  # CLOUDFLARE_API_TOKEN 存在 docs 环境里，该环境只允许 master 使用：别的分支改了 workflow 也拿不到
   deploy-docs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: [check, docs]
     runs-on: ubuntu-latest
+    environment:
+      name: docs
+      url: https://easy-query-ts.zerodep.dpdns.org
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
