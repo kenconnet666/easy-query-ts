@@ -102,6 +102,11 @@ export default _component(() => () => (
           ['`col.date()`', '`DateText`', '`2026-01-02` 这种形状的文字，不经过时区'],
           ['`col.time()`', '`string`', 'Oracle 没有 TIME，存成文字'],
           ['`col.datetime()`', '`Date`', '库里按 UTC 存'],
+          [
+            '`col.datetime({ timeZone: true })`',
+            '`Date`',
+            'PG 的 TIMESTAMPTZ：绝对时刻，不受会话时区影响（只支持 PG）',
+          ],
           ['`col.enum([...] as const)`', '字面量联合', '写入、读出都校验，库里有不认识的值会报错'],
           ['`col.json<T>()`、`col.json(校验器)`', '`T`', '见下'],
           ['`col.uuid()`', '`string`', '小写标准写法，写入时检查格式；MySQL 存 BINARY(16)'],
@@ -126,7 +131,7 @@ export default _component(() => () => (
     <Section id="date" title="日期和时间">
       <P text="`col.date()` 是形状受限的文字：字面量可以直接比较，写成 `'not a date'` 编译不过；普通字符串列调不了 `year()`、`addDays()`。" />
       <SqlExample example={dateText} title="日期列：比较、取年份、加减" />
-      <P text="`col.datetime()` 是 `Date`，按 UTC 写入和读出，不受服务器时区影响。" />
+      <P text="`col.datetime()` 是 `Date`，按 UTC 写入和读出，不受服务器时区影响。PostgreSQL 上要库里也是带时区的类型时写 `col.datetime({ timeZone: true })`：建成 TIMESTAMPTZ，写入带偏移，会话时区改了也是同一个时刻；别的库建表时报错。" />
       <SqlExample example={datetimeValue} title="时间列：参数直接给 Date" />
       <Note text="要有时区的对象，或者要把结果直接发给 vue-tsx-pro 的日期组件，用下面的 `-date` 扩展包。" />
     </Section>

@@ -186,6 +186,7 @@ function diffTable(
         );
       continue;
     }
+    dialect.checkColumn(column.options);
     const type = dialect.columnType(column.codec.kind, column.options);
     if (!column.options.generated && !dialect.sameType(type, existing.type))
       differences.push(`${where}.${name}: type is ${existing.type}, declared ${type}`);

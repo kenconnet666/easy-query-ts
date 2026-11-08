@@ -84,6 +84,7 @@ export class PostgresDialect extends Dialect {
   /** PG 协议里参数个数是 16 位整数，最多 65535 */
   override readonly maxBindParams = 65535;
   override readonly generatedKeys = 'returning' as const;
+  override readonly timestampTz: boolean = true;
 
   override placeholder(index: number): string {
     return `$${index}`;
@@ -137,6 +138,8 @@ export class PostgresDialect extends Dialect {
         return 'JSONB';
       case 'bytes':
         return 'BYTEA';
+      case 'datetime':
+        return o.timeZone ? 'TIMESTAMPTZ(3)' : super.columnType(kind, o);
       default:
         return super.columnType(kind, o);
     }

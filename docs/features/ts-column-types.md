@@ -35,6 +35,7 @@ export const Order = entity('t_order', {
 | `timeOfDay()`                           | `Time`                  | `time`         | TIME                                            |
 | `calendarDateTime()`                    | `CalendarDateTime`      | `timestamp`    | DATETIME / TIMESTAMP（无时区）                  |
 | `zonedDateTime(zone)`、`col.datetime()` | `ZonedDateTime`、`Date` | `timestamptz`  | DATETIME / TIMESTAMP，按 UTC 存                 |
+| `col.datetime({ timeZone: true })`      | `Date`                  | `timestamptz`  | PG 的 TIMESTAMPTZ（写入带偏移，只支持 PG）      |
 | `col.bytes()`                           | `Uint8Array`            | `bytes`        | BLOB / BYTEA                                    |
 | `col.uuid()`                            | `string`（小写）        | —              | UUID / BINARY(16) / UNIQUEIDENTIFIER / CHAR(36) |
 | `col.array(元素列)`                     | `元素[]`                | —              | PG 的 `元素类型[]`（只支持 PG）                 |

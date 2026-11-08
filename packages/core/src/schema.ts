@@ -93,6 +93,8 @@ export interface ColumnOptions {
   readonly computed?: { readonly sql: string; readonly stored: boolean } | undefined;
   /** 数组列的元素列（建表时取它的类型，如 VARCHAR(50)[]） */
   readonly element?: Column<unknown, boolean, boolean> | undefined;
+  /** col.datetime({ timeZone: true })：PostgreSQL 建成 TIMESTAMPTZ，写入带 UTC 偏移（别的库不支持） */
+  readonly timeZone?: boolean | undefined;
   /** col.enum 的取值（建表时 MySQL 的 ENUM(…)、PG 的 CREATE TYPE … AS ENUM 用） */
   readonly enumValues?: readonly string[] | undefined;
   /** 用库里的原生枚举类型（见 Column.native）：PG 是类型名，MySQL 不需要名字（true） */
@@ -603,8 +605,17 @@ export const col = {
   date: () => base(codec<DateText>('date', (r) => toDateText(r) as DateText)),
   /** 一天里的时刻 'HH:MM:SS' */
   time: () => base(codec<string>('time', (r) => String(r).slice(0, 8))),
-  /** 时刻：JS 的 Date，库里按 UTC 存 */
-  datetime: () => base(codec<Date>('datetime', toDate, (v) => utcText(v))),
+  /**
+   * 时刻：JS 的 Date，库里按 UTC 存。`{ timeZone: true }`（PostgreSQL）建成 TIMESTAMPTZ：库里是绝对时刻，
+   * 写入带 `+00` 偏移，不受会话时区影响；别的库建表时报错
+   */
+  datetime: (opts?: { readonly timeZone?: boolean }) =>
+    opts?.timeZone
+      ? base(
+          codec<Date>('datetime', toDate, (v) => `${utcText(v)}+00`),
+          { timeZone: true },
+        )
+      : base(codec<Date>('datetime', toDate, (v) => utcText(v))),
   /** 二进制：JS 里是 Uint8Array（驱动给的 Buffer 会复制成普通的 Uint8Array），库里是 BLOB / BYTEA */
   bytes: () =>
     base(
