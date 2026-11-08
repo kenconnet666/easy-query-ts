@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-tdengine",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "TDengine dialect and driver adapter (@tdengine/websocket) for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
