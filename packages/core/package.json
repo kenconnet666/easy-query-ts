@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Type-safe query builder with implicit joins and subqueries, inferred result types and object-tree results (TypeScript port of easy-query)",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
