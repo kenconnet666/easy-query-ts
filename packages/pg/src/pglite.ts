@@ -6,7 +6,8 @@
  * const db = createDb({ schema, adapter: pglite(new PGlite()) })
  * ```
  * 单独一个入口：不用装 pg，专属函数 Pg 也从这里取。方言与 postgres() 相同；日期时间、int8、numeric（及其数组）按文字读，再由列的 codec 解码（与 pg 驱动一致）。
- * PGlite 只有一条连接：事务进行中其它异步代码发出的语句会排在事务之后（PGlite 自己排队）
+ * PGlite 只有一条连接：事务进行中其它异步代码发出的语句会排在事务之后（PGlite 自己排队）。
+ * NOTIFY 的收听用这个入口的 listen（PGlite 自己收听，不借连接）
  */
 import type {
   Adapter,
@@ -87,4 +88,26 @@ class PgliteDriver extends PgliteSession implements Driver {
 
 export function pglite(database: PgliteDatabase): Adapter {
   return { dialect: new PostgresDialect(), driver: new PgliteDriver(database) };
+}
+
+/** listen 用到的 PGlite 的部分 */
+export interface PgliteListener {
+  listen(channel: string, callback: (payload: string) => void): Promise<() => Promise<void>>;
+}
+
+/**
+ * 收听 NOTIFY（与 db.notify 配对，同 pg 入口的 listen）：PGlite 只有一条连接、自己就能收听，不用借专用连接；
+ * 每条通知调一次 handler(payload)，返回的函数取消收听。浏览器里把服务端推送换成它（新待办、数据变了）
+ * ```ts
+ * const stop = await listen(database, 'todo_changed', (user) => refresh(user))
+ * await db.notify('todo_changed', 'u1')   // 在事务里时随提交发出
+ * ```
+ */
+export async function listen(
+  database: PgliteListener,
+  channel: string,
+  handler: (payload: string) => void,
+): Promise<() => Promise<void>> {
+  const unlisten = await database.listen(channel, handler);
+  return () => unlisten();
 }

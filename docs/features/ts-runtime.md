@@ -51,7 +51,8 @@ await stop();
 - `advisoryLock(名字, { wait })`：事务级的咨询锁（`pg_advisory_xact_lock`，名字经 `hashtextextended` 哈希成 64 位整数），没有对应的行也能锁，
   跨进程、跨机器生效；`wait: false` 拿不到立即返回 false。只能在事务里用。
 - `notify(频道, 内容)` 是 `pg_notify`；收听用 PG 包的 `listen(pool, 频道, handler)`：借一条专用连接 LISTEN，返回的函数 UNLISTEN 并归还连接，
-  连接断了不自动重连。二级缓存的跨进程失效、事件推送可以接它。
+  连接断了不自动重连。PGlite 用 `easy-query-ts-pg/pglite` 的 `listen(PGlite 实例, 频道, handler)`，同样返回取消收听的函数。
+  二级缓存的跨进程失效、事件推送、浏览器里的实时刷新可以接它。
 - 别的库渲染时报不支持（MySQL 的 GET_LOCK 是连接级的，提交时释放不了，没有做）。
 
 ## 嵌套事务（保存点）

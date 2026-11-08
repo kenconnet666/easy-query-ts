@@ -25,7 +25,11 @@ const notify = `import { listen } from '@zerodep-dev/easy-query-ts-pg';
 
 const stop = await listen(pool, 'cache_evict', (key) => cache.delete(key));
 await db.notify('cache_evict', 'user:7'); // 在事务里时随提交发出，回滚不发
-await stop();`;
+await stop();
+
+// PGlite（浏览器、测试）：从 pglite 入口导入，传 PGlite 实例，用法一样
+import { listen as listenPglite } from '@zerodep-dev/easy-query-ts-pg/pglite';
+const stopLocal = await listenPglite(database, 'todo_changed', (user) => refresh(user));`;
 
 export default _component(() => () => (
   <DocPage>
@@ -72,7 +76,7 @@ export default _component(() => () => (
       <CodeBlock code={advisory} lang="ts" />
     </Section>
     <Section id="notify" title="通知（PostgreSQL）">
-      <P text="`notify` 是 `pg_notify`，收听用 PG 包的 `listen`：借一条专用连接，返回的函数归还连接；连接断了不自动重连。二级缓存的跨进程失效、事件推送可以接它。" />
+      <P text="`notify` 是 `pg_notify`，收听用 PG 包的 `listen`：借一条专用连接，返回的函数归还连接；连接断了不自动重连。PGlite 从 `pglite` 入口导入同名的 `listen`，传 PGlite 实例（它只有一条连接，自己收听）。二级缓存的跨进程失效、事件推送、浏览器里的实时刷新可以接它。" />
       <CodeBlock code={notify} lang="ts" />
     </Section>
   </DocPage>
