@@ -62,7 +62,8 @@ catalog:
   # 文档站的整站检查（apps/docs/test/site.mjs）
   playwright: 1.64.1
   # 语言与工具
-  typescript: 7.1.0-beta
+  # 7.1 daily build (commit e2bc2bc), pinned to the same build as vue-tsx-pro
+  typescript: 7.1.0-dev.20261104.1
   '@types/node': 24.19.2
   vitest: 5.0.5
   oxlint: 1.88.0
