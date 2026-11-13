@@ -1,7 +1,8 @@
 // 事务的钩子（afterCommit / afterRollback）与保存点、begin() 的配合，lock() 在 SQLite 上的写法；跨方言的行为在 src/suite.ts
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { seed, User } from '../src/fixture.ts';
+import { createDb } from '@zerodep-dev/easy-query-ts';
+import { schema, seed, User } from '../src/fixture.ts';
 import { memoryDb } from '../src/sqlite-env.ts';
 
 describe('sqlite: transaction hooks and lock', () => {
@@ -65,6 +66,41 @@ describe('sqlite: transaction hooks and lock', () => {
       tx.afterRollback(() => seen.push('rollback'));
     }
     assert.deepEqual(seen, ['commit', 'rollback']);
+  });
+
+  it('begin()：事务没开起来时只把错误交给调用方，不留下未处理的拒绝', async () => {
+    const { adapter } = await memoryDb();
+    const down = {
+      ...adapter,
+      driver: Object.assign(Object.create(adapter.driver), {
+        transaction: () => Promise.reject(new Error('connect failed')),
+      }),
+    };
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', record);
+    try {
+      await assert.rejects(createDb({ schema, adapter: down }).begin(), /connect failed/);
+      // 未处理的拒绝在微任务清空之后才报
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.deepEqual(unhandled, []);
+    } finally {
+      process.off('unhandledRejection', record);
+    }
+  });
+
+  it('保存点的名字在一个事务里不重复：从 tx 派生的 Db（withTimeout 等）接着同一个序号', async () => {
+    const env = await seed(await memoryDb());
+    env.statements.length = 0;
+    await env.db.transaction((tx) =>
+      tx.transaction((inner) =>
+        inner.withTimeout(1000).transaction((innermost) => innermost.queryable(User).count()),
+      ),
+    );
+    assert.deepEqual(
+      env.statements.map((s) => s.sql).filter((sql) => sql.startsWith('SAVEPOINT')),
+      ['SAVEPOINT eqts_sp_1', 'SAVEPOINT eqts_sp_2'],
+    );
   });
 
   it('lock()：SQLite 用一条把主键写回自己的 UPDATE 拿写锁，不经拦截器', async () => {

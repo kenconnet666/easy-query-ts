@@ -142,8 +142,6 @@ export class Db<S extends AnySchema> {
   private readonly adapter: Adapter;
   private readonly keys: Map<Entity, string>;
   private readonly inTransaction: boolean;
-  /** 嵌套事务的保存点序号（同一个事务里的 Db 共用） */
-  private readonly savepoints: { n: number } = { n: 0 };
   /** 原生 SQL：`db.sql\`SELECT … ${value}\``（查询）、`db.sql.execute\`…\``（写入），值作为绑定参数，见 native.ts */
   readonly sql: SqlTag;
 
@@ -529,7 +527,6 @@ export class Db<S extends AnySchema> {
     });
   }
 
-  /** 逐条执行 DDL；能放进事务的库在一个事务里执行 */
   /**
    * 执行还没执行过的迁移（按 id 的顺序），记进历史表（默认 eqts_migrations，没有就建），返回这次执行的 id。
    * 每条迁移连同它的历史记录在一个事务里（DDL 能放进事务的库）；已经执行过的迁移被改了（校验和对不上）直接报错。见 migrate.ts
@@ -577,6 +574,7 @@ export class Db<S extends AnySchema> {
     return done;
   }
 
+  /** 逐条执行 DDL；能放进事务的库在一个事务里执行 */
   private async runDdl(statements: readonly string[]): Promise<void> {
     if (statements.length === 0) return;
     assertWritable(this.ctx);
@@ -878,11 +876,12 @@ export class Db<S extends AnySchema> {
   /** 嵌套事务：SAVEPOINT，成功则释放，失败则回滚到保存点 */
   private async nested<T>(work: (tx: Db<S>) => Promise<T>): Promise<T> {
     const dialect = this.ctx.dialect;
-    const name = `eqts_sp_${++this.savepoints.n}`;
+    const hooks = this.ctx.hooks!;
+    const name = `eqts_sp_${++hooks.savepoints}`;
     await execute(this.ctx, { sql: dialect.savepoint(name), params: [] });
     const release = dialect.releaseSavepoint(name);
     // 保存点里登记的钩子另起一帧：成功并进外层，回滚则丢掉提交后的、执行回滚后的
-    const frames = this.ctx.hooks!.frames;
+    const frames = hooks.frames;
     const frame = { commit: [] as (() => unknown)[], rollback: [] as (() => unknown)[] };
     frames.push(frame);
     try {
@@ -959,6 +958,8 @@ export class Db<S extends AnySchema> {
             }
           },
         );
+      // 事务没开起来（连不上库、BEGIN 失败）时 finished 没有人等：错误已经由 reject 交给调用方，这里接住，免得成了未处理的拒绝
+      finished.catch(() => undefined);
     });
     return transaction;
   }

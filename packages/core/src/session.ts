@@ -125,11 +125,17 @@ export function assertWritable(ctx: Context): void {
 /** 事务结束后要做的事：一层一帧，保存点（嵌套事务）成功时并进外层，失败时丢掉它登记的提交后的事 */
 export interface TransactionHooks {
   readonly frames: { readonly commit: (() => unknown)[]; readonly rollback: (() => unknown)[] }[];
+  /**
+   * 保存点的序号。跟着事务走而不是跟着 Db 对象：事务里派生出来的 Db（withTimeout、mount、usePrimary……）也用同一个序号，
+   * 名字才不会重复——Oracle、达梦里同名的保存点是把原来的挪走，外层回滚就只回到内层的位置
+   */
+  savepoints: number;
 }
 
 /** 新的一组事务钩子 */
 export const newTransactionHooks = (): TransactionHooks => ({
   frames: [{ commit: [], rollback: [] }],
+  savepoints: 0,
 });
 
 /**
