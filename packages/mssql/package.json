@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-mssql",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "SQL Server dialect and driver adapter (mssql / tedious) for @zerodep-dev/easy-query-ts, rendering per server version",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",

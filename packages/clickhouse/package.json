@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-clickhouse",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "ClickHouse dialect and driver adapter (@clickhouse/client) for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
