@@ -105,7 +105,12 @@ class SqliteDriver extends SqliteSession implements Driver {
         this.database.exec('COMMIT');
         return result;
       } catch (error) {
-        this.database.exec('ROLLBACK');
+        // 有的错误（磁盘满、ON CONFLICT ROLLBACK）库已经自己回滚了，再 ROLLBACK 会报"没有事务"：不让它盖住原来的错误
+        try {
+          this.database.exec('ROLLBACK');
+        } catch {
+          /* 保留 work 抛出的原始错误 */
+        }
         throw error;
       } finally {
         if (options?.readOnly) this.database.exec('PRAGMA query_only = OFF');

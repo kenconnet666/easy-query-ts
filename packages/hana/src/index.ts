@@ -341,7 +341,10 @@ class HanaDriver extends HanaSession implements Driver {
         await call<void>((cb) => client.commit((error) => cb(error, undefined)));
         return result;
       } catch (error) {
-        await call<void>((cb) => client.rollback((error) => cb(error, undefined)));
+        // 回滚失败（多半是连接已经断了）不盖住原来的错误
+        await call<void>((cb) => client.rollback((error) => cb(error, undefined))).catch(
+          () => undefined,
+        );
         throw error;
       }
     } finally {

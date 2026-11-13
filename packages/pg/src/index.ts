@@ -43,7 +43,8 @@ interface Target {
 /** 从池里借出的连接；processID 是服务端的进程号（取消语句用） */
 interface PgPoolClient extends Target {
   readonly processID?: number | null;
-  release(): void;
+  /** destroy 为真时不放回池里，直接关掉（连接的状态已经不可信） */
+  release(destroy?: boolean): void;
 }
 
 /** 用到的连接池的部分：pg.Pool、Neon serverless 的 Pool（WebSocket）都满足 */
@@ -124,6 +125,8 @@ class PostgresSession implements Session {
     const own = this.pool ? await this.pool.connect() : undefined;
     const client: Target = own ?? this.target;
     const cursor = `eqts_cursor_${(cursors += 1)}`;
+    let finished = false;
+    let broken = false;
     try {
       if (own) await run(client, 'BEGIN', []);
       await run(client, `DECLARE ${cursor} NO SCROLL CURSOR FOR ${sql}`, params);
@@ -132,13 +135,19 @@ class PostgresSession implements Session {
         if (rows.length > 0) yield rows as Record<string, unknown>[];
         if (rows.length < batchSize) break;
       }
+      await run(client, `CLOSE ${cursor}`, []);
+      if (own) await run(client, 'COMMIT', []);
+      finished = true;
     } finally {
-      try {
-        await run(client, `CLOSE ${cursor}`, []);
-        if (own) await run(client, 'COMMIT', []);
-      } finally {
-        own?.release();
+      // 没读完（语句出错、调用方中途 break）：收尾失败不能盖住原来的错误。借来的连接必须回滚——出过错的事务里 CLOSE、COMMIT
+      // 都会被拒绝，连接要是带着这个事务还回池里，下一个借到它的语句也跟着失败；回滚不了就不要这条连接了
+      if (!finished) {
+        const cleanup = own ? 'ROLLBACK' : `CLOSE ${cursor}`;
+        await run(client, cleanup, []).catch(() => {
+          broken = true;
+        });
       }
+      own?.release(broken);
     }
   }
 
@@ -172,6 +181,7 @@ class PostgresDriver extends PostgresSession implements Driver {
     options?: TransactionOptions,
   ): Promise<T> {
     const client = await this.source.connect();
+    let broken = false;
     try {
       await run(
         client,
@@ -183,11 +193,14 @@ class PostgresDriver extends PostgresSession implements Driver {
         await run(client, 'COMMIT', []);
         return result;
       } catch (error) {
-        await run(client, 'ROLLBACK', []);
+        // 回滚失败（多半是连接断了）不盖住原来的错误；这条连接不再放回池里
+        await run(client, 'ROLLBACK', []).catch(() => {
+          broken = true;
+        });
         throw error;
       }
     } finally {
-      client.release();
+      client.release(broken);
     }
   }
 }

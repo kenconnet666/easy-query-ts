@@ -165,7 +165,8 @@ class OracleDriver extends OracleSession implements Driver {
         await conn.commit();
         return result;
       } catch (error) {
-        await conn.rollback();
+        // 回滚失败（多半是连接已经断了）不盖住原来的错误
+        await conn.rollback().catch(() => undefined);
         throw error;
       }
     } finally {

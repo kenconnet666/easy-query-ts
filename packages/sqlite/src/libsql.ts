@@ -108,7 +108,8 @@ class LibsqlDriver extends LibsqlSession implements Driver {
       await tx.commit();
       return result;
     } catch (error) {
-      await tx.rollback();
+      // 回滚失败（事务已经被库自己回滚、连接断了）不盖住原来的错误
+      await tx.rollback().catch(() => undefined);
       throw error;
     } finally {
       tx.close();

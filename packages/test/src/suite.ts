@@ -20,6 +20,7 @@ import {
   defineSchema,
   defineView,
   or,
+  sql,
   touch,
   win,
   type Cond,
@@ -2050,6 +2051,47 @@ export function liveSuite(
           await db.sql.execute`DROP TABLE ${db.sql.ident('t_token')}`;
         }
       });
+
+      it('hangs children on the right parent when the relation key is a uuid', async () => {
+        const env = await seeded();
+        const db = createDb({
+          schema: defineSchema(
+            { Token },
+            { Token: (r) => ({ owned: r.many('Token', { from: 'id', to: 'owner' }) }) },
+          ),
+          adapter: env.adapter,
+        });
+        await db.sql.execute`DROP TABLE ${db.sql.ident('t_token')}`.catch(() => undefined);
+        await db.createTables();
+        try {
+          // 只差最后一个字节，而且都不是合法的 UTF-8：存成二进制的库（MySQL 的 BINARY(16)）按文字比会当成同一个键
+          const parents = [
+            '01960000-0000-7000-8000-0000000000fe',
+            '01960000-0000-7000-8000-0000000000ff',
+          ];
+          await db
+            .insert(Token)
+            .values([
+              ...parents.map((id, i) => ({ id, owner: null, hits: i, level: 'low' as const })),
+              ...parents.map((owner, i) => ({ owner, hits: 10 + i, level: 'mid' as const })),
+            ])
+            .execute();
+          assert.deepEqual(
+            await db
+              .queryable(Token)
+              .where((t) => t.id.in(parents))
+              .orderBy((t) => t.hits)
+              .select((t) => ({ id: t.id, owned: t.owned.toList((o) => o.hits) }))
+              .toList(),
+            [
+              { id: parents[0], owned: [10] },
+              { id: parents[1], owned: [11] },
+            ],
+          );
+        } finally {
+          await db.sql.execute`DROP TABLE ${db.sql.ident('t_token')}`;
+        }
+      });
     },
   );
 
@@ -2648,6 +2690,20 @@ export function liveSuite(
           .stream())
           void _;
       }, /toList()/);
+    });
+
+    it('a stream that fails leaves the connection usable for the next statement', async () => {
+      const { db } = await seeded();
+      await assert.rejects(async () => {
+        for await (const _ of db
+          .queryable(Post)
+          .where(() => sql<boolean>`no_such_column = 1`)
+          .stream())
+          void _;
+      });
+      // 连接池先复用刚还回来的那条连接：它要是带着出错的事务，这几条就会跟着失败
+      for (let i = 0; i < 3; i++) assert.equal(await db.queryable(Post).count(), 4);
+      await db.transaction(async (tx) => assert.equal(await tx.queryable(Post).count(), 4));
     });
 
     it('streams inside a transaction and reports the streamed rows to onExecute', async () => {

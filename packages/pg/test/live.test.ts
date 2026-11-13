@@ -170,6 +170,21 @@ for (const url of urls) {
           })),
         ),
       );
+      // DISTINCT ON 之后的行数、分页的总数：数的是去重后的行
+      const latest = db
+        .queryable(Post)
+        .distinctOn((p) => p.userId)
+        .orderBy((p) => p.id.desc());
+      assert.equal(await latest.count(), 2);
+      assert.equal((await latest.toPage(1, 1)).total, 2);
+      // 流式读取出错：抛出的是语句本身的错误，不是"事务已中止"
+      await assert.rejects(async () => {
+        for await (const _ of db
+          .queryable(Post)
+          .where(() => sql<boolean>`no_such_column = 1`)
+          .stream())
+          void _;
+      }, /no_such_column/);
       // 共享锁、FOR NO KEY UPDATE 在事务里照常
       await db.transaction(async (tx) => {
         assert.equal((await tx.queryable(Post).forShare().toList()).length, 4);

@@ -419,7 +419,8 @@ class Db2Driver extends Db2Session implements Driver {
         await conn.commitTransaction();
         return result;
       } catch (error) {
-        await conn.rollbackTransaction();
+        // 回滚失败（多半是连接已经断了）不盖住原来的错误
+        await conn.rollbackTransaction().catch(() => undefined);
         throw error;
       }
     } finally {
