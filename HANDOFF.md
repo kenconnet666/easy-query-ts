@@ -28,11 +28,13 @@ pnpm check
 实库套件在设了 `EQTS_*` 环境变量时才跑，容器在 WSL Debian 的 Docker 里（compose 项目 `easy-query-ts-dev`，端口 3xxxx，和 `vue-tsx-pro-dev` 错开）：
 
 ```bash
-wsl -d Debian -- bash -lc 'cd /mnt/c/Users/lionheart/IdeaProjects/easy-query-ts && bash infra/dev/db.sh up -d --wait'   # MySQL 8.4、PG 17、Redis 8.2
-wsl -d Debian -- bash -lc 'cd /mnt/c/Users/lionheart/IdeaProjects/easy-query-ts && bash infra/dev/db.sh --profile hana up -d'   # 按需加 HANA 等，见 compose.yaml
+# 在仓库根目录执行（wsl 沿用当前目录）
+wsl -d Debian -- bash infra/dev/db.sh up -d --wait          # MySQL 8.4、PG 17、Redis 8.2
+wsl -d Debian -- bash infra/dev/db.sh --profile hana up -d  # 按需加 HANA 等，见 compose.yaml
 ```
 
-密码、连接说明与环境变量在不提交的 `.local/db.env`、`.local/connections.md`，首次运行 `db.sh` 时生成。跑之前先 `set -a; . ./.local/db.env; set +a`。
+密码、连接说明与环境变量在不提交的 `.local/db.env`、`.local/connections.md`，首次运行 `db.sh` 时生成。跑之前先 `set -a; . ./.local/db.env; set +a`；
+`db.env` 里有所有库的连接串，没启动的库会让它的套件一直等连接，只跑其中几个时单独导出对应的变量（如 `EQTS_PG_URLS`、`EQTS_MYSQL_URLS`）。
 本地只跑相关的库，全部方言交给 CI 的 `db`、`db-analytic`、`db-db2` 任务；HANA 不在 CI，本机跑。
 
 ## 约定
