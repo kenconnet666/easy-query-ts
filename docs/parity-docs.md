@@ -135,4 +135,4 @@
 | sql-tsdb        | `easy-query-ts-tdengine`：TDengine 3.3，时间戳主键、写入覆盖（ts-tdengine.md）                | ✓    |
 | sql-h2          | JVM 内的库，Node 没有驱动                                                                     | —    |
 | （官方没有）    | `doris(pool)`（MySQL 包）：Apache Doris 4.1，主键模型、分析型套件（ts-doris.md）              | ✓    |
-| （官方没有）    | `easy-query-ts-hana`：SAP HANA，共用套件（本机容器，不进 CI）                                 | ✓    |
+| （官方没有）    | `easy-query-ts-hana`：SAP HANA 2.0，共用套件（CI 的 db-hana）                                 | ✓    |

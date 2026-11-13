@@ -243,3 +243,15 @@ easy-query 的 TS 版。阶段编号沿用迁移前 vue-tsx-pro 的 ROADMAP，�
 - [x] 25.5.2 “方言专属函数”一章：`Pg`、`MySQL`、`MsSql`、`Hana` 的完整列表和卡片（写明方言的卡片固定在它上面，PG 在 PGlite 上真跑，别的只渲染 SQL），兼容库的差别在 MariaDB、openGauss 容器上核对过；补上 Java 版有的 `Pg.jsonb().hasAnyKey / hasAllKeys`，`pglite` 入口也导出 `Pg`
 - [ ] 25.6 全文搜索：现在只搜标题与简介；脚本检查每个公开导出都有文档、与 `docs/parity-docs.md` 对账
 - [x] 25.7 部署到 Cloudflare Workers 静态资源：https://easy-query-ts.zerodep.dpdns.org，CI 的 `deploy-docs` 上传
+
+## 阶段 26：HANA 进 CI（2026-11-14）
+
+目标（用户定）：HANA 关掉用不到的功能省内存、能较快启动，本机先测通，再让它的测试进 CI。
+
+- [x] 26.1 镜像瘦身（`infra/dev/hana/`）：启动前关 diserver，启动后关 web dispatcher 与嵌入式统计服务，去掉 SAP 的首次启动“优化”钩子（遥测、注册、整理数据卷）。
+      内存上限 12 GB → 6 GB：跑完全部用例后 HANA 记账的峰值 4.2 GB
+- [x] 26.2 快速启动：首次启动 6～11 分钟（看机器忙不忙），其中系统库与租户库各自建系统目录占大头，关服务省不下来；带着初始化好的数据卷启动只要半分钟。
+      `infra/dev/hana/volume.sh save / restore` 把卷存成约 100 MB 的包，本机实测恢复 53 秒、启动 31 秒
+- [x] 26.3 修 HANA 适配器在实库上暴露的问题（之前不在 CI，41 个用例失败）：`SET TRANSACTION` 的只读与隔离级别留在连接上、
+      带导航的 UPDATE 写法、NCLOB（json 列）读成字节、条件当值、AVG 丢小数位、JSON 路径、多行插入超出 hdb 的包大小
+- [x] 26.4 CI 的 `db-hana` 任务：数据卷按镜像与密码缓存，命中时不用再初始化

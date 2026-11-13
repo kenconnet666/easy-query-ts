@@ -17,3 +17,5 @@ logs/
 # SQLite 测试库文件
 *.db
 packages/test/.generated/
+# HANA 数据卷的快照（infra/dev/hana/volume.sh，CI 缓存用的目录）
+/.hana-volume/

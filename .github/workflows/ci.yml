@@ -74,7 +74,7 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
-  # 实库套件：MySQL 8.0.18（PolarDB 基线）、MariaDB 11.4、PG 17、SQL Server 2022、Oracle 23ai、达梦、openGauss、ClickHouse 的服务容器；HANA 不在 CI，本机跑。
+  # 实库套件：MySQL 8.0.18（PolarDB 基线）、MariaDB 11.4、PG 17、SQL Server 2022、Oracle 23ai、达梦、openGauss、ClickHouse 的服务容器；HANA 在 db-hana。
   # Redis 8.2 给二级缓存接 Redis 的示例实现（多实例缓存的实测）
   db:
     runs-on: ubuntu-latest
@@ -209,6 +209,57 @@ jobs:
       - run: pnpm exec vitest run --configLoader native db2
         env:
           EQTS_DB2_URL: DATABASE=eqts;HOSTNAME=127.0.0.1;PORT=50000;PROTOCOL=TCPIP;UID=db2inst1;PWD=Ci_Db2pass1
+
+  # SAP HANA Express 2.0。镜像要自建（infra/dev/hana：启动时接受 SAP 的开发者许可、关掉测试用不到的服务），不能当服务容器，
+  # 用 infra/dev 的 compose 起，内存上限只在 compose 里写一处（runner 有 16 GB）。
+  # 首次启动要初始化系统库、建租户库，要好几分钟；带着初始化好的数据卷启动不到 1 分钟。所以把初始化好的卷按镜像与密码缓存起来
+  # （infra/dev/hana/volume.sh，压缩后约 100 MB）：命中就恢复再启动，没命中照常初始化，跑完测试再存
+  db-hana:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # 16-64 位字母数字，含大小写与数字（infra/dev/hana/start.sh 校验）。compose 里环境变量优先于 db.sh 生成的 .local/db.env
+      EQTS_DEV_HANA_PASSWORD: EqtsCi2026Pass0Hana
+    steps:
+      - uses: actions/checkout@v7
+      - name: Restore the initialized HANA volume
+        id: volume
+        uses: actions/cache/restore@v6
+        with:
+          path: .hana-volume
+          key: hana-volume-${{ hashFiles('infra/dev/hana/**') }}-${{ env.EQTS_DEV_HANA_PASSWORD }}
+      - name: Start HANA
+        run: |
+          if [[ -f .hana-volume/volume.tar.gz ]]; then bash infra/dev/hana/volume.sh restore .hana-volume/volume.tar.gz; fi
+          bash infra/dev/db.sh --profile hana up -d hana
+      - uses: ./.github/actions/setup
+      - name: Wait for HANA
+        id: wait
+        run: |
+          container=$(bash infra/dev/db.sh --profile hana ps -q hana)
+          for _ in $(seq 1 300); do
+            if [[ $(docker inspect -f '{{.State.Health.Status}}' "$container") == healthy ]]; then
+              docker logs "$container" 2>&1 | sed -n '/Duration of start operations/,/Ready at/p'
+              docker stats --no-stream "$container"
+              exit 0
+            fi
+            sleep 5
+          done
+          docker logs --tail 200 "$container"
+          exit 1
+      - run: pnpm exec vitest run --configLoader native hana
+        env:
+          EQTS_HANA_URL: hana://SYSTEM:${{ env.EQTS_DEV_HANA_PASSWORD }}@127.0.0.1:39041
+      # 测试失败也存：卷是初始化的产物，与测试结果无关，下次不用再初始化
+      - name: Pack the initialized HANA volume
+        if: ${{ !cancelled() && steps.volume.outputs.cache-hit != 'true' && steps.wait.outcome == 'success' }}
+        run: bash infra/dev/hana/volume.sh save .hana-volume/volume.tar.gz
+      - name: Save the initialized HANA volume
+        if: ${{ !cancelled() && steps.volume.outputs.cache-hit != 'true' && steps.wait.outcome == 'success' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .hana-volume
+          key: ${{ steps.volume.outputs.cache-primary-key }}
 
   # 把通过检查的产物上传到 Cloudflare：内容没变的文件不会重传，所以每次推送都跑也不费事。
   # CLOUDFLARE_API_TOKEN 存在 docs 环境里，该环境只允许 master 使用：别的分支改了 workflow 也拿不到

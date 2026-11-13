@@ -21,7 +21,7 @@ const db = createDb({ schema, adapter: pglite(new PGlite()) });`;
 export default _component(() => () => (
   <DocPage>
     <Section id="matrix" title="方言包">
-      <P text="驱动是方言包的 peer 依赖，版本由项目自己定。每种方言都跑同一套实库测试，HANA 在本机跑，其余在 CI 上。" />
+      <P text="驱动是方言包的 peer 依赖，版本由项目自己定。每种方言都在 CI 上跑同一套实库测试。" />
       <SimpleTable
         head={['数据库', '包', '驱动', '说明']}
         rows={[
@@ -39,7 +39,7 @@ export default _component(() => () => (
           ['Oracle', '`-oracle`', '`oracledb`', 'Thin 模式，12c 之前按 ROWNUM 分页'],
           ['达梦', '`-dameng`', '`dmdb`', 'DM8'],
           ['Db2', '`-db2`', '`ibm_db`', '12.1'],
-          ['SAP HANA', '`-hana`', '`hdb`', '2.0，本机验证'],
+          ['SAP HANA', '`-hana`', '`hdb`', '2.0'],
           ['ClickHouse', '`-clickhouse`', '`@clickhouse/client`', '没有自增和事务，主键由应用给值'],
           ['DuckDB', '`-duckdb`', '`@duckdb/node-api`', '嵌入式，序列自增'],
           ['TDengine', '`-tdengine`', '`@tdengine/websocket`', '时序库'],

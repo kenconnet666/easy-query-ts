@@ -35,7 +35,10 @@ wsl -d Debian -- bash infra/dev/db.sh --profile hana up -d  # 按需加 HANA 等
 
 密码、连接说明与环境变量在不提交的 `.local/db.env`、`.local/connections.md`，首次运行 `db.sh` 时生成。跑之前先 `set -a; . ./.local/db.env; set +a`；
 `db.env` 里有所有库的连接串，没启动的库会让它的套件一直等连接，只跑其中几个时单独导出对应的变量（如 `EQTS_PG_URLS`、`EQTS_MYSQL_URLS`）。
-本地只跑相关的库，全部方言交给 CI 的 `db`、`db-analytic`、`db-db2` 任务；HANA 不在 CI，本机跑。
+本地只跑相关的库，全部方言交给 CI 的 `db`、`db-analytic`、`db-db2`、`db-hana` 任务。
+
+HANA 首次启动要初始化 6～11 分钟（看机器忙不忙），之后带着数据卷启动不到 1 分钟；内存上限 6 GB（镜像里关掉了测试用不到的服务，见 `infra/dev/hana/`）。
+`infra/dev/hana/volume.sh save / restore` 把初始化好的数据卷存成约 100 MB 的包，CI 按它做缓存，本机想回到刚初始化的状态时也用它。
 
 ## 约定
 
