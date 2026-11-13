@@ -32,7 +32,7 @@ db.queryable(User).select((u) => ({
 | `nullIf(v)`                                                                            | 相等得 NULL                          | 原生                                                | 原生                       | 原生                                | 原生                        |
 | `cast('string' \| 'int' \| 'bigint' \| 'double' \| 'decimal' \| 'date' \| 'datetime')` | 类型转换（decimal 要给精度与小数位） | 见 `SqliteDialect`                                  | `CHAR / SIGNED / DOUBLE …` | 标准类型名，字符串用 `TEXT`         | `NVARCHAR(5000) / DOUBLE …` |
 
-\* HANA 一栏按官方文档写，**本机没有 HANA 实例，未实库验证**；SQLite、MySQL 8.0.18 / 8.4、PG 17 均实测通过。
+\* SQLite、MySQL 8.0.18 / 8.4、PG 17、HANA 2.0 均实测通过。
 
 限制：
 

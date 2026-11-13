@@ -25,9 +25,16 @@ import {
   type Node,
   type Session,
   type TransactionOptions,
+  type UpdateNode,
 } from '@zerodep-dev/easy-query-ts';
 
 export { Hana } from './functions.ts';
+
+/**
+ * hdb 一个包的上限。默认是 128 KB，一条几千行的多行插入（语句文本就有几百 KB）发不出去；
+ * hdb 只在需要时才用到这么大，平时仍按 packetSize 分配
+ */
+const PACKET_SIZE_LIMIT = 2 ** 24;
 
 /** HANA 的 LIMIT 不能省、OFFSET 前必须有 LIMIT */
 const NO_LIMIT = 2147483647;
@@ -36,6 +43,27 @@ export class HanaDialect extends Dialect {
   readonly name = 'hana';
   /** HANA 没有 WITH RECURSIVE（层级查询用 HIERARCHY 函数） */
   override readonly supportsRecursiveCte = false;
+  /** 条件不能直接当值（`SELECT a > b` 不合法）：写成 CASE WHEN … THEN 1 ELSE 0 END，布尔列当条件写成 = 1 */
+  protected override readonly booleanValues = false;
+
+  protected override conditionFunctions(): readonly string[] {
+    return [...super.conditionFunctions(), 'json_boolean', 'hana.contains', 'hana.contains_fuzzy'];
+  }
+
+  /**
+   * 批量插入按估计的字节数再切：多行插入每行是一段 SELECT … FROM DUMMY，语句文本与参数都要装进 hdb 的一个包里
+   * （连接的 packetSizeLimit，见 PACKET_SIZE_LIMIT），给文本留出余量
+   */
+  override readonly maxStatementBytes = PACKET_SIZE_LIMIT / 4;
+  /** 多行插入每行是一段 SELECT … FROM DUMMY 再 UNION ALL：行数一多 HANA 解析得很慢，分成小块反而快 */
+  override readonly maxInsertRows = 1000;
+
+  override node(n: Node, w: SqlWriter): string {
+    // AVG 的结果沿用参数的小数位（DECIMAL(12,2) 的平均值只留两位）：先转成浮点小数再求，整数、浮点列结果不变
+    if (n.k === 'agg' && n.fn === 'avg' && n.arg)
+      return `AVG(${n.distinct ? 'DISTINCT ' : ''}TO_DECIMAL(${this.node(n.arg, w)}))`;
+    return super.node(n, w);
+  }
 
   override columnType(kind: string, o: ColumnOptions): string {
     if (o.dbType) return o.dbType;
@@ -112,6 +140,18 @@ export class HanaDialect extends Dialect {
     return (
       ' FOR UPDATE' + (wait === 'nowait' ? ' NOWAIT' : wait === 'skip' ? ' IGNORE LOCKED' : '')
     );
+  }
+
+  /**
+   * 带 join 时（条件、set 里用了多对一导航）：UPDATE 后面写 FROM 里的别名，目标表与各个 join 都放在 FROM 里（同 SQL Server）。
+   * 基类的"目标表另起别名再自连接"在 HANA 上认不出那个别名
+   */
+  override update(q: UpdateNode, w: SqlWriter = new SqlWriter()): string {
+    if (!q.joins?.length) return super.update(q, w);
+    const set = q.set.map((s) => `${this.quote(s.column)} = ${this.value(s.e, w)}`).join(', ');
+    let s = `UPDATE ${q.from.alias} SET ${set} FROM ${this.table(q.from.table)} ${q.from.alias}${this.joinClauses(q.joins, w)}`;
+    if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
+    return s;
   }
 
   /** HANA 没有 RELEASE SAVEPOINT：回滚到保存点即可，其余在事务结束时一起清掉 */
@@ -194,13 +234,66 @@ function call<T>(fn: (cb: (error: Error | null, result: T) => void) => void): Pr
 }
 
 async function run(client: Client, sql: string, params: readonly unknown[]): Promise<unknown> {
-  if (params.length === 0) return call<unknown>((cb) => client.exec(sql, cb));
+  if (params.length === 0) return lobsAsText(await call<unknown>((cb) => client.exec(sql, cb)));
   const statement = await call<import('hdb').Statement>((cb) => client.prepare(sql, cb));
   try {
-    return await call<unknown>((cb) => statement.exec([...params], cb));
+    return lobsAsText(await call<unknown>((cb) => statement.exec([...params], cb)));
   } finally {
     statement.drop();
   }
+}
+
+/** 字符型大对象的类型码：CLOB、NCLOB、NLOCATOR、TEXT */
+const TEXT_LOBS = new Set([25, 26, 32, 51]);
+
+/**
+ * hdb 把大对象一律读成字节，字符型的（NCLOB：json 列、长文字）也不例外：按结果集的列类型（连接开了 rowsWithMetadata）解成文字，
+ * 列的 codec 才读得了。写语句的结果（影响的行数）原样返回
+ */
+function lobsAsText(result: unknown): unknown {
+  const metadata = (result as { metadata?: readonly ColumnMetadata[] } | null)?.metadata;
+  if (!Array.isArray(result) || !metadata) return result;
+  const columns = metadata.filter((m) => TEXT_LOBS.has(m.dataType)).map((m) => m.columnDisplayName);
+  if (columns.length === 0) return result;
+  for (const row of result as Record<string, unknown>[])
+    for (const column of columns) {
+      const value = row[column];
+      if (value instanceof Uint8Array) row[column] = cesu8Text(value);
+    }
+  return result;
+}
+
+interface ColumnMetadata {
+  readonly columnDisplayName: string;
+  readonly dataType: number;
+}
+
+/**
+ * HANA 的文字在线路上是 CESU-8：BMP 以外的字符（表情、生僻字）写成一对各 3 字节的代理项，按 UTF-8 解会变成替换符。
+ * 没有代理项时它就是 UTF-8（绝大多数情况），直接解；有的话逐个码元解成 UTF-16
+ */
+function cesu8Text(bytes: Uint8Array): string {
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let at = buffer.indexOf(0xed);
+  while (at >= 0 && buffer[at + 1]! < 0xa0) at = buffer.indexOf(0xed, at + 1);
+  if (at < 0) return buffer.toString('utf8');
+  let text = '';
+  const units: number[] = [];
+  for (let i = 0; i < buffer.length;) {
+    const b = buffer[i]!;
+    if (b < 0x80) {
+      units.push(b);
+      i += 1;
+    } else if (b < 0xe0) {
+      units.push(((b & 0x1f) << 6) | (buffer[i + 1]! & 0x3f));
+      i += 2;
+    } else {
+      units.push(((b & 0x0f) << 12) | ((buffer[i + 1]! & 0x3f) << 6) | (buffer[i + 2]! & 0x3f));
+      i += 3;
+    }
+    if (units.length >= 8192) text += String.fromCharCode(...units.splice(0));
+  }
+  return text + String.fromCharCode(...units);
 }
 
 class HanaSession implements Session {
@@ -251,6 +344,9 @@ const ISOLATION = {
   serializable: 'SERIALIZABLE',
 } as const;
 
+/** HANA 会话默认的隔离级别 */
+const DEFAULT_ISOLATION = 'READ COMMITTED';
+
 /** hdb 连接参数（hdb 自己没有类型，这里声明用到的字段；其余原样传给 hdb） */
 export interface HdbClientOptions {
   host: string;
@@ -299,13 +395,32 @@ class Pool {
     else this.idle.push(client);
   }
 
+  /** 状态不可信的连接：关掉，不放回池里；有人在等时给他另开一条 */
+  discard(client: Client): void {
+    client.end();
+    this.size--;
+    const next = this.waiting.shift();
+    if (!next) return;
+    this.size++;
+    this.open().then(next, () => {
+      // 开不出来：让他继续等别人还回来的连接
+      this.size--;
+      this.waiting.unshift(next);
+    });
+  }
+
   end(): void {
     for (const client of this.idle.splice(0)) client.end();
   }
 
   private async open(): Promise<Client> {
     const { schema, max: _max, ...connect } = this.options;
-    const client = hdb.createClient(connect);
+    // rowsWithMetadata：结果行带上列的类型，字符型大对象靠它解成文字（见 lobsAsText）
+    const client = hdb.createClient({
+      packetSizeLimit: PACKET_SIZE_LIMIT,
+      ...connect,
+      rowsWithMetadata: true,
+    });
     client.on('error', () => undefined);
     await call<void>((cb) => client.connect((error) => cb(error, undefined)));
     if (schema) await run(client, `SET SCHEMA "${schema.replace(/"/g, '""')}"`, []);
@@ -330,6 +445,7 @@ class HanaDriver extends HanaSession implements Driver {
   ): Promise<T> {
     const client = await this.pool.acquire();
     client.setAutoCommit(false);
+    let usable = true;
     try {
       if (options?.isolation)
         await run(client, `SET TRANSACTION ISOLATION LEVEL ${ISOLATION[options.isolation]}`, []);
@@ -349,7 +465,17 @@ class HanaDriver extends HanaSession implements Driver {
       }
     } finally {
       client.setAutoCommit(true);
-      this.pool.release(client);
+      // HANA 的 SET TRANSACTION 作用在会话上，事务结束也不复原：还回池之前改回默认值，
+      // 否则下一个借到这条连接的语句还是只读、还是那个隔离级别。改不回去的连接不要了
+      try {
+        if (options?.readOnly) await run(client, 'SET TRANSACTION READ WRITE', []);
+        if (options?.isolation)
+          await run(client, `SET TRANSACTION ISOLATION LEVEL ${DEFAULT_ISOLATION}`, []);
+      } catch {
+        usable = false;
+      }
+      if (usable) this.pool.release(client);
+      else this.pool.discard(client);
     }
   }
 

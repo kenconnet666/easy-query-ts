@@ -55,6 +55,54 @@ describe('hana: SQL text', () => {
     assert.ok(!ignore!.sql.includes('WHEN MATCHED'));
   });
 
+  it('updates through a navigation with the alias after UPDATE and the joins in FROM', () => {
+    assert.equal(
+      db
+        .update(Post)
+        .set((p) => ({ title: p.user.name }))
+        .where((p) => p.user.name.eq('bob'))
+        .toSQL().sql,
+      'UPDATE t0 SET "title" = t1."name" FROM "t_post" t0 LEFT JOIN "t_user" t1 ON t1."id" = t0."user_id" WHERE t1."name" = ?',
+    );
+    // 没有导航时是普通的写法
+    assert.equal(
+      db
+        .update(Post)
+        .set({ title: 'x' })
+        .where((p) => p.id.eq(1))
+        .toSQL().sql,
+      'UPDATE "t_post" AS t0 SET "title" = ? WHERE t0."id" = ?',
+    );
+  });
+
+  it('selects conditions as CASE, averages over TO_DECIMAL and addresses json keys with brackets', () => {
+    assert.equal(
+      db
+        .queryable(User)
+        .select((u) => ({ adult: u.age.ge(18), has: u.attrs.jsonHas('tags', 0) }))
+        .toSQL().sql,
+      'SELECT CASE WHEN t0."age" >= ? THEN 1 ELSE 0 END AS "c0",' +
+        ` CASE WHEN (JSON_VALUE(t0."attrs", '$[''tags''][0]') IS NOT NULL OR JSON_QUERY(t0."attrs", '$[''tags''][0]') IS NOT NULL) THEN 1 ELSE 0 END AS "c1"` +
+        ' FROM "t_user" t0',
+    );
+    assert.equal(
+      db
+        .queryable(Post)
+        .groupBy((p) => ({ userId: p.userId }))
+        .select((g) => g.avg((p) => p.amount))
+        .toSQL().sql,
+      'SELECT AVG(TO_DECIMAL(t0."amount")) AS "c0" FROM "t_post" t0 GROUP BY t0."user_id"',
+    );
+    assert.throws(
+      () =>
+        db
+          .queryable(User)
+          .select((u) => u.attrs.jsonLength('tags'))
+          .toSQL(),
+      /jsonLength is not supported by the hana dialect/,
+    );
+  });
+
   it('needs a LIMIT before OFFSET', () => {
     assert.match(db.queryable(Post).offset(3).toSQL().sql, / LIMIT 2147483647 OFFSET 3$/);
   });

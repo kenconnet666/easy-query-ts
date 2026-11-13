@@ -63,6 +63,8 @@ if (!raw) {
     dateTrunc: false,
     createTableAs: false,
     returning: false,
+    orderedSubqueries: false,
+    jsonLength: false,
   });
 
   describe(`hana ${url.port}: Hana.* functions`, () => {

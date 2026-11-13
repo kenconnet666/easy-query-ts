@@ -88,8 +88,10 @@ export interface LiveSuiteOptions {
   readonly nthValue?: boolean;
   /** FOR UPDATE NOWAIT（Db2 LUW 没有，只有 SKIP LOCKED DATA） */
   readonly noWait?: boolean;
-  /** jsonLength（Db2 的 JSON_TABLE 只能从根展开，数不了数组长度） */
+  /** jsonLength（Db2 的 JSON_TABLE 只能从根展开、HANA 的不能引用外层的列，数不了数组长度） */
   readonly jsonLength?: boolean;
+  /** 导航上的 at(i)：关联子查询里带 ORDER BY … LIMIT，HANA 不允许（correlated subquery cannot have TOP or ORDER BY） */
+  readonly orderedSubqueries?: boolean;
   /** JSON 的更新写法（jsonSet / jsonRemove / jsonMerge / jsonAppend）：PG、MySQL、SQLite 有，传 true 才测 */
   readonly jsonEdits?: boolean;
 }
@@ -3185,31 +3187,40 @@ export function liveSuite(
         .select((u) => u.name)
         .toList();
       assert.deepEqual(all, ['alice', 'carol']);
-      const rows = await db
-        .queryable(User)
-        .orderBy((u) => u.id)
-        .select((u) => ({
-          latest: u.posts.orderBy((p) => p.id.desc()).at(0).title,
-          second: u.posts.orderBy((p) => p.id).at(1).title,
-          users: u.posts.countDistinct((p) => p.userId),
-        }))
-        .toList();
-      assert.deepEqual(rows, [
-        { latest: 'sql 100%', second: 'sql 100%', users: 1 },
-        { latest: 'hello', second: 'hello', users: 1 },
-        { latest: null, second: null, users: 0 },
-      ]);
-      const byLatest = await db
-        .queryable(User)
-        .where((u) =>
-          u.posts
-            .orderBy((p) => p.id)
-            .at(0)
-            .title.startsWith('orm'),
-        )
-        .select((u) => u.name)
-        .toList();
-      assert.deepEqual(byLatest.sort(), ['alice', 'bob']);
+      assert.deepEqual(
+        await db
+          .queryable(User)
+          .orderBy((u) => u.id)
+          .select((u) => u.posts.countDistinct((p) => p.userId))
+          .toList(),
+        [1, 1, 0],
+      );
+      if (options.orderedSubqueries !== false) {
+        const rows = await db
+          .queryable(User)
+          .orderBy((u) => u.id)
+          .select((u) => ({
+            latest: u.posts.orderBy((p) => p.id.desc()).at(0).title,
+            second: u.posts.orderBy((p) => p.id).at(1).title,
+          }))
+          .toList();
+        assert.deepEqual(rows, [
+          { latest: 'sql 100%', second: 'sql 100%' },
+          { latest: 'hello', second: 'hello' },
+          { latest: null, second: null },
+        ]);
+        const byLatest = await db
+          .queryable(User)
+          .where((u) =>
+            u.posts
+              .orderBy((p) => p.id)
+              .at(0)
+              .title.startsWith('orm'),
+          )
+          .select((u) => u.name)
+          .toList();
+        assert.deepEqual(byLatest.sort(), ['alice', 'bob']);
+      }
       assert.throws(
         () =>
           db

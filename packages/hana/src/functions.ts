@@ -8,12 +8,31 @@
 import {
   codecs,
   dialectFn,
-  standardJsonPath,
+  jsonPathParts,
+  sqlString,
   unquoteSql,
   type Expr,
   type FunctionRenderer,
   type Pred,
 } from '@zerodep-dev/easy-query-ts';
+
+/**
+ * HANA 的 JSON 路径：键写成 `$['key']`。`$."key"` 这种带双引号的写法它取不到值（返回 NULL），
+ * `$.key` 又认不得带空格、数字开头的键；键里的单引号、反斜杠不知道怎么转义，直接报错
+ */
+function hanaJsonPath(literal: string): string {
+  const path = jsonPathParts(literal)
+    .map((part) => {
+      if (typeof part === 'number') return `[${part}]`;
+      if (part.includes("'") || part.includes('\\'))
+        throw new Error(
+          `json path key ${JSON.stringify(part)} is not supported by the hana dialect`,
+        );
+      return `['${part}']`;
+    })
+    .join('');
+  return sqlString(`$${path}`);
+}
 
 export const Hana = {
   text: (...columns: Expr<string | null>[]) => {
@@ -71,12 +90,18 @@ export const hanaFunctions: Record<string, FunctionRenderer> = {
   truncate: (a) => `ROUND(${a[0]}, ${a[1]}, ROUND_DOWN)`,
   log10: (a) => `LOG(10, ${a[0]})`,
   // JSON：JSON_QUERY 取对象、数组，JSON_VALUE 取标量
-  json_value: (a) => `JSON_QUERY(${a[0]}, ${standardJsonPath(a[1]!)})`,
-  json_text: (a) => `JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)})`,
-  json_number: (a) => `CAST(JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)}) AS DOUBLE)`,
-  json_boolean: (a) => `(JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)}) = 'true')`,
+  json_value: (a) => `JSON_QUERY(${a[0]}, ${hanaJsonPath(a[1]!)})`,
+  json_text: (a) => `JSON_VALUE(${a[0]}, ${hanaJsonPath(a[1]!)})`,
+  json_number: (a) => `CAST(JSON_VALUE(${a[0]}, ${hanaJsonPath(a[1]!)}) AS DOUBLE)`,
+  json_boolean: (a) => `(JSON_VALUE(${a[0]}, ${hanaJsonPath(a[1]!)}) = 'true')`,
   json_has: (a) =>
-    `(JSON_VALUE(${a[0]}, ${standardJsonPath(a[1]!)}) IS NOT NULL OR JSON_QUERY(${a[0]}, ${standardJsonPath(a[1]!)}) IS NOT NULL)`,
+    `(JSON_VALUE(${a[0]}, ${hanaJsonPath(a[1]!)}) IS NOT NULL OR JSON_QUERY(${a[0]}, ${hanaJsonPath(a[1]!)}) IS NOT NULL)`,
+  // JSON_TABLE 能把数组展开成行，但它的文档参数不能引用外层查询的列：按行数数组长度做不到
+  json_length: () => {
+    throw new Error(
+      'jsonLength is not supported by the hana dialect (JSON_TABLE cannot read a column of the outer query)',
+    );
+  },
   cast_string: (a) => `CAST(${a[0]} AS NVARCHAR(5000))`,
   cast_double: (a) => `CAST(${a[0]} AS DOUBLE)`,
   'hana.contains': (a) => `CONTAINS(${columnList(a.slice(0, -1))}, ${a[a.length - 1]})`,
