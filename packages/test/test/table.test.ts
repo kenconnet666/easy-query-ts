@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { parseTableRequest, rangeOf } from '@zerodep-dev/easy-query-ts';
-import { seed, User } from '../src/fixture.ts';
+import { Post, seed, User } from '../src/fixture.ts';
 import { memoryDb } from '../src/sqlite-env.ts';
 
 describe('parseTableRequest', () => {
@@ -85,6 +85,41 @@ describe('sqlite: Queryable.table', async () => {
       people().table(parseTableRequest({ 'filter.age': 'x' })),
       /expects a number/,
     );
+  });
+
+  it('请求的列名不能顺着导航走到别的表：没有 select、或结果里带了导航的整行时也一样', async () => {
+    const posts = db.queryable(Post);
+    for (const request of [
+      { 'filter.user.name': 'alice' },
+      { 'search.user.company.name': 'a' },
+      { sort: '-user.age' },
+      { condition: JSON.stringify({ field: 'user.name', op: 'startsWith', value: 'a' }) },
+    ])
+      await assert.rejects(
+        posts.table(parseTableRequest(request)),
+        /not a column of the result \(columns: id, userId, title, amount\)/,
+      );
+    // 结果里的整行：它自己的列能用，再往下的导航不行
+    const withUser = db.queryable(Post).select((p) => ({ id: p.id, user: p.user }));
+    assert.equal(
+      (await withUser.table(parseTableRequest({ 'filter.user.name': 'alice' }))).total,
+      2,
+    );
+    await assert.rejects(
+      withUser.table(parseTableRequest({ 'filter.user.company.name': 'acme' })),
+      /not a column of the result/,
+    );
+    await assert.rejects(
+      posts.table(parseTableRequest({ sort: 'constructor.name' })),
+      /not a column of the result/,
+    );
+  });
+
+  it('toPage 的页码、条数必须是正整数', async () => {
+    const users = db.queryable(User).orderBy((u) => u.id);
+    await assert.rejects(users.toPage(0, 10), /page must be a positive integer, got 0/);
+    await assert.rejects(users.toPage(1.5, 10), /page must be a positive integer/);
+    await assert.rejects(users.toPage(1, 0), /size must be a positive integer, got 0/);
   });
 
   it('没有 select 时结果列就是实体的列', async () => {

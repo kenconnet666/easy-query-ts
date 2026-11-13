@@ -14,6 +14,7 @@
  * 前端已知总数时（只翻页、换排序）带上 total，不再执行 COUNT。
  */
 import { and, Expr, not, or, type Cond } from './expr.ts';
+import { REF, type AnyRef } from './ref.ts';
 
 /** 每页条数的上限：超过时报错，不悄悄少给（同 Spring Data 的 max-page-size） */
 const MAX_PAGE_SIZE = 2000;
@@ -110,9 +111,7 @@ function nonNegativeInt(text: string, name: string): number {
 /** 结果里一列的表达式；不是列（嵌套对象、一对多的数组）或没有这个名字时报错，说明能用哪些 */
 export function resultColumn(shape: unknown, key: string, use: string): Expr<unknown> {
   // 值对象里的列写成路径：'address.city'
-  const value = key
-    .split('.')
-    .reduce<unknown>((item, part) => (item as Record<string, unknown> | null)?.[part], shape);
+  const value = key.split('.').reduce(resultMember, shape);
   if (value instanceof Expr) return value;
   const columns = Object.entries((shape ?? {}) as Record<string, unknown>)
     .filter(([, item]) => item instanceof Expr)
@@ -120,6 +119,20 @@ export function resultColumn(shape: unknown, key: string, use: string): Expr<unk
   throw new Error(
     `cannot ${use} by '${key}': not a column of the result (columns: ${columns.join(', ')})`,
   );
+}
+
+/**
+ * 路径的下一段，只在结果里走。键来自请求，所以只认自有属性（挡住 __proto__、constructor），
+ * 表引用上的导航也不认：`user.name` 会顺着导航 join 到别的表，那些列不在结果里，请求不该碰得到；计算属性是这个实体自己的，照常能用
+ */
+function resultMember(item: unknown, part: string): unknown {
+  if (item === null || typeof item !== 'object' || !Object.hasOwn(item, part)) return undefined;
+  if (REF in item) {
+    const { schema, key } = (item as AnyRef)[REF];
+    const member = schema.relations[key]?.[part];
+    if (member && member.kind !== 'computed') return undefined;
+  }
+  return (item as Record<string, unknown>)[part];
 }
 
 /**
