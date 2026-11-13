@@ -60,7 +60,7 @@ UPDATE t_post SET title = CASE WHEN id = ? THEN ? WHEN id = ? THEN ? ELSE title 
 WHERE (id = ? AND version = ?) OR (id = ? AND version = ?)
 ```
 
-官方靠 JDBC 的批量接口（同一条 SQL 多组参数）；Node 的驱动没有统一的等价物，所以直接合成一条，各库都是一次往返，按方言的绑定参数上限切块。带版本列时逐行带版本条件，改到的行数不足就抛 `optimistic lock failed: n of m`。`ELSE 原列` 不会走到（条件只选中这些行），是给 PG 推断 CASE 类型用的。插入本来就是多行 `VALUES` 一条语句。
+官方靠 JDBC 的批量接口（同一条 SQL 多组参数）；Node 的驱动没有统一的等价物，所以直接合成一条，各库都是一次往返；每条最多 500 行，并按方言的绑定参数上限切块。带版本列时逐行带版本条件，改到的行数不足就抛 `optimistic lock failed: n of m`。`ELSE 原列` 不会走到（条件只选中这些行），是给 PG 推断 CASE 类型用的。插入本来就是多行 `VALUES` 一条语句。
 
 ## 大批量写入（ROADMAP 19.5）
 

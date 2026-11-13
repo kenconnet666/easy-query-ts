@@ -58,7 +58,7 @@ export default _component(() => () => (
       <SqlExample example={expectRows} title="发布：只有草稿能发布" />
     </Section>
     <Section id="returning" title="拿回改之后的值">
-      <P text="切到 MySQL 看：没有 RETURNING 的库在渲染时报错。" />
+      <P text="切到 MySQL 看：没有 RETURNING 的库在渲染时报错。`expectRows` 与乐观锁的检查照常生效：行数不对、版本对不上时抛错，不会返回空数组。" />
       <SqlExample example={updateReturning} title="returning" />
     </Section>
     <Section id="limit" title="分批改">
@@ -74,7 +74,7 @@ export default _component(() => () => (
       <SqlExample example={updateColumns} title="null 的不改" />
     </Section>
     <Section id="batch" title="批量更新">
-      <P text="`entities` 每行一条语句。加 `batch()` 把写的列相同的行合成一条 CASE WHEN，一次往返，按参数上限切块。" />
+      <P text="`entities` 每行一条语句。加 `batch()` 把写的列相同的行合成一条 CASE WHEN，一次往返；每条最多 500 行，并按参数上限切块。" />
       <SqlExample example={entitiesEach} title="逐行" />
       <SqlExample example={batch} title="合成一条" />
       <Points

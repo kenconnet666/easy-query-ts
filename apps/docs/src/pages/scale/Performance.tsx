@@ -77,7 +77,7 @@ export default _component(() => () => (
       <CodeBlock code={stream} lang="ts" />
       <Sub id="bulk" title="批量写入" />
       <CodeBlock code={bulk} lang="ts" />
-      <P text="`entities(rows).batch()` 把一批更新合成一条 CASE WHEN，一次往返，按参数上限切块。超长的 `in(...)` 列表没法这样拆，渲染时超过上限直接报错，分批查询。" />
+      <P text="`entities(rows).batch()` 把一批更新合成一条 CASE WHEN，一次往返；每条最多 500 行，并按参数上限切块。超长的 `in(...)` 列表没法这样拆，渲染时超过上限直接报错，分批查询。" />
       <SqlExample example={batch} title="批量更新" />
     </Section>
     <Section id="prepare" title="预编译">

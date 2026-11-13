@@ -100,8 +100,7 @@ export class Returning<R> {
   private readonly statements: readonly Statement[];
   private readonly props: readonly string[];
   private readonly detail: WriteDetail;
-  /** update / delete：读改之前的行（拦截器要时） */
-  private readonly before: (() => Promise<Record<string, unknown>[] | undefined>) | undefined;
+  private readonly guard: ReturningGuard;
 
   constructor(
     ctx: Context,
@@ -109,14 +108,14 @@ export class Returning<R> {
     statements: readonly Statement[],
     props: readonly string[],
     detail: WriteDetail,
-    before?: () => Promise<Record<string, unknown>[] | undefined>,
+    guard: ReturningGuard = {},
   ) {
     this.ctx = ctx;
     this.entity = entity;
     this.statements = statements;
     this.props = props;
     this.detail = detail;
-    this.before = before;
+    this.guard = guard;
   }
 
   toSQL(): Statement[] {
@@ -126,11 +125,12 @@ export class Returning<R> {
   }
 
   async execute(): Promise<R[]> {
-    const before = await this.before?.();
+    const before = await this.guard.before?.();
     const out: R[] = [];
     for (const statement of this.toSQL())
       for (const row of await query(this.ctx, statement))
         out.push(decodeRow(this.entity, this.props, (p) => row[this.entity.columnNames[p]!]) as R);
+    this.guard.check?.(out.length);
     await this.ctx.interceptors.afterWrite(
       {
         ...this.detail,
@@ -143,6 +143,14 @@ export class Returning<R> {
     );
     return out;
   }
+}
+
+/** update / delete 带 RETURNING 时，不带 RETURNING 的那条路上有的东西照样要有 */
+interface ReturningGuard {
+  /** 读改之前的行（拦截器要时） */
+  readonly before?: () => Promise<Record<string, unknown>[] | undefined>;
+  /** 按改到的行数检查 expectRows 与乐观锁，不满足就抛错 */
+  readonly check?: (affected: number) => void;
 }
 
 /** 读出的一行按列解码，值对象的列放回嵌套对象 */
@@ -251,7 +259,7 @@ export class BatchUpdate {
     this.merged = merged;
   }
 
-  /** 写的列相同的行合成一条语句（按方言的绑定参数上限切块） */
+  /** 写的列相同的行合成一条语句（每条最多 500 行，并按方言的绑定参数上限切块） */
   batch(): BatchUpdate {
     return new BatchUpdate(this.ctx, this.key, this.state, this.rows, this.options, true);
   }
@@ -291,8 +299,13 @@ export class BatchUpdate {
     // 每行占的参数：每列一个 WHEN（主键几列 + 值），WHERE 里主键几列（+ 版本）
     const perRow = (columns: number) =>
       columns * (pk.length + 1) + pk.length + (version === undefined ? 0 : 1);
+    // 拦截器还会各添几个参数（$onUpdate、touch 的值，租户条件），留出余量
+    const budget = this.ctx.dialect.maxBindParams - BATCH_RESERVED_PARAMS;
     return [...groups.values()].flatMap(({ written, rows }) => {
-      const size = Math.max(1, Math.floor(this.ctx.dialect.maxBindParams / perRow(written.length)));
+      const size = Math.max(
+        1,
+        Math.min(BATCH_UPDATE_ROWS, Math.floor(budget / perRow(written.length))),
+      );
       const updates: Updatable<any, any>[] = [];
       for (let from = 0; from < rows.length; from += size)
         updates.push(this.merge(entity, written, rows.slice(from, from + size)));
@@ -351,6 +364,15 @@ export class BatchUpdate {
     );
   }
 }
+
+/**
+ * batch() 一条语句最多合并多少行。每行在 WHERE 里是 OR 的一项、在每列的 CASE 里是一个 WHEN：
+ * SQLite 的表达式嵌套上限是 1000 层（OR 链一项一层），而且库对每一行都要把 WHEN 从头比到命中，行数再多只会更慢
+ */
+const BATCH_UPDATE_ROWS = 500;
+
+/** batch() 按参数个数切块时留给拦截器的余量 */
+const BATCH_RESERVED_PARAMS = 32;
 
 /** 按主键（与版本）定位一行时，主键与版本都要有值 */
 function requireKey(
@@ -996,7 +1018,7 @@ abstract class Filtered {
   /** 同样的语句，换一个构建现场 */
   protected abstract retarget(ctx: Context): Filtered;
 
-  private check(affected: number): void {
+  protected check(affected: number): void {
     const expect = this.state.expect;
     if (expect && affected !== expect.count) throw expect.error(affected);
     // 带乐观锁条件却一行也没改到：行已被删除或已被别人改过
@@ -1222,14 +1244,10 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   returning(...columns: string[]): Returning<unknown> {
     const entity = this.ctx.schema.entities[this.key]!;
     const { statement, detail } = this.withState({ returning: true }).build();
-    return new Returning(
-      this.ctx,
-      entity,
-      [statement],
-      returningProps(entity, columns),
-      detail,
-      () => this.rowsBefore(),
-    );
+    return new Returning(this.ctx, entity, [statement], returningProps(entity, columns), detail, {
+      before: () => this.rowsBefore(),
+      check: (affected) => this.check(affected),
+    });
   }
 
   /**
@@ -1386,14 +1404,10 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   returning(...columns: string[]): Returning<unknown> {
     const entity = this.ctx.schema.entities[this.key]!;
     const { statement, detail } = this.withState({ returning: true }).build();
-    return new Returning(
-      this.ctx,
-      entity,
-      [statement],
-      returningProps(entity, columns),
-      detail,
-      () => this.rowsBefore(),
-    );
+    return new Returning(this.ctx, entity, [statement], returningProps(entity, columns), detail, {
+      before: () => this.rowsBefore(),
+      check: (affected) => this.check(affected),
+    });
   }
 
   protected retarget(ctx: Context): Deletable<S, K> {
