@@ -234,11 +234,11 @@ catalogs:
       specifier: 8.11.10
       version: 8.11.10
     '@zerodep-dev/vue-tsx-pro-tsx':
-      specifier: 0.21.0
-      version: 0.21.0
+      specifier: 0.22.0
+      version: 0.22.0
     '@zerodep-dev/vue-tsx-pro-ui':
-      specifier: 0.21.0
-      version: 0.21.0
+      specifier: 0.22.0
+      version: 0.22.0
     decimal.js:
       specifier: 10.6.0
       version: 10.6.0
@@ -378,10 +378,10 @@ importers:
         version: link:../../packages/sqlite
       '@zerodep-dev/vue-tsx-pro-tsx':
         specifier: 'catalog:'
-        version: 0.21.0(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))
+        version: 0.22.0(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))
       '@zerodep-dev/vue-tsx-pro-ui':
         specifier: 'catalog:'
-        version: 0.21.0(@codemirror/autocomplete@6.20.3)(@codemirror/commands@6.11.1)(@codemirror/lang-javascript@6.2.5)(@codemirror/language@6.13.1)(@codemirror/search@6.7.2)(@codemirror/state@6.7.6)(@codemirror/view@6.43.14)(@lezer/highlight@1.2.5)(@lucide/icons@1.69.0)(pinyin-pro@3.29.5)(shiki@4.5.0)(vite@8.3.4(@types/node@24.19.2))(vue-router@5.4.0(@vue/compiler-sfc@3.5.44)(rolldown@1.2.16)(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1)))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))(zod@4.6.7)
+        version: 0.22.0(@codemirror/autocomplete@6.20.3)(@codemirror/commands@6.11.1)(@codemirror/lang-javascript@6.2.5)(@codemirror/language@6.13.1)(@codemirror/search@6.7.2)(@codemirror/state@6.7.6)(@codemirror/view@6.43.14)(@lezer/highlight@1.2.5)(@lucide/icons@1.69.0)(pinyin-pro@3.29.5)(shiki@4.5.0)(vite@8.3.4(@types/node@24.19.2))(vue-router@5.4.0(@vue/compiler-sfc@3.5.44)(rolldown@1.2.16)(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1)))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))(zod@4.6.7)
       pinyin-pro:
         specifier: 'catalog:'
         version: 3.29.5
@@ -1709,8 +1709,8 @@ packages:
   '@vue/shared@3.5.44':
     resolution: {integrity: sha512-H82XLH0DjmSOdbEwO15x3QTo1f5PWEtv237eLpYKc0mqLu+B8hnq16lFWmuBmNurkeiG3wr+oM1FhOll/YVFRg==}
 
-  '@zerodep-dev/vue-tsx-pro-tsx@0.21.0':
-    resolution: {integrity: sha512-2ZD0v5ylkxYniXpkxKoTOOlcFbzPFTEja7nUuCmBWNt3XVcdyTyaW9aitOv9Krmbj/Zq34vBvVHquM88KllA4A==}
+  '@zerodep-dev/vue-tsx-pro-tsx@0.22.0':
+    resolution: {integrity: sha512-43U1rdXmUnOlOar12zPeQaFe2RrKmSINMUM0d5FoWCPySpq7btWt+DvurX/PlmBvUrljt18H9TQkJFPqR4kzyw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       vite: ^8.0.0
@@ -1719,8 +1719,8 @@ packages:
       vite:
         optional: true
 
-  '@zerodep-dev/vue-tsx-pro-ui@0.21.0':
-    resolution: {integrity: sha512-wOlSWlGFBo9465B4A2L4OrCeiy2G6HzZhUNbOy6DNqkMmFip8MjOrbiDU/pX/gvAK5BADjuFLFbYFbjz5sWGZA==}
+  '@zerodep-dev/vue-tsx-pro-ui@0.22.0':
+    resolution: {integrity: sha512-bdNkC2wA6xxG2hFCh+SqfZLIyFju2hFpZN2jA16JQBVJ5Gah8SBC2palDg7jqg/uCR15GZ9jQtQRhNZ6xl9uwg==}
     hasBin: true
     peerDependencies:
       '@codemirror/autocomplete': ^6.20.0
@@ -4271,7 +4271,7 @@ snapshots:
 
   '@vue/shared@3.5.44': {}
 
-  '@zerodep-dev/vue-tsx-pro-tsx@0.21.0(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))':
+  '@zerodep-dev/vue-tsx-pro-tsx@0.22.0(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))':
     dependencies:
       '@babel/core': 8.0.7
       '@babel/plugin-transform-typescript': 8.0.6(@babel/core@8.0.7)
@@ -4282,13 +4282,13 @@ snapshots:
     optionalDependencies:
       vite: 8.3.4(@types/node@24.19.2)
 
-  '@zerodep-dev/vue-tsx-pro-ui@0.21.0(@codemirror/autocomplete@6.20.3)(@codemirror/commands@6.11.1)(@codemirror/lang-javascript@6.2.5)(@codemirror/language@6.13.1)(@codemirror/search@6.7.2)(@codemirror/state@6.7.6)(@codemirror/view@6.43.14)(@lezer/highlight@1.2.5)(@lucide/icons@1.69.0)(pinyin-pro@3.29.5)(shiki@4.5.0)(vite@8.3.4(@types/node@24.19.2))(vue-router@5.4.0(@vue/compiler-sfc@3.5.44)(rolldown@1.2.16)(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1)))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))(zod@4.6.7)':
+  '@zerodep-dev/vue-tsx-pro-ui@0.22.0(@codemirror/autocomplete@6.20.3)(@codemirror/commands@6.11.1)(@codemirror/lang-javascript@6.2.5)(@codemirror/language@6.13.1)(@codemirror/search@6.7.2)(@codemirror/state@6.7.6)(@codemirror/view@6.43.14)(@lezer/highlight@1.2.5)(@lucide/icons@1.69.0)(pinyin-pro@3.29.5)(shiki@4.5.0)(vite@8.3.4(@types/node@24.19.2))(vue-router@5.4.0(@vue/compiler-sfc@3.5.44)(rolldown@1.2.16)(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1)))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))(zod@4.6.7)':
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@internationalized/date': 3.12.4
       '@lucide/icons': 1.69.0
       '@radix-ui/colors': 3.0.0
-      '@zerodep-dev/vue-tsx-pro-tsx': 0.21.0(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))
+      '@zerodep-dev/vue-tsx-pro-tsx': 0.22.0(vite@8.3.4(@types/node@24.19.2))(vue@3.5.44(typescript@7.1.0-dev.20261104.1))
       culori: 4.0.2
       decimal.js: 10.6.0
       tabbable: 6.5.0
