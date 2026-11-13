@@ -1118,3 +1118,19 @@ export function setPath(target: Record<string, unknown>, path: string, value: un
     current = (current[part] ??= {}) as Record<string, unknown>;
   current[parts.at(-1)!] = value;
 }
+
+/**
+ * 几个键值 → 一个 Map 的键：对象树按它把子项挂回父行，聚合保存按它认出原来的行。
+ * 不能直接 String()：二进制的键（MySQL 把 uuid 存成 BINARY(16)）转成文字时，非法的 UTF-8 字节都变成同一个替换符，
+ * 不同的键会撞在一起；Date 转成文字只到秒
+ */
+export function keyText(values: readonly unknown[]): string {
+  return values.map(keyPart).join('\u0001');
+}
+
+function keyPart(value: unknown): string {
+  if (value instanceof Uint8Array)
+    return Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  if (value instanceof Date) return String(value.getTime());
+  return String(value);
+}

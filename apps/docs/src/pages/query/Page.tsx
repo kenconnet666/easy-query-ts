@@ -36,7 +36,7 @@ export default _component(() => () => (
       <SqlExample example={limitOffset} title="跳过 4 行取 3 行" />
     </Section>
     <Section id="to-page" title="toPage">
-      <P text="`toPage` 先数总数，再取这一页，返回 `{ rows, total, page, size }`。页码从 1 开始。" />
+      <P text="`toPage` 先数总数，再取这一页，返回 `{ rows, total, page, size }`。页码从 1 开始；页码、条数不是正整数时报错。" />
       <SqlExample example={sortPage} title="第二页" />
       <P text="COUNT 语句会去掉用不到的 join 和排序。对象树的第二条查询也只查这一页的父行。" />
       <SqlExample example={pageWithNavigation} title="带导航列和子表统计" />

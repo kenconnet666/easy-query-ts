@@ -64,7 +64,7 @@ describe('postgres: JSON edits and jsonSome', () => {
 describe('postgres: query forms', () => {
   const db = createDb({ schema, adapter: postgres({} as Pool) });
 
-  it('renders DISTINCT ON with its keys leading the ORDER BY, ILIKE, ~*, COLLATE and the lock strengths', () => {
+  it('renders DISTINCT ON with its keys leading the ORDER BY, ILIKE, ~*, COLLATE and the lock strengths', async () => {
     assert.equal(
       db
         .queryable(Post)
@@ -79,6 +79,28 @@ describe('postgres: query forms', () => {
       'SELECT DISTINCT ON (t0."user_id") (t0."title" COLLATE "C") AS "c0" FROM "t_post" t0' +
         ` WHERE t0."title" ILIKE $1 ESCAPE '\\' AND (t0."title" ~* $2) ORDER BY t0."user_id" ASC, t0."id" DESC`,
     );
+    // count()：DISTINCT ON 之后的行数要包成子查询再数（直接换成 COUNT(*) 是不合法的 SQL）
+    const counted: string[] = [];
+    const counting = createDb({
+      schema,
+      adapter: postgres({
+        query: async (config: { text: string }) => {
+          counted.push(config.text);
+          return { rows: [{ n: '2' }] };
+        },
+      } as never),
+    });
+    assert.equal(
+      await counting
+        .queryable(Post)
+        .distinctOn((p) => p.userId)
+        .orderBy((p) => p.id.desc())
+        .count(),
+      2,
+    );
+    assert.deepEqual(counted, [
+      'SELECT COUNT(*) AS "n" FROM (SELECT DISTINCT ON (t0."user_id") t0."id" AS "c0", t0."user_id" AS "c1", t0."title" AS "c2", t0."amount" AS "c3" FROM "t_post" t0 ORDER BY t0."user_id" ASC) eq_count',
+    ]);
     assert.match(db.queryable(Post).forShare().toSQL().sql, / FOR SHARE$/);
     assert.match(db.queryable(Post).forNoKeyUpdate().toSQL().sql, / FOR NO KEY UPDATE$/);
     assert.match(

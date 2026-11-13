@@ -21,7 +21,7 @@
 import type { Db } from './db.ts';
 import { and, or, type Cond, type Expr } from './expr.ts';
 import type { AnySchema, EntityKey, Many, Member, One, Relation } from './relations.ts';
-import { flattenRow, type Entity, type UpdateOf } from './schema.ts';
+import { flattenRow, keyText, type Entity, type UpdateOf } from './schema.ts';
 
 /** 不在输入里的子项怎么处理 */
 export type RemovedPolicy = 'delete' | 'unlink' | 'keep';
@@ -143,22 +143,22 @@ export class AggregateSaver {
     const pk = target.primaryKey;
     const link = Object.fromEntries(rel.to.map((c, i) => [c, parent[rel.from[i]!]]));
     const existing = await this.loadChildren(parent, rel);
-    const byPk = new Map(existing.map((r) => [keyText(r, pk), r]));
-    const byKey = node.key ? new Map(existing.map((r) => [String(r[node.key!]), r])) : undefined;
+    const byPk = new Map(existing.map((r) => [rowKey(r, pk), r]));
+    const byKey = node.key ? new Map(existing.map((r) => [keyText([r[node.key!]]), r])) : undefined;
     const kept = new Set<string>();
     for (const child of list) {
       const flat = flattenRow(target, child);
       const before = hasKey(flat, pk)
-        ? byPk.get(keyText(flat, pk))
+        ? byPk.get(rowKey(flat, pk))
         : node.key && flat[node.key] !== undefined && flat[node.key] !== null
-          ? byKey?.get(String(flat[node.key]))
+          ? byKey?.get(keyText([flat[node.key]]))
           : undefined;
       const values: Row = { ...child, ...link };
       if (before) for (const k of pk) values[k] ??= before[k];
       const saved = await this.save(rel.target, values, node.include, before);
-      kept.add(keyText(saved, pk));
+      kept.add(rowKey(saved, pk));
     }
-    const removed = existing.filter((r) => !kept.has(keyText(r, pk)));
+    const removed = existing.filter((r) => !kept.has(rowKey(r, pk)));
     if (removed.length === 0) return;
     const policy =
       node.removed ??
@@ -187,7 +187,7 @@ export class AggregateSaver {
       const values = rel.to.map((c) => saved[c]);
       if (values.some((v) => v === undefined || v === null))
         throw new Error(`save: a ${rel.target} item has no ${rel.to.join(', ')} to link with`);
-      wanted.set(values.map(String).join('\u0001'), values);
+      wanted.set(keyText(values), values);
     }
     const parentKey = rel.from.map((c) => parent[c]);
     const existing = await this.db
@@ -196,9 +196,8 @@ export class AggregateSaver {
         through.from.map((c, i) => (m[c] as Expr<unknown>).eq(parentKey[i] as never)),
       )
       .toList();
-    const present = new Set(
-      existing.map((m: Row) => through.to.map((c) => String(m[c])).join('\u0001')),
-    );
+    const linkKey = (m: Row) => keyText(through.to.map((c) => m[c]));
+    const present = new Set(existing.map(linkKey));
     const added = [...wanted].filter(([id]) => !present.has(id));
     if (added.length > 0)
       await this.db
@@ -212,9 +211,7 @@ export class AggregateSaver {
         .execute();
     const policy = node.removed ?? 'unlink';
     if (policy === 'keep') return;
-    const gone = existing.filter(
-      (m: Row) => !wanted.has(through.to.map((c) => String(m[c])).join('\u0001')),
-    );
+    const gone = existing.filter((m: Row) => !wanted.has(linkKey(m)));
     if (gone.length === 0) return;
     await this.deleteLinks(parent, rel, gone);
     if (policy === 'delete') {
@@ -349,8 +346,8 @@ function hasKey(row: Row, pk: readonly string[]): boolean {
   return pk.length > 0 && pk.every((k) => row[k] !== undefined && row[k] !== null);
 }
 
-function keyText(row: Row, pk: readonly string[]): string {
-  return pk.map((k) => String(row[k])).join('\u0001');
+function rowKey(row: Row, pk: readonly string[]): string {
+  return keyText(pk.map((k) => row[k]));
 }
 
 /** 这几列（键）等于 rows 里的某一行：单列用 IN，多列写成几组 AND 的 OR */

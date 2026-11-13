@@ -49,6 +49,7 @@ import type { AnySchema, EntityKey, Schema } from './relations.ts';
 import type { KeyOf } from './db.ts';
 import {
   Column,
+  keyText,
   setPath,
   type Codec,
   type DerivedEntity,
@@ -247,6 +248,15 @@ export type KeyInput<E extends Entity> = Row<E>[keyof Row<E>] | Partial<Row<E>>;
 
 type Columns = Record<string, Expr<unknown>>;
 
+function checkPage(page: number, size: number): void {
+  for (const [name, value] of [
+    ['page', page],
+    ['size', size],
+  ] as const)
+    if (!Number.isSafeInteger(value) || value < 1)
+      throw new RangeError(`toPage: ${name} must be a positive integer, got ${value}`);
+}
+
 /** 普通对象（复合主键的 `{ 列: 值 }`），不是 Date、Decimal 这类值对象 */
 function isKeyObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
@@ -423,13 +433,11 @@ abstract class Executable<Out> implements Subquery<Out> {
     );
   }
 
-  /** 恰好一行，否则抛错 */
+  /** 恰好一行，否则抛错：一行都没有时是 NotFoundError（同 firstOrThrow，接口层据此回 404），多于一行是普通的 Error */
   async single(): Promise<Out> {
     const rows = await this.limit(2).toList();
-    if (rows.length !== 1)
-      throw new Error(
-        `expected exactly one row, got ${rows.length === 0 ? 'none' : 'more than one'}`,
-      );
+    if (rows.length === 0) throw new NotFoundError('expected exactly one row, got none');
+    if (rows.length > 1) throw new Error('expected exactly one row, got more than one');
     return rows[0]!;
   }
 
@@ -443,8 +451,9 @@ abstract class Executable<Out> implements Subquery<Out> {
     return (await query(this.ctx, render(this.ctx, built.select))).length > 0;
   }
 
-  /** page 从 1 开始 */
+  /** page 从 1 开始；page、size 不是正整数时报错（页码 0、小数会悄悄取到别的页） */
   async toPage(page: number, size: number): Promise<Page<Out>> {
+    checkPage(page, size);
     const total = await this.count();
     return { rows: await this.pageRows(total, page, size), total, page, size };
   }
@@ -489,7 +498,9 @@ abstract class Executable<Out> implements Subquery<Out> {
       limit: undefined,
       offset: undefined,
     };
-    const grouped = this.state.group !== undefined || this.state.distinct;
+    // 分组、去重（含 DISTINCT ON）之后的行数：包成子查询再数
+    const grouped =
+      this.state.group !== undefined || this.state.distinct || this.state.distinctOn !== undefined;
     const built = build(this.ctx, plain, !grouped);
     const n = this.ctx.dialect.quote('n');
     if (!grouped) {
@@ -683,6 +694,7 @@ export class Queryable<
     }
     const { page, pageSize: size } = request;
     if (request.total === undefined) return query.toPage(page, size);
+    checkPage(page, size);
     return {
       rows: await query.pageRows(request.total, page, size),
       total: request.total,
@@ -1773,7 +1785,7 @@ class ShapeCompiler {
       // 键为 NULL 或空串的行填不到任何东西
       if (present(raw)) {
         const key = fill.from.codec ? fill.from.codec.decode(raw) : raw;
-        const id = slotId([key]);
+        const id = keyText([key]);
         let slot = pending.slots.get(id);
         if (!slot) pending.slots.set(id, (slot = { keys: [key], arrays: [] }));
         slot.arrays.push(array);
@@ -1794,7 +1806,7 @@ class ShapeCompiler {
       const keys = keyAs.map((as) => row[as]);
       // 关联键里有 NULL 或空串的父行不会有孩子，不去查
       if (keys.every(present)) {
-        const id = slotId(keys);
+        const id = keyText(keys);
         let slot = pending.slots.get(id);
         if (!slot) pending.slots.set(id, (slot = { keys, arrays: [] }));
         slot.arrays.push(array);
@@ -1808,11 +1820,6 @@ class ShapeCompiler {
 function present(key: unknown): boolean {
   if (key === null || key === undefined) return false;
   return typeof key !== 'string' || key.trim() !== '';
-}
-
-/** 关联键 → Map 的键：各列转成文字再用不会出现在数据里的分隔符拼起来 */
-function slotId(keys: readonly unknown[]): string {
-  return keys.map(String).join('\u0001');
 }
 
 function decoder(as: string, codec: Codec<any> | undefined): Reader {
@@ -1905,7 +1912,7 @@ async function complete(ctx: Context, shape: ShapeCompiler): Promise<void> {
     for (let i = 0; i < all.length; i += IN_CHUNK) {
       const keys = all.slice(i, i + IN_CHUNK).map((slot) => slot.keys[0]);
       for (const [key, row] of await fill.fetch(keys))
-        for (const array of slots.get(slotId([key]))?.arrays ?? []) array.push(row);
+        for (const array of slots.get(keyText([key]))?.arrays ?? []) array.push(row);
     }
   }
   shape.fixups.forEach((f) => f());
@@ -1959,7 +1966,7 @@ async function fillLists(ctx: Context, lists: readonly PendingList[]): Promise<v
         render(ctx, many.take === undefined ? select : perParent(select, toNodes, many.take)),
       )) {
         const item = shape.read(row);
-        for (const array of pending.slots.get(slotId(keyAs.map((as) => row[as])))?.arrays ?? [])
+        for (const array of pending.slots.get(keyText(keyAs.map((as) => row[as])))?.arrays ?? [])
           array.push(item);
       }
     }
