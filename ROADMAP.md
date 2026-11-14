@@ -316,14 +316,15 @@ easy-query 的 TS 版。阶段编号沿用迁移前 vue-tsx-pro 的 ROADMAP，�
 发 1.0 意味着公开 API 冻结、按语义化版本维护。满足下面几条再发：
 
 - [x] 28.5.1 28.4 的几条做完或写进文档的已知限制
-- [ ] 28.5.2 连续两个次版本（0.4、0.5）没有因为设计问题再改公开 API；改了的都有迁移说明 - 要等 0.5 发出去才能勾。发版前用 `pnpm api:diff` 把构建出的 `.d.ts` 和 npm 上的上一版逐包比，删掉的、签名变了的都写迁移说明（`RELEASE.md` 的发布步骤）
-- [x] 28.5.3 每个公开导出都有说明（28.3.3 已经在检查），文档站每页的示例在各方言下都能运行 - 共用实库套件加了"文档示例"一条：拿每种方言的连接把文档站的全部示例（490 多段）执行一遍。方言明确报"不支持"的写法不算失败（卡片上显示的就是这句）；
-      跑不了、又写进了文档的限制列在 `packages/test/src/docs-examples.ts` 的 `KNOWN_DOCS_FAILURES`，修好后用例会提示删掉 - 跑出来修掉的：条件当排序键、分组键时没写成 CASE WHEN（SQL Server、Oracle、HANA 等，`nullsLast` 的写法直接报语法错）；`sql` 片段放在条件里被补上 `= 1`；
-      HANA 的 `insert().fromQuery()` 生成空的 SELECT；HANA 的 `diff` 收不了只有日期的文字；SQL Server 递归 CTE 里 `cast('string')` 与拼接结果类型不一致；
-      SQL Server 分组键带参数（GROUP BY 照抄 SELECT 里的写法，共用 @p 参数）；DuckDB 分组键带参数（写列序号）、删表时留下自增序列、另一个 schema 的表与当前 schema 的同名表共用一个序列；
-      openGauss 的 `jsonRemove`、`jsonAppend` 改成明确报不支持 - 写进文档的限制：原生 SQL 里不加引号的名字在 Oracle、达梦、HANA、Db2 上按大写找；分组键带参数在 HANA、Oracle、Db2、达梦上报错；HANA 上 `at(i)` 由库报错。
-      分析型与时序库（ClickHouse、Doris、TDengine）有自己的套件，不跑文档示例
-- [x] 28.5.4 支持的库在 CI 里各有一遍共用套件，HANA 8 GB 的长跑观察有结论 - 金仓：公开镜像都要自带 `license.dat`，试用许可证都已过期，也没有找到在 CI 里跑金仓的开源项目。定为"按 PG 模式的写法支持、没有实测"，写进文档站"方言包"一页与 `RELEASE.md`；有实例时设 EQTS_KINGBASE_URL 照常跑共用套件 - HANA：8 GB 上限下连续运行 11.5 小时，其间连跑 5 遍实库套件，cgroup 记的峰值 4.42 GiB（上限的 55%），没有碰到上限，也没有 OOM。8 GB 维持不变
+- [ ] 28.5.2 连续两个次版本（0.4、0.5）没有因为设计问题再改公开 API；改了的都有迁移说明
+  - 要等 0.5 发出去才能勾。发版前用 `pnpm api:diff` 把构建出的 `.d.ts` 和 npm 上的上一版逐包比，删掉的、签名变了的都写迁移说明（`RELEASE.md` 的发布步骤）
+- [x] 28.5.3 每个公开导出都有说明（28.3.3 已经在检查），文档站每页的示例在各方言下都能运行
+  - 共用实库套件加了"文档示例"一条：拿每种方言的连接把文档站的全部示例（490 多段）执行一遍。方言明确报"不支持"的写法不算失败（卡片上显示的就是这句）；跑不了、又写进了文档的限制列在 `packages/test/src/docs-examples.ts` 的 `KNOWN_DOCS_FAILURES`，修好后用例会提示删掉
+  - 跑出来修掉的：条件当排序键、分组键时没写成 CASE WHEN（`nullsLast` 的写法在 SQL Server、Oracle、HANA、Db2 上报语法错）；`sql` 片段放在条件里被补上 `= 1`；SQL Server 分组键带参数（GROUP BY 照抄 SELECT 里的写法，共用 @p 参数）、递归 CTE 里 `cast('string')` 与拼接结果类型不一致；HANA 的 `insert().fromQuery()` 生成空的 SELECT、`diff` 收不了只有日期的文字；Db2 按子查询排序（排序键放进派生表）、CASE 分支的布尔与长字符串参数、`diff` 的参数类型；DuckDB 分组键带参数（写列序号）、删表时留下自增序列、另一个 schema 的同名表共用一个序列；openGauss 的 `jsonRemove`、`jsonAppend` 改成明确报不支持；Oracle 带排序的分页加 `forUpdate` 改成渲染时就报错并给出替代写法
+  - 写进文档的限制：原生 SQL 里不加引号的名字在 Oracle、达梦、HANA、Db2 上按大写找；分组键带参数在 HANA、Oracle、Db2、达梦上报错；HANA 上 `at(i)` 由库报错；SQL Server 镜像没装全文检索组件。分析型与时序库（ClickHouse、Doris、TDengine）有自己的套件，不跑文档示例
+- [x] 28.5.4 支持的库在 CI 里各有一遍共用套件，HANA 8 GB 的长跑观察有结论
+  - 金仓：公开镜像都要自带 `license.dat`，试用许可证都已过期，也没有找到在 CI 里跑金仓的开源项目。定为"按 PG 模式的写法支持、没有实测"，写进文档站"方言包"一页与 `RELEASE.md`；有实例时设 EQTS_KINGBASE_URL 照常跑共用套件
+  - HANA：8 GB 上限下连续运行 11.5 小时，其间连跑 5 遍实库套件，cgroup 记的峰值 4.42 GiB（上限的 55%），没有碰到上限，也没有 OOM。8 GB 维持不变
 - [x] 28.5.5 `RELEASE.md` 写明版本策略：什么算破坏性变更、弃用的 API 保留多久、支持的 Node 与各库的最低版本怎么升。支持的 TypeScript 定为 5.7 起（5.6 及以前不认 `Uint8Array<…>`）
 - [x] 28.5.6 发布产物的检查（`tests/consumer`）覆盖最低与最新的 Node，以及 Bun、Deno 各一遍冒烟；另用最低的 TypeScript 做一遍类型检查
 
