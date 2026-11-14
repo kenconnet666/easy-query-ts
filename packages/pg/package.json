@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-pg",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "PostgreSQL adapter (pg) for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
