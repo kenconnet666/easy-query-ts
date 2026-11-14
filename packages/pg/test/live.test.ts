@@ -6,12 +6,7 @@
 import { afterAll, describe, it } from 'vitest';
 import pg from 'pg';
 import assert from 'node:assert/strict';
-import {
-  createDb,
-  SerializationError,
-  sql,
-  type Statement,
-} from '@zerodep-dev/easy-query-ts';
+import { createDb, SerializationError, sql, type Statement } from '@zerodep-dev/easy-query-ts';
 import { Post, schema, seed, User, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
 import { listen, Pg, postgres } from '../src/index.ts';
