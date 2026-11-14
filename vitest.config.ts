@@ -10,7 +10,8 @@ export default defineConfig({
     name: 'easy-query',
     environment: 'node',
     include: ['packages/*/test/**/*.test.ts'],
-    // PGlite、SQLite WASM 在文件的第一个用例里启动：全量并行跑时 CPU 被占满，默认的 5 秒不够
+    // PGlite、SQLite WASM 在文件的第一个用例或 beforeAll 里启动：全量并行跑时 CPU 被占满，默认的 5 秒、10 秒不够
     testTimeout: 20_000,
+    hookTimeout: 30_000,
   },
 });

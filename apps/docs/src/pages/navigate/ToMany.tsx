@@ -76,6 +76,7 @@ export default _component(() => () => (
       <P text="`at(i)` 按排序取第几行，每一列是一条标量子查询，条件和结果里都能用；没有这一行时列为 NULL。对应 Java 版的 `element`。要整行或多列时用 `first`，见“对象树”。" />
       <SqlExample example={nthChild} title="阅读量最高那篇的标题" />
       <SqlExample example={nthInWhere} title="最高的一篇过了 2000 阅读的作者" />
+      <Note text="HANA 不允许关联子查询里带 TOP 或 ORDER BY，`at(i)` 在 HANA 上由库报错；要取第几个改用 `first`（按窗口函数取，见“对象树”）。" />
     </Section>
     <Section id="group-join" title="子查询太多时：groupJoin">
       <P text="一个导航上要好几个聚合时，逐行子查询要跑好几遍。`groupJoin()` 改成先分组再 LEFT JOIN，一次算完，写法不变。同一个导航（含它的 `where`）上的几个聚合共用一个分组 join。" />

@@ -73,6 +73,7 @@ export default _component(() => () => (
       <P text="数组展开成逗号分隔的多个参数，空数组报错（`IN ()` 不是合法 SQL）；`null` 绑成 NULL；`undefined` 报错，多半是漏传的变量。" />
       <SqlExample example={rawArray} title="IN 列表" />
       <P text="表名、列名不是值，不能绑定参数，用 `db.sql.ident`，按方言加引号，支持 `schema.table`。" />
+      <P text="Oracle、达梦、HANA、Db2 把不加引号的名字折成大写再找，而 `createTables` 建的表名、列名是加了引号的、和实体里写的一样（小写）。在这几种库上写原生 SQL，名字要用 `db.sql.ident` 或自己加双引号，不然报找不到表、列。" />
       <SqlExample example={rawIdent} title="标识符" />
       <SqlExample example={rawExecute} title="写入：返回影响的行数" />
       <P text="事务里用 `tx.sql`，和其它语句在同一个事务里。" />

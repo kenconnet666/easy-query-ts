@@ -56,6 +56,7 @@ import {
   UserRole,
   type TestEnv,
 } from './fixture.ts';
+import { KNOWN_DOCS_FAILURES, runDocsExamples } from './docs-examples.ts';
 
 // 用例里自己写的拦截器：名字要登记，noInterceptor 才认得
 declare module '@zerodep-dev/easy-query-ts' {
@@ -76,6 +77,8 @@ export interface LiveSuiteOptions {
   readonly recursiveCte?: boolean;
   /** 在另一个 schema 里建表（libSQL 的客户端不保证 ATTACH 之后还是同一条连接，传 false） */
   readonly secondSchema?: boolean;
+  /** 把文档站的示例执行一遍；同一种库已经由别的连接跑过时（PGlite、libSQL）传 false，省时间 */
+  readonly docsExamples?: boolean;
   /** 是否测试只读事务；各库的拒绝写入报错不同，只断言"会失败"。HANA 未验证时可关 */
   readonly readOnlyTransactions?: boolean;
   /** 保存点（嵌套事务）；DuckDB 没有 */
@@ -4515,6 +4518,28 @@ export function liveSuite(
             .where((p) => p.title.startsWith('bulk '))
             .count(),
           12000,
+        );
+      },
+    );
+  });
+
+  describe(`${name}: documentation examples`, () => {
+    // 几百段示例，写过数据的要重新建表、放数据：慢的库要几分钟
+    it.skipIf(options.docsExamples === false)(
+      'runs every example of the documentation site',
+      { timeout: 900_000 },
+      async () => {
+        const { db, adapter } = await open();
+        // 示例的表名与套件的部分表相同
+        await db.dropTables();
+        const { ran, failures } = await runDocsExamples(adapter);
+        assert.ok(ran > 400, `only ${ran} examples were found`);
+        const known = KNOWN_DOCS_FAILURES[adapter.dialect.name] ?? {};
+        const unexpected = [...failures].filter(([key]) => !(key in known));
+        const fixed = Object.keys(known).filter((key) => !failures.has(key));
+        assert.deepEqual(
+          { unexpected: Object.fromEntries(unexpected), fixed },
+          { unexpected: {}, fixed: [] },
         );
       },
     );

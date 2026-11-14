@@ -26,6 +26,8 @@ const open = async (): Promise<TestEnv> => {
 
 // 只有一条连接：两个事务互相等锁（NOWAIT、SKIP LOCKED）的用例会卡住
 liveSuite('pglite', open, {
+  // 文档示例由 db 任务里的真 PG 跑
+  docsExamples: false,
   extensionTypes: true,
   extraTables: true,
   rowLocks: false,

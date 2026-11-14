@@ -54,6 +54,7 @@ export default _component(() => () => (
       <SqlExample example={groupByMonth} title="按月统计订单" />
       <SqlExample example={groupByYearMonth} title="按年、月两个键" />
       <SqlExample example={caseInGroup} title="按 CASE 分组" />
+      <Note text="分组键里带参数（CASE 的分支值、比较的常量）时，库要认出 SELECT 和 GROUP BY 里是同一个表达式：PostgreSQL、MySQL、DuckDB 写成列序号 `GROUP BY 1`，SQL Server 两处用同几个 `@p` 参数。HANA、Oracle、Db2、达梦的参数没法这样共用，会报“不是 GROUP BY 表达式”；在这几种库上，分组键里的常量用 `sql` 片段写成字面量，或者先在子查询里算出分组键再分组。" />
       <P text="`groupBy(() => ({}))` 不分组，一行里算好几个聚合。" />
       <SqlExample example={groupWholeTable} title="整张表一行统计" />
     </Section>
