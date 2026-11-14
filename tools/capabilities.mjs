@@ -304,7 +304,7 @@ export const capabilities = {
   'dialect.mssql': {
     title: 'SQL Server 方言',
     status: 'done',
-    ts: 'easy-query-ts-mssql：共用套件全绿（SQL Server 2022）、MsSql.* 专属函数、建表与读库结构；ts-sqlserver.md',
+    ts: 'easy-query-ts-mssql：共用套件全绿（SQL Server 2022）、MsSql.* 专属函数、建表与读库结构',
   },
   'dialect.mssql2008': {
     title: 'SQL Server 2008 及以前（ROW_NUMBER 分页）',
@@ -314,22 +314,22 @@ export const capabilities = {
   'dialect.dameng': {
     title: '达梦方言',
     status: 'done',
-    ts: 'easy-query-ts-dameng：方言继承 Oracle 方言后覆盖差异（BIT、CLOB、IDENTITY_INSERT、多行 VALUES、DATEADD）；共用套件在 DM8 上全绿；ts-dameng.md',
+    ts: 'easy-query-ts-dameng：方言继承 Oracle 方言后覆盖差异（BIT、CLOB、IDENTITY_INSERT、多行 VALUES、DATEADD）；共用套件在 DM8 上全绿',
   },
   'dialect.kingbase': {
     title: '人大金仓方言',
     status: 'different',
-    ts: 'kingbase(pool)：PG 模式的金仓与 PG 同一套写法（KingbaseDialect）；试用许可证过期，没有实库容器，EQTS_KINGBASE_URL 有实例时跑共用套件；openGauss 另有 opengauss(pool) 实测全绿；ts-pg-compatible.md',
+    ts: 'kingbase(pool)：PG 模式的金仓与 PG 同一套写法（KingbaseDialect）；试用许可证过期，没有实库容器，EQTS_KINGBASE_URL 有实例时跑共用套件；openGauss 另有 opengauss(pool) 实测全绿',
   },
   'dialect.duckdb': {
     title: 'DuckDB 方言',
     status: 'done',
-    ts: 'easy-query-ts-duckdb：共用套件在内存库上全绿；序列自增、事务排队、BLOB / DECIMAL 读写；ts-duckdb.md',
+    ts: 'easy-query-ts-duckdb：共用套件在内存库上全绿；序列自增、事务排队、BLOB / DECIMAL 读写',
   },
   'dialect.clickhouse': {
     title: 'ClickHouse 方言',
     status: 'different',
-    ts: 'easy-query-ts-clickhouse：查询、函数、mutation（ALTER TABLE UPDATE / DELETE，mutations_sync）、MergeTree 建表与读库结构；没有自增、事务，主键由应用给值；ts-clickhouse.md',
+    ts: 'easy-query-ts-clickhouse：查询、函数、mutation（ALTER TABLE UPDATE / DELETE，mutations_sync）、MergeTree 建表与读库结构；没有自增、事务，主键由应用给值',
   },
   'dialect.h2': { title: 'H2 方言', status: 'na', ts: '不适用：H2 运行在 JVM 里，Node 没有驱动' },
 };

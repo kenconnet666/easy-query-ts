@@ -9,4 +9,4 @@ import { tdengine } from '@zerodep-dev/easy-query-ts-tdengine';
 const db = createDb({ schema, adapter: tdengine(await sqlConnect(conf)) });
 ```
 
-详见仓库 [easy-query-ts](https://github.com/kenconnet666/easy-query-ts) 的 `docs/features/ts-tdengine.md`。需要同时安装核心包与 `@tdengine/websocket`。许可证：Apache-2.0。
+详见文档站的[各库要注意的地方](https://easy-query-ts.zerodep.dpdns.org/scale/dialects#notes)。需要同时安装核心包与 `@tdengine/websocket`。许可证：Apache-2.0。

@@ -66,18 +66,18 @@ pnpm add @zerodep-dev/easy-query-ts-date @internationalized/date
 
 包名都以 `@zerodep-dev/` 开头。核心零依赖，驱动是各方言包的 peer 依赖，要同时安装。
 
-| 包                                                           | 内容                                                                                       |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `easy-query-ts`                                              | 实体、关系、表达式、语法树、方言基类、查询与写入构建器、结果拼装                           |
-| `easy-query-ts-sqlite`                                       | `node:sqlite`（Node 自带），也支持 `bun:sqlite`、Cloudflare D1、libSQL / Turso             |
-| `easy-query-ts-mysql`                                        | `mysql2`：MySQL 8.0.18（PolarDB）起，以及 MariaDB、Doris                                   |
-| `easy-query-ts-pg`                                           | `pg`：PG 12 起，以及 openGauss、人大金仓、PGlite、Neon                                     |
-| `easy-query-ts-mssql`、`-oracle`、`-dameng`、`-db2`、`-hana` | SQL Server、Oracle、达梦、Db2、SAP HANA                                                    |
-| `easy-query-ts-clickhouse`、`-duckdb`、`-tdengine`           | 分析型与时序库                                                                             |
-| `easy-query-ts-decimal`、`-date`                             | decimal.js 与 `@internationalized/date` 的列类型                                           |
-| `easy-query-ts-crypto`                                       | 列加密（AES、SM4，可分段搜索）                                                             |
-| `easy-query-ts-cache`                                        | 二级缓存：本机缓存与 Redis 接口，见 [docs/features/ts-cache.md](docs/features/ts-cache.md) |
-| `easy-query-ts-cli`                                          | `eqts`：由库生成实体、迁移、SQL 快照                                                       |
+| 包                                                           | 内容                                                                                                   |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `easy-query-ts`                                              | 实体、关系、表达式、语法树、方言基类、查询与写入构建器、结果拼装                                       |
+| `easy-query-ts-sqlite`                                       | `node:sqlite`（Node 自带），也支持 `bun:sqlite`、Cloudflare D1、libSQL / Turso                         |
+| `easy-query-ts-mysql`                                        | `mysql2`：MySQL 8.0.18（PolarDB）起，以及 MariaDB、Doris                                               |
+| `easy-query-ts-pg`                                           | `pg`：PG 12 起，以及 openGauss、人大金仓、PGlite、Neon                                                 |
+| `easy-query-ts-mssql`、`-oracle`、`-dameng`、`-db2`、`-hana` | SQL Server、Oracle、达梦、Db2、SAP HANA                                                                |
+| `easy-query-ts-clickhouse`、`-duckdb`、`-tdengine`           | 分析型与时序库                                                                                         |
+| `easy-query-ts-decimal`、`-date`                             | decimal.js 与 `@internationalized/date` 的列类型                                                       |
+| `easy-query-ts-crypto`                                       | 列加密（AES、SM4，可分段搜索）                                                                         |
+| `easy-query-ts-cache`                                        | 二级缓存：本机缓存与 Redis 接口，见文档站的[缓存](https://easy-query-ts.zerodep.dpdns.org/scale/cache) |
+| `easy-query-ts-cli`                                          | `eqts`：由库生成实体、迁移、SQL 快照                                                                   |
 
 `packages/test` 是不发布的测试模块：共用夹具、跨方言套件、类型检查（见 [packages/test/README.md](packages/test/README.md)）。
 

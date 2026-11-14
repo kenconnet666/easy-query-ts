@@ -119,20 +119,20 @@
 
 官方每个方言一个模块；我们每个方言一个包（PG 协议的兼容库放在 PG 包里，MySQL 协议的 Doris 放在 MySQL 包里）。"共用套件"指 `test/src/suite.ts` 的实库用例。
 
-| 官方模块        | TS 对应                                                                                       | 状态 |
-| --------------- | --------------------------------------------------------------------------------------------- | ---- |
-| sql-mysql       | `easy-query-ts-mysql`：MySQL 8.0.18（PolarDB 基线）/ 8.4，共用套件，`mysql.detect` 读版本     | ✓    |
-| sql-pgsql       | `easy-query-ts-pg`：PostgreSQL 17，共用套件                                                   | ✓    |
-| sql-sqlite      | `easy-query-ts-sqlite`：共用套件                                                              | ✓    |
-| sql-mssql       | `easy-query-ts-mssql`：SQL Server 2022，2008 起按版本渲染，共用套件（ts-sqlserver.md）        | ✓    |
-| sql-oracle      | `easy-query-ts-oracle`：Oracle 23ai，11.2 起按版本渲染，共用套件（ts-oracle.md）              | ✓    |
-| sql-dameng      | `easy-query-ts-dameng`：继承 Oracle 方言，DM8 共用套件（ts-dameng.md）                        | ✓    |
-| sql-kingbase-es | `kingbase(pool)`（PG 包）：PG 模式的金仓；试用许可证过期，没有实库容器（ts-pg-compatible.md） | ≈    |
-| sql-gauss-db    | `opengauss(pool)`（PG 包）：openGauss 7.0 共用套件（ts-pg-compatible.md）                     | ✓    |
-| sql-duckdb      | `easy-query-ts-duckdb`：内存库共用套件（ts-duckdb.md）                                        | ✓    |
-| sql-clickhouse  | `easy-query-ts-clickhouse`：查询完整、mutation 写入、没有自增与事务（ts-clickhouse.md）       | ≈    |
-| sql-db2         | `easy-query-ts-db2`：Db2 12.1 共用套件（Linux）（ts-db2.md）                                  | ✓    |
-| sql-tsdb        | `easy-query-ts-tdengine`：TDengine 3.3，时间戳主键、写入覆盖（ts-tdengine.md）                | ✓    |
-| sql-h2          | JVM 内的库，Node 没有驱动                                                                     | —    |
-| （官方没有）    | `doris(pool)`（MySQL 包）：Apache Doris 4.1，主键模型、分析型套件（ts-doris.md）              | ✓    |
-| （官方没有）    | `easy-query-ts-hana`：SAP HANA 2.0，共用套件（CI 的 db-hana）                                 | ✓    |
+| 官方模块        | TS 对应                                                                                   | 状态 |
+| --------------- | ----------------------------------------------------------------------------------------- | ---- |
+| sql-mysql       | `easy-query-ts-mysql`：MySQL 8.0.18（PolarDB 基线）/ 8.4，共用套件，`mysql.detect` 读版本 | ✓    |
+| sql-pgsql       | `easy-query-ts-pg`：PostgreSQL 17，共用套件                                               | ✓    |
+| sql-sqlite      | `easy-query-ts-sqlite`：共用套件                                                          | ✓    |
+| sql-mssql       | `easy-query-ts-mssql`：SQL Server 2022，2008 起按版本渲染，共用套件                       | ✓    |
+| sql-oracle      | `easy-query-ts-oracle`：Oracle 23ai，11.2 起按版本渲染，共用套件                          | ✓    |
+| sql-dameng      | `easy-query-ts-dameng`：继承 Oracle 方言，DM8 共用套件                                    | ✓    |
+| sql-kingbase-es | `kingbase(pool)`（PG 包）：PG 模式的金仓；试用许可证过期，没有实库容器                    | ≈    |
+| sql-gauss-db    | `opengauss(pool)`（PG 包）：openGauss 7.0 共用套件                                        | ✓    |
+| sql-duckdb      | `easy-query-ts-duckdb`：内存库共用套件                                                    | ✓    |
+| sql-clickhouse  | `easy-query-ts-clickhouse`：查询完整、mutation 写入、没有自增与事务                       | ≈    |
+| sql-db2         | `easy-query-ts-db2`：Db2 12.1 共用套件（Linux）（ts-db2.md）                              | ✓    |
+| sql-tsdb        | `easy-query-ts-tdengine`：TDengine 3.3，时间戳主键、写入覆盖                              | ✓    |
+| sql-h2          | JVM 内的库，Node 没有驱动                                                                 | —    |
+| （官方没有）    | `doris(pool)`（MySQL 包）：Apache Doris 4.1，主键模型、分析型套件                         | ✓    |
+| （官方没有）    | `easy-query-ts-hana`：SAP HANA 2.0，共用套件（CI 的 db-hana）                             | ✓    |

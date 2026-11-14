@@ -9,4 +9,4 @@ await cache.of(db).kv(User).find(1);
 ```
 
 三种部署：单实例用默认的本机缓存；多实例只用外部 Redis（实现 `CacheStore`）；多实例本机 + 外部 Redis（`tieredStore`，再实现失效通知 `CacheTransport`）。
-本包不带 Redis 与 MQ 的驱动，接法与完整示例见仓库 [easy-query-ts](https://github.com/kenconnet666/easy-query-ts) 的 `docs/features/ts-cache.md`。需要同时安装核心包。许可证：Apache-2.0。
+本包不带 Redis 与 MQ 的驱动，接法与完整示例见文档站的[缓存](https://easy-query-ts.zerodep.dpdns.org/scale/cache)。需要同时安装核心包。许可证：Apache-2.0。

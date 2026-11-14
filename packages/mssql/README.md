@@ -17,4 +17,4 @@ const db = createDb({ schema, adapter: mssql(pool) }); // 默认按最新（2022
 const legacy = createDb({ schema, adapter: mssql(pool, { version: 2008 }) }); // ROW_NUMBER 分页等旧写法
 ```
 
-低于某个特性的最低版本时退回旧写法，没有旧写法就报错并说明要哪个版本。详见仓库 [easy-query-ts](https://github.com/kenconnet666/easy-query-ts) 的 `docs/features/ts-sqlserver.md`。需要同时安装核心包与 `mssql`。许可证：Apache-2.0。
+低于某个特性的最低版本时退回旧写法，没有旧写法就报错并说明要哪个版本。详见文档站的[各库要注意的地方](https://easy-query-ts.zerodep.dpdns.org/scale/dialects#notes)。需要同时安装核心包与 `mssql`。许可证：Apache-2.0。
