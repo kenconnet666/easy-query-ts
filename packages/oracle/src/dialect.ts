@@ -128,13 +128,15 @@ export class OracleDialect extends Dialect {
 
   override select(q: SelectNode, w: SqlWriter = new SqlWriter()): string {
     const paged = q.limit !== undefined || (q.offset ?? 0) > 0;
-    // FETCH FIRST、ROWNUM 子查询都不能和 FOR UPDATE 一起用（ORA-02014）：提前说清楚，不让库报一句看不出原因的错
-    if (paged && q.forUpdate)
+    const legacy = !this.atLeast('12.1');
+    // 带排序的分页（FETCH FIRST 落成带窗口函数的视图）与 12c 之前的 ROWNUM 子查询都不能加 FOR UPDATE（ORA-02014）：
+    // 提前说清楚，不让库报一句看不出原因的错。不排序的分页可以（single()、first() 按主键锁一行）
+    if (paged && q.forUpdate && (legacy || q.orderBy.length > 0))
       throw new Error(
-        'forUpdate() with limit() / offset() / first() is not supported by the oracle dialect (ORA-02014); ' +
+        'forUpdate() on a sorted page (orderBy with limit / offset / first) is not supported by the oracle dialect (ORA-02014); ' +
           'lock one row with db.lock(Entity, key), or pick the keys first and lock them with forUpdate().toList()',
       );
-    if (!this.atLeast('12.1') && paged) return this.rownumPage(q, w);
+    if (legacy && paged) return this.rownumPage(q, w);
     return super.select(q, w);
   }
 

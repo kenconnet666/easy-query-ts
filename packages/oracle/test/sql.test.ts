@@ -10,7 +10,7 @@ describe('oracle: SQL text', () => {
   const db = createDb({ schema, adapter: oracle(pool) });
   const old = createDb({ schema, adapter: oracle(pool, { version: '11.2' }) });
 
-  it('分页的查询不能加 FOR UPDATE（ORA-02014）：渲染时就报出来，说明怎么改', () => {
+  it('带排序的分页不能加 FOR UPDATE（ORA-02014）：渲染时就报出来，说明怎么改；不排序的可以', () => {
     for (const target of [db, old])
       assert.throws(
         () =>
@@ -20,8 +20,18 @@ describe('oracle: SQL text', () => {
             .limit(2)
             .forUpdate()
             .toSQL(),
-        /forUpdate\(\) with limit\(\).*not supported by the oracle dialect.*db\.lock/,
+        /forUpdate\(\) on a sorted page.*not supported by the oracle dialect.*db\.lock/,
       );
+    assert.equal(
+      db
+        .queryable(User)
+        .where((u) => u.id.eq(1))
+        .limit(2)
+        .forUpdate()
+        .select((u) => u.id)
+        .toSQL().sql,
+      'SELECT t0."id" AS "c0" FROM "t_user" t0 WHERE t0."id" = :1 FETCH NEXT 2 ROWS ONLY FOR UPDATE',
+    );
   });
 
   it(':n 参数、表别名不写 AS、OFFSET … FETCH；日期时间参数写成 TO_TIMESTAMP', () => {
