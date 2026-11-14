@@ -1,6 +1,6 @@
 # 本仓库的开发与实库测试数据库，运行在 WSL Debian 的 Docker 里。
 # compose 项目名与端口都和 vue-tsx-pro-dev、easy-query-dev 错开，几个项目可以同时存在。
-# HANA 体积大、首次启动要初始化 6～11 分钟（之后带着数据卷启动不到 1 分钟，快照见 hana/volume.sh），内存上限 6 GB，
+# HANA 体积大、首次启动要初始化 6～11 分钟（之后带着数据卷启动不到 1 分钟，快照见 hana/volume.sh），内存上限 8 GB，
 # 放在 hana profile 里按需启动；启动它即按镜像的说明接受 SAP 的许可。
 # MySQL 8.0.18（PolarDB 基线）放在 polardb profile 里：本地实库测试只跑 8.4，基线由 CI 的 8.0.18 服务容器把关，要在本机复现时再启动。
 #
@@ -178,9 +178,11 @@ services:
     platform: linux/amd64
     hostname: hxehost
     restart: unless-stopped
-    # HANA 把 cgroup 上限当物理内存，取 90% 作全局分配上限。镜像里关掉了测试用不到的服务（见 hana/）
-    mem_limit: 6g
-    memswap_limit: 6g
+    # HANA 把 cgroup 上限当物理内存，取 90% 作全局分配上限。镜像里关掉了测试用不到的服务（见 hana/）。
+    # 这个上限把代码段与共享内存（约 1.9 GB）也算在内，系统库与租户库的堆再占 3.3 GB 以上：
+    # 6g 跑得过一轮测试，但开上十个小时就卡在上限上（连接都建不了），所以留出余量
+    mem_limit: 8g
+    memswap_limit: 8g
     shm_size: 2g
     stop_grace_period: 2m
     environment:
