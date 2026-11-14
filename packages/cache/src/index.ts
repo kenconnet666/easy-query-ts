@@ -16,7 +16,8 @@
  * 一致性（对应官方的"延迟删除 + 逻辑删除"方案）：
  * - 失效走拦截器：insert 按插入的主键，update / delete 按改之前的行（拦截器对缓存的实体声明 before，核心先按同样条件读出受影响的行），
  *   所以表达式更新也知道该删哪些键——官方要自己实现 CacheKeysProvider 按更新时间回查
- * - 写入时删一次，事务提交后再删一次（事务里别的请求可能把旧值读回缓存）；回滚了第二次也不删，第一次删掉的只是少命中一次
+ * - 写入时删一次，事务提交后再删一次（事务里别的请求可能把旧值读回缓存）；回滚了第二次也不删，第一次删掉的只是少命中一次。
+ *   写入之后到事务结束之前，这些键不写回缓存：写入的事务自己读到的是还没提交的值
  * - 绕过本库的写入（直接改库、别的服务）不会失效，靠过期时间兜底，或接 CDC 调用 evict
  * - 两级存储时：提交后删本机与共享层、发通知，别的实例收到后只删本机层；通知断过时清空本机层。读库前记下代数，
  *   期间这个键被失效过（本机的或收到的）就不写回；lateEvictMs 在提交后隔一会儿再删一次、再发一次
@@ -57,6 +58,7 @@ export {
 } from './stores.ts';
 export { memoryTransport, type CacheTransport } from './transport.ts';
 
+/** createCache 的选项 */
 export interface CacheOptions {
   /** 要缓存的实体：写入它们时失效（只有列在这里的实体能用 kv / all） */
   readonly entities: readonly Entity[];
@@ -80,6 +82,7 @@ type KeyValue = string | number | bigint;
 /** 缓存里表示"库里没有"的值 */
 const MISSING = 'null';
 
+/** createCache 返回的缓存：interceptor 交给 createDb（写入时失效），of(db) 得到带缓存的读法 */
 export class EasyCache {
   /** 放进 createDb 的 interceptors：写入缓存的实体时失效 */
   readonly interceptor: Interceptor;
@@ -99,6 +102,11 @@ export class EasyCache {
   private readonly evicted = new Map<string, number>();
   /** evicted 太大时清空，这之前开始的读一律不写回 */
   private floor = 0;
+  /**
+   * 写过、所在的事务还没结束的键 → 几次写入在等：这期间不往缓存写回。
+   * 写入的事务自己再读到的是还没提交的值，写回去别的请求就读到了；事务要是回滚，这个从没存在过的值会留到过期
+   */
+  private readonly unsettled = new Map<string, number>();
 
   constructor(options: CacheOptions) {
     this.store = options.store ?? memoryStore();
@@ -126,10 +134,15 @@ export class EasyCache {
         if (!this.tables.has(event.entity.table)) return;
         const rows = event.kind === 'insert' ? event.rows : (event.before ?? []);
         const keys = [this.allKey(event.entity), ...this.keysOf(event.entity, rows)];
-        // 延迟双删：现在删一次，提交后再删一次
+        // 延迟双删：现在删一次，提交后再删一次；事务结束之前这些键不写回
         this.markEvicted(keys);
         await this.store.delete(keys);
-        event.afterCommit(() => this.remove(keys));
+        this.settle(keys, 1);
+        event.afterCommit(() => {
+          this.settle(keys, -1);
+          return this.remove(keys);
+        });
+        event.afterRollback(() => this.settle(keys, -1));
       },
     };
   }
@@ -194,6 +207,15 @@ export class EasyCache {
     await this.store.evictLocal?.(undefined);
   }
 
+  /** 记下 / 销掉"这些键所在的事务还没结束" */
+  private settle(keys: readonly string[], change: 1 | -1): void {
+    for (const key of keys) {
+      const waiting = (this.unsettled.get(key) ?? 0) + change;
+      if (waiting > 0) this.unsettled.set(key, waiting);
+      else this.unsettled.delete(key);
+    }
+  }
+
   private markEvicted(keys: readonly string[]): void {
     this.generation++;
     if (this.evicted.size > 10_000) {
@@ -220,6 +242,7 @@ export class EasyCache {
    */
   async write(key: string, field: string, value: string | undefined, since: number): Promise<void> {
     if (since < this.floor || (this.evicted.get(key) ?? 0) > since) return;
+    if (this.unsettled.has(key)) return;
     await this.store.set(
       key,
       field,
@@ -289,6 +312,7 @@ export class CacheClient<S extends AnySchema> {
 type Filter<S extends AnySchema, K extends EntityKey<S>> = (r: Ref<S, K>) => Cond;
 type RowOf<S extends AnySchema, K extends EntityKey<S>> = Row<S['entities'][K]>;
 
+/** `cache.of(db).kv(实体)`：按主键缓存单行 */
 export class KvCache<S extends AnySchema, K extends EntityKey<S>> {
   private readonly db: Db<S>;
   private readonly cache: EasyCache;
@@ -357,6 +381,7 @@ export class KvCache<S extends AnySchema, K extends EntityKey<S>> {
   }
 }
 
+/** `cache.of(db).all(实体)`：缓存整张表（行数少、很少改的字典表），在内存里筛选、排序、分页 */
 export class AllCache<S extends AnySchema, K extends EntityKey<S>> {
   private readonly db: Db<S>;
   private readonly cache: EasyCache;
@@ -397,6 +422,12 @@ export class AllCache<S extends AnySchema, K extends EntityKey<S>> {
 
   /** 在缓存的整表上分页（page 从 1 开始） */
   async toPage(page: number, size: number): Promise<Page<RowOf<S, K>>> {
+    for (const [name, value] of [
+      ['page', page],
+      ['size', size],
+    ] as const)
+      if (!Number.isSafeInteger(value) || value < 1)
+        throw new RangeError(`toPage: ${name} must be a positive integer, got ${value}`);
     const rows = await this.toList();
     return { rows: rows.slice((page - 1) * size, page * size), total: rows.length, page, size };
   }

@@ -55,13 +55,17 @@ export type WriteEvent = WriteRecord & {
    */
   readonly afterCommit: (task: () => unknown) => void;
   /**
+   * 登记一件回滚之后做的事：这次写入所在的事务（或保存点）回滚时执行。不在事务里时什么也不登记——语句已经生效，不会回滚
+   */
+  readonly afterRollback: (task: () => unknown) => void;
+  /**
    * 在这次写入所在的连接上执行一条语句：在事务里时是同一个事务（随它提交或回滚），写发件箱这类要和写入同生共死的事用它。
    * 语句由 db.insert(…).toSQL() 这类生成；执行时不经过拦截器
    */
   readonly execute: (statement: Statement) => Promise<ExecuteResult>;
 };
 
-/** 写入的记录：WriteEvent 去掉 afterCommit（构建语句的地方给出这些，afterCommit 由 Interceptors.afterWrite 补上） */
+/** 写入的记录：WriteEvent 去掉 afterCommit / afterRollback / execute（构建语句的地方给出这些，其余由 Interceptors.afterWrite 补上） */
 export type WriteRecord = WriteDetail & {
   readonly entity: Entity;
   readonly affected: number;
@@ -270,6 +274,7 @@ export class Interceptors {
     const event: WriteEvent = {
       ...record,
       afterCommit: (task) => (frames ? frames[frames.length - 1]!.commit : later).push(task),
+      afterRollback: (task) => void frames?.[frames.length - 1]!.rollback.push(task),
       execute: (statement) => execute(ctx, statement),
     };
     for (const interceptor of this.active) await interceptor.afterWrite?.(event);

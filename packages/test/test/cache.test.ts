@@ -90,6 +90,25 @@ describe('cache: kv and all modes', () => {
     assert.equal(reads(), before + 1);
   });
 
+  it('事务里改了又读：没提交的值不进缓存，回滚之后读到的还是原来的', async () => {
+    const { db, cache, cached } = await setup();
+    await db
+      .transaction(async (tx) => {
+        await tx
+          .update(User)
+          .set({ name: 'uncommitted' })
+          .where((u) => u.id.eq(1))
+          .execute();
+        // 同一个事务里经缓存读：读到的是自己刚改的值，但不能写回缓存
+        assert.equal((await cache.of(tx).kv(User).find(1))!.name, 'uncommitted');
+        assert.equal((await cache.of(tx).all(User).toList())[0]!.name, 'uncommitted');
+        throw new Error('roll back');
+      })
+      .catch(() => undefined);
+    assert.equal((await cached.kv(User).find(1))!.name, 'alice');
+    assert.equal((await cached.all(User).toList())[0]!.name, 'alice');
+  });
+
   it('where 条件是缓存字段的一部分；findMany 按给出的顺序、跳过没有的', async () => {
     const { cached } = await setup();
     assert.equal(
