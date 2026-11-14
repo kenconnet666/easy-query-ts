@@ -25,6 +25,7 @@ import {
   type Session,
   type TransactionOptions,
   type DatabaseErrorKind,
+  type NullOrder,
 } from '@zerodep-dev/easy-query-ts';
 import { OracleDialect } from '@zerodep-dev/easy-query-ts-oracle/dialect';
 
@@ -44,6 +45,8 @@ const CASE_TYPES: Record<string, string> = {
 /** 达梦（DM8）的方言：继承 Oracle 方言，覆盖两者不同的地方 */
 export class DamengDialect extends OracleDialect {
   override readonly name: string = 'dameng';
+  /** 达梦不管升序降序，NULL 都排在最前面（Oracle 是当成最大的值） */
+  override readonly nullOrder: NullOrder = 'first';
 
   /**
    * dmdb 的错误码写在消息里（"[-6602]:违反表[T]唯一性约束"），字段名各版本不一：先取码，取不到再看消息的用词。

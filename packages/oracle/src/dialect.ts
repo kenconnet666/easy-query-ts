@@ -19,6 +19,7 @@ import {
   type SelectNode,
   type UpdateNode,
   type DatabaseErrorKind,
+  type NullOrder,
 } from '@zerodep-dev/easy-query-ts';
 
 /** 支持的服务器版本 */
@@ -61,7 +62,7 @@ export class OracleDialect extends Dialect {
         return undefined;
     }
   }
-  override readonly nullOrder: 'smallest' | 'largest' | 'last' = 'largest';
+  override readonly nullOrder: NullOrder = 'largest';
   /** CASE 分支里参数要转成的类型（Oracle 兼容的库按自己的类型名覆盖） */
   protected readonly caseTypes: Record<string, string> = CASE_TYPES;
   /** Oracle 一条语句最多 65535 个绑定变量；IN 列表最多 1000 项另由核心切分 */

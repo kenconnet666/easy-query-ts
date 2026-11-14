@@ -194,6 +194,7 @@ export type {
 export type { DbOptions, KeyOf, RetryOptions, TreeWalk, WithCte } from './db.ts';
 export type { RemovedPolicy, SaveInclude, SaveNode, SaveValue } from './save.ts';
 export { compareVersions, Dialect, SqlWriter } from './dialect.ts';
+export type { NullOrder } from './dialect.ts';
 export type {
   DatePart,
   DateToken,

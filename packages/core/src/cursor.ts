@@ -3,6 +3,7 @@
  * 文字是 base64url 的 JSON；里面的值回来之后只当参数用（经过列的 codec 编码），改坏的游标抛 InvalidCursorError
  */
 import type { Node, OrderNode } from './ast.ts';
+import { nullsFirst, type NullOrder } from './dialect.ts';
 import { InvalidCursorError } from './errors.ts';
 import { Expr, or, type Cond } from './expr.ts';
 import type { Codec } from './schema.ts';
@@ -78,7 +79,7 @@ export function cursorValue(key: OrderKey, raw: unknown): unknown {
 export function afterCursor(
   keys: readonly OrderKey[],
   values: readonly unknown[],
-  nullOrder: 'smallest' | 'largest' | 'last',
+  nullOrder: NullOrder,
 ): Cond {
   if (values.length !== keys.length)
     throw new InvalidCursorError(
@@ -90,7 +91,7 @@ export function afterCursor(
     const e = new Expr<unknown>(key.e as Node, key.codec);
     const value = values[i];
     // 这个键的排序里 NULL 是不是排在非空值后面
-    const nullsLast = nullOrder === 'last' || (nullOrder === 'smallest' ? key.desc : !key.desc);
+    const nullsLast = !nullsFirst(nullOrder, key.desc);
     let later: Cond;
     if (value === null) later = nullsLast ? false : e.isNotNull();
     else {

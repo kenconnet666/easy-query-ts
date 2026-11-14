@@ -16,6 +16,7 @@
  */
 import type { Node } from './ast.ts';
 import type { Db } from './db.ts';
+import { nullsFirst } from './dialect.ts';
 import type { Deletable, Updatable } from './mutation.ts';
 import type { Page, Queryable } from './query.ts';
 import type { AnySchema, EntityKey } from './relations.ts';
@@ -248,8 +249,7 @@ export class ShardedQuery<Out> {
         const [xNull, yNull] = [x === null || x === undefined, y === null || y === undefined];
         if (xNull || yNull) {
           if (xNull && yNull) continue;
-          const nullsFirst = nullOrder === 'smallest' ? !desc : nullOrder === 'largest' && desc;
-          return xNull === nullsFirst ? -1 : 1;
+          return xNull === nullsFirst(nullOrder, desc) ? -1 : 1;
         }
         const c = compare(x, y);
         if (c !== 0) return desc ? -c : c;

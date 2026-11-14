@@ -131,6 +131,10 @@ export function liveSuite(
           ['carol', 'alice', 'bob'],
           ['alice', 'carol', 'bob'],
         ],
+        first: [
+          ['bob', 'carol', 'alice'],
+          ['bob', 'alice', 'carol'],
+        ],
       }[env.adapter.dialect.nullOrder];
       assert.deepEqual([await names(false), await names(true)], expected);
     });

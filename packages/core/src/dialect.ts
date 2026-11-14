@@ -106,6 +106,18 @@ function hasParam(value: unknown): boolean {
   return Object.values(value).some(hasParam);
 }
 
+/**
+ * ORDER BY 里 NULL 排在哪：当成最小的值（MySQL、SQLite、SQL Server……升序在前、降序在后）、当成最大的值（PostgreSQL、Oracle、Db2），
+ * 不管升降序总在最后（DuckDB、ClickHouse）或总在最前（达梦）
+ */
+export type NullOrder = 'smallest' | 'largest' | 'last' | 'first';
+
+/** 按这个方向排序时 NULL 是不是排在非空值前面 */
+export function nullsFirst(order: NullOrder, desc: boolean): boolean {
+  if (order === 'first' || order === 'last') return order === 'first';
+  return order === 'smallest' ? !desc : desc;
+}
+
 export abstract class Dialect {
   abstract readonly name: string;
   /** 面向的服务器版本；undefined 表示最新 */
@@ -669,11 +681,10 @@ export abstract class Dialect {
   }
 
   /**
-   * ORDER BY 里 NULL 排在哪：'smallest' 当最小值（升序在前、降序在后：MySQL、SQLite、SQL Server、HANA），
-   * 'largest' 当最大值（升序在后、降序在前：PostgreSQL、Oracle、Db2），'last' 两个方向都在最后（DuckDB、ClickHouse）。
-   * 跨库查询在内存里归并各库排好序的结果时按它比较，和库里的顺序才对得上
+   * ORDER BY 里 NULL 排在哪（见 NullOrder）。跨库查询在内存里归并各库排好序的结果、键集分页算"排在游标之后"都按它，
+   * 和库里的顺序才对得上；共用套件在每个库上核对声明的与实际的一致
    */
-  readonly nullOrder: 'smallest' | 'largest' | 'last' = 'smallest';
+  readonly nullOrder: NullOrder = 'smallest';
 
   /**
    * 驱动抛出的错误是哪一种（唯一键、外键、非空、死锁、串行化失败）；认不出返回 undefined，错误原样抛给调用方。
