@@ -209,6 +209,8 @@ export class OracleDialect extends Dialect {
       ...super.functions(),
       length: (a) => `LENGTH(${a[0]})`,
       concat: (a) => `(${a.map((x) => `${x}`).join(' || ')})`,
+      // || 把 NULL 当空串
+      text_or_empty: (a) => a[0]!,
       substring: (a) => `SUBSTR(${a.join(', ')})`,
       index_of: (a) => `(INSTR(${a[0]}, ${a[1]}) - 1)`,
       left: (a) => `SUBSTR(${a[0]}, 1, ${a[1]})`,

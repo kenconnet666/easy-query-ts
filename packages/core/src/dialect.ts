@@ -13,7 +13,9 @@ import type {
   SelectNode,
   UpdateNode,
 } from './ast.ts';
-import { sqlString, unquoteSql } from './expr.ts';
+import { dateFormatParts, sqlString, unquoteSql, type DatePart, type DateToken } from './expr.ts';
+
+export { dateFormatParts, type DatePart, type DateToken };
 import { bareName, type DbTable, type ForeignKeySpec, type QueryRunner } from './ddl.ts';
 import { utcText, type ColumnOptions, type Entity, type TableIndex } from './schema.ts';
 import { Placeholder, PreparedParam } from './placeholder.ts';
@@ -134,6 +136,8 @@ export abstract class Dialect {
       trim: (a) => `TRIM(${a[0]})`,
       length: (a) => `CHAR_LENGTH(${a[0]})`,
       concat: (a) => `CONCAT(${a.join(', ')})`,
+      // concat / text 的表达式项：NULL 当空串。CONCAT 本来就跳过 NULL 的库（PG、SQL Server、Oracle 的 ||、DuckDB）覆盖成原样
+      text_or_empty: (a) => `COALESCE(${a[0]}, '')`,
       coalesce: (a) => `COALESCE(${a.join(', ')})`,
       year: (a) => `EXTRACT(YEAR FROM ${a[0]})`,
       month: (a) => `EXTRACT(MONTH FROM ${a[0]})`,
@@ -1006,30 +1010,6 @@ export function pgJsonPath(literal: string): string {
 
 /** diff 的单位折合多少秒 */
 const SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
-
-/** 日期格式里认得的部分（写法同 Java 的 DateTimeFormatter） */
-export type DateToken = 'yyyy' | 'yy' | 'MM' | 'dd' | 'HH' | 'mm' | 'ss';
-export type DatePart = { readonly token: DateToken } | { readonly text: string };
-const DATE_TOKENS: readonly DateToken[] = ['yyyy', 'yy', 'MM', 'dd', 'HH', 'mm', 'ss'];
-
-/** 把 'yyyy-MM-dd HH:mm' 拆成格式符与原样输出的文字 */
-export function dateFormatParts(pattern: string): DatePart[] {
-  const parts: DatePart[] = [];
-  let i = 0;
-  while (i < pattern.length) {
-    const token = DATE_TOKENS.find((t) => pattern.startsWith(t, i));
-    if (token) {
-      parts.push({ token });
-      i += token.length;
-      continue;
-    }
-    const last = parts.at(-1);
-    if (last && 'text' in last) parts[parts.length - 1] = { text: last.text + pattern[i] };
-    else parts.push({ text: pattern[i]! });
-    i++;
-  }
-  return parts;
-}
 
 /**
  * 把子查询里的 CTE 提到最外层（SQL Server 的 WITH 只能写在语句开头），并让递归 CTE 用 UNION ALL（它不认递归里的 UNION）。

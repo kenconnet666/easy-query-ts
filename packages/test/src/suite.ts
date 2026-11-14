@@ -1603,6 +1603,41 @@ export function liveSuite(
       ]);
     });
 
+    it('refuses a child that belongs to another parent unless the navigation adopts', async () => {
+      const { db } = await seeded();
+      const users = () =>
+        db
+          .queryable(User)
+          .orderBy((u) => u.id)
+          .select((u) => ({ name: u.name, companyId: u.companyId }))
+          .toList();
+      // bob（id 2）是 acme（公司 1）的人：公司 2 的表单带上他的主键，不能就把他改名、挪走
+      await assert.rejects(
+        () =>
+          db.save(
+            Company,
+            { id: 2, users: [{ id: 2, name: 'hijacked' }] },
+            { include: { users: { removed: 'keep' } } },
+          ),
+        /User \(id = 2\) belongs to another parent; set adopt: true/,
+      );
+      assert.deepEqual((await users())[1], { name: 'bob', companyId: 1 });
+      // carol（id 3）没有公司：外键为空的行直接挂过来
+      await db.save(
+        Company,
+        { id: 2, users: [{ id: 3 }] },
+        { include: { users: { removed: 'keep' } } },
+      );
+      assert.deepEqual((await users())[2], { name: 'carol', companyId: 2 });
+      // 确实要挪：这个导航写 adopt
+      await db.save(
+        Company,
+        { id: 2, users: [{ id: 2, name: 'bobby' }] },
+        { include: { users: { removed: 'keep', adopt: true } } },
+      );
+      assert.deepEqual((await users())[1], { name: 'bobby', companyId: 2 });
+    });
+
     it('rolls the whole save back when a child fails', async () => {
       const { db } = await seeded();
       // 第二个子行缺必填的标题：整个 save 在一个事务里，父行也不该留下
@@ -3560,6 +3595,22 @@ export function liveSuite(
         same: 0,
         label: '用户 alice，30 岁',
       });
+      // 为 NULL 的项当空串，各库一致：bob 没有年龄，carol 没有公司
+      assert.deepEqual(
+        await db
+          .queryable(User)
+          .orderBy((u) => u.id)
+          .select((u) => ({
+            label: text`${u.name}/${u.age}`,
+            joined: u.name.concat('@', u.company.name),
+          }))
+          .toList(),
+        [
+          { label: 'alice/30', joined: 'alice@acme' },
+          { label: 'bob/', joined: 'bob@acme' },
+          { label: 'carol/17', joined: 'carol@' },
+        ],
+      );
       const names = await db
         .queryable(User)
         .where((u) => [u.name.notStartsWith('a'), u.name.notEndsWith('ol')])
@@ -3608,6 +3659,8 @@ export function liveSuite(
           dayOfWeek: u.createdAt.dayOfWeek(),
           iso: u.createdAt.isoDayOfWeek(),
           text: u.createdAt.format('yyyy/MM/dd HH:mm:ss 写入'),
+          // 要原样输出的英文字母用单引号括起来
+          stamp: u.createdAt.format("yyyy-MM-dd'T'HH:mm:ss"),
           later: u.createdAt.addHours(2),
           nextYear: u.createdAt.addYears(1),
           byColumn: u.createdAt.add(u.age, 'day'),
@@ -3630,6 +3683,7 @@ export function liveSuite(
           dayOfWeek: 5,
           iso: 5,
           text: '2026/01/02 03:04:05 写入',
+          stamp: '2026-01-02T03:04:05',
           later: '2026-01-02T05:04:05.006Z',
           nextYear: '2027-01-02T03:04:05.006Z',
           byColumn: '2026-02-01T03:04:05.006Z',

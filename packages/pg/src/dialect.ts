@@ -96,6 +96,8 @@ export class PostgresDialect extends Dialect {
       ...super.functions(),
       ...pgFunctions,
       concat: (a) => `CONCAT(${a.map((x) => `CAST(${x} AS text)`).join(', ')})`,
+      // CONCAT 跳过 NULL
+      text_or_empty: (a) => a[0]!,
       // PG 的两参数 ROUND 只接受 numeric，double 列要先转
       round: (a) => `ROUND(CAST(${a[0]} AS NUMERIC), ${a[1]})`,
       date_trunc: (a) => `DATE_TRUNC(${a[1]}, ${a[0]})`,

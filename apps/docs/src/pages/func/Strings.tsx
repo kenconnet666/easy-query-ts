@@ -21,7 +21,7 @@ export default _component(() => () => (
           ['`upper()`、`lower()`', '大小写'],
           ['`trim()`、`ltrim()`、`rtrim()`', '去空白'],
           ['`length()`', '字符数，各库都按字符算'],
-          ['`concat(...)`', '拼接；参数可以是值或列，NULL 的处理由方言统一'],
+          ['`concat(...)`', '拼接；参数可以是值或列，为 NULL 的项当空串'],
           ['`text` 模板', '拼接的另一种写法，读起来更清楚'],
           ['`substring(起, 止)`', '子串，从 0 起，左闭右开'],
           ['`left(n)`、`right(n)`', '开头、结尾的 n 个字符'],
@@ -38,7 +38,7 @@ export default _component(() => () => (
       <SqlExample example={lengthFilter} title="长评论，按长度排序" />
     </Section>
     <Section id="concat" title="拼接">
-      <P text="切到 MySQL、SQL Server 看：`||`、`CONCAT`、`+` 由方言选。" />
+      <P text="切到 MySQL、SQL Server 看：`||`、`CONCAT`、`+` 由方言选。为 NULL 的项当空串，各库结果一致；想让 NULL 传下去用 `caseWhen`。" />
       <SqlExample example={concatValues} title="concat 和 text 模板" />
       <SqlExample example={strings} title="截取、拼接、替换" />
     </Section>

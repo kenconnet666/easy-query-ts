@@ -239,6 +239,8 @@ export class MsSqlDialect extends Dialect {
       // SUBSTRING 必须给长度：取到末尾时给一个够大的长度
       substring: (a) => `SUBSTRING(${a[0]}, ${a[1]}, ${a[2] ?? '2147483647'})`,
       concat,
+      // CONCAT 跳过 NULL，旧版本的写法自己 ISNULL
+      text_or_empty: (a) => a[0]!,
       trim: (a) => `LTRIM(RTRIM(${a[0]}))`,
       year: (a) => `YEAR(${a[0]})`,
       month: (a) => `MONTH(${a[0]})`,
@@ -321,8 +323,14 @@ export class MsSqlDialect extends Dialect {
   /** FORMAT(值, '.NET 格式')（2012+）：yyyy、MM、dd、HH、mm、ss 与我们的写法相同，其余文字用单引号括起来 */
   protected override formatDate(value: string, parts: readonly DatePart[]): string {
     this.requires('FORMAT', '2012');
+    // 文字用单引号括起来；文字里的单引号在引号外写成 \'
+    const quoted = (text: string) =>
+      text
+        .split("'")
+        .map((piece) => (piece ? `'${piece}'` : ''))
+        .join("\\'");
     const format = parts
-      .map((p) => ('token' in p ? p.token : /^[\s\-/:.,]*$/.test(p.text) ? p.text : `'${p.text}'`))
+      .map((p) => ('token' in p ? p.token : /^[\s\-/:.,]*$/.test(p.text) ? p.text : quoted(p.text)))
       .join('');
     // N'…'：格式里的汉字等要按 Unicode 写
     return `FORMAT(${value}, N'${format.replaceAll("'", "''")}')`;

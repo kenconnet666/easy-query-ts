@@ -313,9 +313,16 @@ export class Expr<T> {
   length(this: Expr<string | null>): Expr<Keep<T, number>> {
     return new Expr({ k: 'fn', name: 'length', args: [this.node] }, codecs.int);
   }
-  concat(this: Expr<string | null>, ...parts: (string | Expr<string | null>)[]): Expr<T> {
+  /**
+   * 拼接。为 NULL 的项当空串，各库一致（库的 CONCAT / || 各不相同：有的跳过 NULL，有的整个变 NULL）；
+   * 想让 NULL 传下去的写 caseWhen
+   */
+  concat(
+    this: Expr<string | null>,
+    ...parts: (string | Expr<string | null>)[]
+  ): Expr<NonNullable<T>> {
     return new Expr(
-      { k: 'fn', name: 'concat', args: [this.node, ...parts.map((p) => toNode(p, codecs.string))] },
+      { k: 'fn', name: 'concat', args: [this, ...parts].map(concatPart) },
       this.codec,
     );
   }
@@ -553,10 +560,14 @@ export class Expr<T> {
   }
 
   /**
-   * 格式化成文字（对应 Java 版的 format），模式的写法同 Java：yyyy、yy、MM、dd、HH、mm、ss，其余字符原样输出：
-   * `createdAt.format('yyyy年MM月dd日 HH:mm')`。各库翻译成自己的格式（DATE_FORMAT、TO_CHAR、strftime）
+   * 格式化成文字（对应 Java 版的 format），模式的写法同 Java：yyyy、yy、MM、dd、HH、mm、ss；汉字、标点、空格原样输出，
+   * 要原样输出的英文字母用单引号括起来，别的英文字母报错（见 dateFormatParts）：
+   * `createdAt.format('yyyy年MM月dd日 HH:mm')`、`createdAt.format("yyyy-MM-dd'T'HH:mm:ss")`。
+   * 各库翻译成自己的格式（DATE_FORMAT、TO_CHAR、strftime）
    */
   format(this: Expr<Temporal | null>, pattern: string): Expr<Keep<T, string>> {
+    // 写错的模式在构建表达式时就报出来，不等到渲染
+    dateFormatParts(pattern);
     return new Expr(
       { k: 'fn', name: 'date_format', args: [this.node, { k: 'lit', sql: sqlString(pattern) }] },
       codecs.string,
@@ -1136,16 +1147,25 @@ function extreme<V>(name: string, first: Expr<V>, rest: readonly unknown[]): Exp
 
 /**
  * 字符串模板（对应 Java 版的 stringFormat）：插进来的表达式按列拼接，其余值作为参数：
- * `text\`编号 \${b.code}，类型 \${b.type}\``。任一部分为 NULL 时结果的处理随各库的 CONCAT（MySQL 为 NULL，PG 当空串）
+ * `text\`编号 \${b.code}，类型 \${b.type}\``。为 NULL 的项当空串（同 concat），数字等按文字拼进去
  */
 export function text(strings: TemplateStringsArray, ...values: unknown[]): Expr<string> {
   const parts: Node[] = [];
   strings.forEach((s, i) => {
     if (s) parts.push(toNode(s, codecs.string));
-    if (i < values.length) parts.push(toNode(values[i], codecs.string));
+    if (i < values.length) parts.push(concatPart(values[i]));
   });
   if (parts.length === 0) parts.push(toNode('', codecs.string));
   return new Expr<string>({ k: 'fn', name: 'concat', args: parts }, codecs.string);
+}
+
+/**
+ * 拼接的一项：表达式、子查询包一层 text_or_empty（NULL 当空串，由方言渲染）；JS 的值直接作参数，null / undefined 就是空串。
+ * 不放进 concat 函数自己的写法里：like 用列当模式时也用 concat 拼通配符，那里的 NULL 要照旧
+ */
+function concatPart(value: unknown): Node {
+  const node = toNode(value ?? '', codecs.string);
+  return node.k === 'param' ? node : { k: 'fn', name: 'text_or_empty', args: [node] };
 }
 
 export function caseWhen<V>(condition: Pred, value: V | Expr<V>): CaseBuilder<V> {
@@ -1288,4 +1308,60 @@ function isNode(value: unknown): value is Node {
     'k' in value &&
     (value as { k: unknown }).k === 'lit'
   );
+}
+
+/** 日期格式里认得的部分（写法同 Java 的 DateTimeFormatter） */
+export type DateToken = 'yyyy' | 'yy' | 'MM' | 'dd' | 'HH' | 'mm' | 'ss';
+export type DatePart = { readonly token: DateToken } | { readonly text: string };
+const DATE_TOKENS: readonly DateToken[] = ['yyyy', 'yy', 'MM', 'dd', 'HH', 'mm', 'ss'];
+
+/**
+ * 把 'yyyy-MM-dd HH:mm' 拆成格式符与原样输出的文字（规则同 Java 的 DateTimeFormatter）：
+ * 英文字母都是格式符，不认识的直接报错——以前原样输出，'yyyy-M-d' 得到的是 '2026-M-d'；
+ * 要原样输出的字母用单引号括起来（`yyyy-MM-dd'T'HH:mm`），两个单引号是一个单引号。汉字、标点、空格照常原样输出
+ */
+export function dateFormatParts(pattern: string): DatePart[] {
+  const parts: DatePart[] = [];
+  const literal = (text: string) => {
+    const last = parts.at(-1);
+    if (last && 'text' in last) parts[parts.length - 1] = { text: last.text + text };
+    else parts.push({ text });
+  };
+  let i = 0;
+  while (i < pattern.length) {
+    const token = DATE_TOKENS.find((t) => pattern.startsWith(t, i));
+    if (token) {
+      parts.push({ token });
+      i += token.length;
+    } else if (pattern[i] === "'") {
+      // '' 是一个单引号；否则一直到下一个单引号都是文字（里面的 '' 同样是一个单引号）
+      if (pattern[i + 1] === "'") {
+        literal("'");
+        i += 2;
+        continue;
+      }
+      let end = i + 1;
+      let text = '';
+      for (;;) {
+        if (end >= pattern.length)
+          throw new Error(`date format '${pattern}': the quoted text is not closed`);
+        if (pattern[end] !== "'") text += pattern[end++];
+        else if (pattern[end + 1] === "'") {
+          text += "'";
+          end += 2;
+        } else break;
+      }
+      literal(text);
+      i = end + 1;
+    } else if (/[A-Za-z]/.test(pattern[i]!)) {
+      throw new Error(
+        `date format '${pattern}': '${pattern[i]}' is not a supported pattern letter ` +
+          `(supported: ${DATE_TOKENS.join(', ')}); quote literal text, e.g. yyyy-MM-dd'T'HH:mm`,
+      );
+    } else {
+      literal(pattern[i]!);
+      i++;
+    }
+  }
+  return parts;
 }

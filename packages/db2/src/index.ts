@@ -167,6 +167,8 @@ export class Db2Dialect extends Dialect {
       right: (a) =>
         `SUBSTRING(${a[0]}, GREATEST(CHARACTER_LENGTH(${a[0]}, CODEUNITS32) - ${a[1]} + 1, 1), CODEUNITS32)`,
       concat: (a) => `(${a.join(' || ')})`,
+      // 先转成文字：COALESCE(数字, '') 的两个参数类型对不上
+      text_or_empty: (a) => `COALESCE(VARCHAR(${a[0]}), '')`,
       ceil: (a) => `CEILING(${a[0]})`,
       log: (a) => `(LN(${a[0]}) / LN(${a[1]}))`,
       truncate: (a) => `TRUNCATE(${a[0]}, ${a[1]})`,

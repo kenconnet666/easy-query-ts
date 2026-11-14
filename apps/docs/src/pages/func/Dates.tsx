@@ -23,7 +23,10 @@ export default _component(() => () => (
           ['`year()`、`month()`、`day()`', '年、月（1 起）、日'],
           ['`hour()`、`minute()`、`second()`', '时、分、秒，只有时间列能用'],
           ['`dayOfWeek()`、`isoDayOfWeek()`、`dayOfYear()`', '星期几、一年的第几天'],
-          ['`format(模板)`', '`yyyy`、`MM`、`dd`、`HH`、`mm`、`ss`，各库的函数由方言选'],
+          [
+            '`format(模板)`',
+            '`yyyy`、`MM`、`dd`、`HH`、`mm`、`ss`；原样输出的字母加单引号，各库的函数由方言选',
+          ],
           ['`addYears(n)` … `addSeconds(n)`、`add(n, 单位)`', '加减；n 可以是负数或一列'],
           [
             '`diff(另一个, 单位)`、`diffDays(另一个)`',
@@ -42,6 +45,7 @@ export default _component(() => () => (
     </Section>
     <Section id="format" title="格式化">
       <SqlExample example={dateFormat} title="写成文字" />
+      <P text="模板里的英文字母都是格式符：认得 `yyyy`、`yy`、`MM`、`dd`、`HH`、`mm`、`ss`，别的字母报错。要原样输出的字母用单引号括起来，如 `yyyy-MM-dd'T'HH:mm:ss`；汉字、标点、空格直接写。" />
       <Note text="结果是文字，展示用；排序、比较还是用原来的列，不然走不上索引。" />
     </Section>
     <Section id="math" title="加减和相差">

@@ -144,6 +144,8 @@ export class ClickHouseDialect extends Dialect {
     return {
       ...super.functions(),
       length: (a) => `char_length(${a[0]})`,
+      // concat 只收文字，Nullable 的项为 NULL 时整个结果是 NULL
+      text_or_empty: (a) => `ifNull(toString(${a[0]}), '')`,
       index_of: (a) => `(positionUTF8(${a[0]}, ${a[1]}) - 1)`,
       substring: (a) => `substringUTF8(${a.join(', ')})`,
       left: (a) => `leftUTF8(${a[0]}, ${a[1]})`,

@@ -89,6 +89,8 @@ export class DuckDbDialect extends Dialect {
     return {
       ...super.functions(),
       length: (a) => `LENGTH(${a[0]})`,
+      // CONCAT 跳过 NULL
+      text_or_empty: (a) => a[0]!,
       date_trunc: (a) => `DATE_TRUNC(${a[1]}, ${a[0]})`,
       diff_days: (a) => `DATE_DIFF('day', CAST(${a[1]} AS DATE), CAST(${a[0]} AS DATE))`,
       now: () => `CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP)`,

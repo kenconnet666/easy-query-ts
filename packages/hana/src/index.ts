@@ -165,6 +165,8 @@ export class HanaDialect extends Dialect {
       length: (a) => `LENGTH(${a[0]})`,
       // HANA 的 CONCAT 只收两个参数
       concat: (a) => `(${a.join(' || ')})`,
+      // 先转成文字：COALESCE(数字, '') 会把 '' 当数字报错
+      text_or_empty: (a) => `COALESCE(TO_NVARCHAR(${a[0]}), '')`,
       ...hanaFunctions,
     };
   }

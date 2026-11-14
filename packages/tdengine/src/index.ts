@@ -118,6 +118,8 @@ export class TdengineDialect extends Dialect {
     return {
       ...super.functions(),
       length: (a) => `CHAR_LENGTH(${a[0]})`,
+      // TDengine 3.3 没有 COALESCE / IFNULL
+      text_or_empty: (a) => `CASE WHEN ${a[0]} IS NULL THEN '' ELSE ${a[0]} END`,
       substring: (a) => `SUBSTR(${a.join(', ')})`,
       now: () => 'NOW()',
       cast_string: (a) => `CAST(${a[0]} AS VARCHAR(4096))`,
