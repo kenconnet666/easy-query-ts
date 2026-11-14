@@ -1,13 +1,39 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { createDb } from '@zerodep-dev/easy-query-ts';
-import { Dept, Gadget, Post, schema } from '@zerodep-dev/easy-query-ts-test/fixture';
+import { caseWhen, createDb } from '@zerodep-dev/easy-query-ts';
+import { Dept, Gadget, Post, schema, User } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { db2 } from '../src/index.ts';
 
 const pool = {} as never;
 
 describe('db2: SQL text', () => {
   const db = createDb({ schema, adapter: db2(pool, '') });
+
+  it('排序键里有子查询（按导航上的聚合排序）：在派生表里算出来，外层排序、分页', () => {
+    assert.equal(
+      db
+        .queryable(User)
+        .orderBy((u) => u.posts.count().desc())
+        .limit(3)
+        .select((u) => u.name)
+        .toSQL().sql,
+      `SELECT eq_s."c0" AS "c0" FROM (SELECT t0."name" AS "c0", (SELECT COUNT(*) AS "v" FROM "t_post" t1 WHERE t1."user_id" = t0."id") AS "eq_o0" FROM "t_user" t0) eq_s` +
+        ` ORDER BY eq_s."eq_o0" DESC FETCH NEXT 3 ROWS ONLY`,
+    );
+  });
+
+  it('CASE 分支的布尔参数、时间差里的参数都写出类型：Db2 推不出 ? 的类型', () => {
+    const { sql } = db
+      .queryable(User)
+      .select((u) => ({
+        adult: caseWhen(u.age.ge(18), true).else(false),
+        days: u.createdAt.diff(new Date('2026-01-01T00:00:00Z'), 'day'),
+      }))
+      .toSQL();
+    assert.match(sql, /THEN CAST\(\? AS BOOLEAN\) ELSE CAST\(\? AS BOOLEAN\) END/);
+    assert.match(sql, /DAYS\(CAST\(\? AS TIMESTAMP\)\)/);
+    assert.match(sql, /MIDNIGHT_SECONDS\(CAST\(\? AS TIMESTAMP\)\)/);
+  });
 
   it('OFFSET … FETCH 分页；upsert 写成 MERGE … USING (VALUES …)', () => {
     assert.equal(

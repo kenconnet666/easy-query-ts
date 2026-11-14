@@ -13,6 +13,7 @@ import {
   bareName,
   Dialect,
   dateFormatParts,
+  isBoundParam,
   SqlWriter,
   sqlString,
   standardJsonPath,
@@ -43,6 +44,31 @@ import {
 
 const SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
 
+/** 节点里有没有子查询（标量子查询、EXISTS） */
+function hasSubquery(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasSubquery);
+  if (value === null || typeof value !== 'object') return false;
+  const k = (value as { k?: unknown }).k;
+  if (k === 'sub' || k === 'exists') return true;
+  return Object.values(value).some(hasSubquery);
+}
+
+/**
+ * 要不要把排序挪到派生表外面：排序键里有子查询时。DISTINCT、带 CTE、UNION、加锁的查询不挪
+ * （多出来的排序列会改变去重结果；WITH 不能写进派生表；FOR UPDATE 不能加在派生表上），照原样交给库
+ */
+function sortsBySubquery(q: SelectNode): boolean {
+  return (
+    q.columns.length > 0 &&
+    !q.distinct &&
+    !q.distinctOn?.length &&
+    !q.ctes?.length &&
+    !q.unions?.length &&
+    !q.forUpdate &&
+    q.orderBy.some((o) => hasSubquery(o.e))
+  );
+}
+
 /** CASE 分支里参数要转成的类型（按列的种类） */
 const CASE_TYPES: Record<string, string> = {
   int: 'INTEGER',
@@ -54,7 +80,8 @@ const CASE_TYPES: Record<string, string> = {
   date: 'DATE',
   time: 'TIME',
   json: 'CLOB',
-  string: 'VARCHAR(4000)',
+  // 和按字符计长的列（createTables 建的 VARCHAR(n CODEUNITS32)）放进同一个 CASE 时，超过 2042 个字符就判为类型不兼容（SQL0581N）
+  string: 'VARCHAR(2042 CODEUNITS32)',
 };
 
 /** IBM Db2 的方言 */
@@ -91,6 +118,7 @@ export class Db2Dialect extends Dialect {
 
   /** 递归 CTE 的递归成员不能有显式 join（SQL0345N）：内连接改成逗号连接，ON 的条件挪进 WHERE */
   override select(q: SelectNode, w: SqlWriter = new SqlWriter()): string {
+    if (sortsBySubquery(q)) return this.sortedOutside(q, w);
     if (!q.ctes?.some((c) => c.recursive)) return super.select(q, w);
     const ctes = q.ctes.map((c) =>
       c.recursive
@@ -98,6 +126,23 @@ export class Db2Dialect extends Dialect {
         : c,
     );
     return super.select({ ...q, ctes }, w);
+  }
+
+  /**
+   * 排序键里不能有关联的标量子查询（SQLSTATE 42703，按导航上的聚合、计算属性排序都是这种）：
+   * 把排序键当成列在派生表里算出来，外层按它排序、分页
+   */
+  private sortedOutside(q: SelectNode, w: SqlWriter): string {
+    const keys = q.orderBy.map((o, i) => ({ e: o.e, as: `eq_o${i}` }));
+    const inner = super.select(
+      { ...q, columns: [...q.columns, ...keys], orderBy: [], limit: undefined, offset: undefined },
+      w,
+    );
+    const columns = q.columns.map((c) => `eq_s.${this.quote(c.as)} AS ${this.quote(c.as)}`);
+    const order = keys.map(
+      (k, i) => `eq_s.${this.quote(k.as)} ${q.orderBy[i]!.desc ? 'DESC' : 'ASC'}`,
+    );
+    return `SELECT ${columns.join(', ')} FROM (${inner}) eq_s ORDER BY ${order.join(', ')}${this.limitOffset(q.limit, q.offset)}`;
   }
 
   /** 全是 CROSS JOIN 时写成逗号连接（递归 CTE 的递归成员里连 CROSS JOIN 也不让写） */
@@ -118,8 +163,10 @@ export class Db2Dialect extends Dialect {
       : typeof n.value === 'number'
         ? 'DOUBLE'
         : typeof n.value === 'string'
-          ? 'VARCHAR(4000)'
-          : undefined;
+          ? CASE_TYPES['string']
+          : typeof n.value === 'boolean'
+            ? CASE_TYPES['boolean']
+            : undefined;
     return type ? `CAST(${sql} AS ${type})` : sql;
   }
 
@@ -197,8 +244,11 @@ export class Db2Dialect extends Dialect {
       add_time: (a) => `(${a[0]} + ${a[1]} ${unquoteSql(a[2]!).toUpperCase()}S)`,
       diff_days: (a) => `(DAYS(CAST(${a[0]} AS TIMESTAMP)) - DAYS(CAST(${a[1]} AS TIMESTAMP)))`,
       // 按经过的秒数整除（向零截断），与其它库一致
-      diff_time: (a) =>
-        `((DAYS(${a[0]}) - DAYS(${a[1]})) * 86400 + MIDNIGHT_SECONDS(${a[0]}) - MIDNIGHT_SECONDS(${a[1]})) / ${SECONDS[unquoteSql(a[2]!)]}`,
+      // 绑定参数那一端转成 TIMESTAMP：DAYS(?) 推不出参数的类型（SQL0245N）
+      diff_time: (a) => {
+        const [x, y] = [a[0]!, a[1]!].map((v) => (isBoundParam(v) ? `CAST(${v} AS TIMESTAMP)` : v));
+        return `((DAYS(${x}) - DAYS(${y})) * 86400 + MIDNIGHT_SECONDS(${x}) - MIDNIGHT_SECONDS(${y})) / ${SECONDS[unquoteSql(a[2]!)]}`;
+      },
       day_of_year: (a) => `DAYOFYEAR(${a[0]})`,
       day_of_week: (a) => `(DAYOFWEEK(${a[0]}) - 1)`,
       iso_day_of_week: (a) => `DAYOFWEEK_ISO(${a[0]})`,
