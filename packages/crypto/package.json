@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-crypto",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "AES / SM4 column encryption (searchable by segments) for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",

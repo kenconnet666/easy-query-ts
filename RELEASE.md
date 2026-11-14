@@ -14,7 +14,7 @@
 ## 每次发布
 
 1. **确认版本**：`packages/*/package.json` 的 `version` 相同且没发布过（npm 上已发布的版本不能覆盖）。
-2. **确认 CI**：要发布的提交在 `master` 上，GitHub Actions 全部通过（check、test、consumer、db、db-analytic、db-db2）。
+2. **确认 CI**：要发布的提交在 `master` 上，GitHub Actions 全部通过（check、test、consumer、docs、db、db-analytic、db-db2、db-hana）。
 3. **发布**（`-r` 按依赖顺序先发核心；`prepack` 会先构建）：
 
    ```bash
