@@ -22,6 +22,7 @@ export default _component(() => () => (
       <P text="`filterBy` 接一个表单对象和一组规则。没填的字段跳过；同名的列直接写比较方式，不同名的写 `{ op, column }`；`column` 可以经过导航，也可以给几列，任一满足。这对应官方的 `whereObject`，规则的键和值类型都由实体推出，写错编译不过。" />
       <SqlExample example={filterBy} title="关键字查标题或作者，再加最低阅读量" />
       <P text="区间用 `between`，给一对值，任一端为空就不限。" />
+      <P text="日期时间列上只写了日期的值（`2026-01-31`）一律按整天算，时区看 `timeZone`：等于是“落在这一天里”，小于等于含这一整天，大于是“这一天之后”，区间的两端同理。条件树、`search` 参数、`between` 用的是同一套；`in` 不按整天，要写出时刻。" />
       <P text="不走 `filterBy`、自己拼条件时，同样的规则可以单独拿来用：`rangeOf(列, 字段名, 起, 止)` 是“任一端为空就不限”的区间，`conditionOf(条件树, 形状)` 把前端传来的条件树变成条件，字段只认形状里有的列。两个都返回普通的条件，放进任何 `where`。" />
       <SqlExample example={range} title="年龄区间" />
       <SimpleTable

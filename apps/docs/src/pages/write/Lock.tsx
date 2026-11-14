@@ -41,7 +41,7 @@ export default _component(() => () => (
           ['读改写的并发：编辑表单', '乐观锁，见“乐观锁”'],
           ['读改写的并发，冲突很多', '`tx.lock`、`forUpdate`'],
           ['抢任务', '`forUpdateSkipLocked`'],
-          ['定时任务只让一个实例做', '`advisoryLock`（PG）'],
+          ['定时任务只让一个实例做', '`advisoryLock`（PG、SQL Server）'],
         ]}
       />
     </Section>
@@ -71,8 +71,8 @@ export default _component(() => () => (
       />
       <Note text="这些方法在类型上标了方言能力：连的库不支持时编辑器里直接标红，见“方言差异”。SQLite 只有库级的写锁，这里是空操作。MySQL 按没有索引的列加锁会锁住扫描过的所有行，抢任务要按主键或索引列取。" />
     </Section>
-    <Section id="advisory" title="咨询锁（PostgreSQL）">
-      <P text="定时任务只让一个实例做、按业务键串行化，用咨询锁。名字哈希成 64 位整数，`wait: false` 拿不到时立刻返回 false。只能在事务里用；MySQL 的 GET_LOCK 是连接级的，提交时释放不了，没有做。" />
+    <Section id="advisory" title="咨询锁（PostgreSQL、SQL Server）">
+      <P text="定时任务只让一个实例做、按业务键串行化，用咨询锁：按名字加锁，事务结束自动释放，`wait: false` 拿不到时立刻返回 false。只能在事务里用。PostgreSQL 把名字哈希成 64 位整数（`pg_advisory_xact_lock`），SQL Server 用 `sp_getapplock`。MySQL 的 `GET_LOCK` 是连接级的，提交时不会释放，所以没有当成 `advisoryLock`；`db.migrate` 自己在一条专门的连接上用它排队。" />
       <CodeBlock code={advisory} lang="ts" />
     </Section>
     <Section id="notify" title="通知（PostgreSQL）">

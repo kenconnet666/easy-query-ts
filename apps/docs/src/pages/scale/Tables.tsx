@@ -36,6 +36,7 @@ export default _component(() => () => (
     </Section>
     <Section id="schema" title="换 schema：inSchema">
       <P text="多租户分库、归档库：表还是那些表，换一个 schema（MySQL 里是库）。表名已带 schema 前缀的会换掉前缀。" />
+      <P text="建表也跟着走：`db.inSchema('archive_2025').createTables()`、`syncTables`、`tableExists`、`dropTables` 读的是那个 schema 的表结构，当前 schema 里有同名的表不算数；`db.introspect('archive_2025')` 直接读它。PostgreSQL 系、MySQL 系、SQLite 的附加库、SQL Server、HANA、Db2、DuckDB、ClickHouse 支持；Oracle、达梦的 schema 就是用户，只读当前用户的表，前缀要和当前用户一致。" />
       <SqlExample example={useSchema} title="所有表换到 archive_2025" />
       <P text="第二个参数只换这几个实体。" />
       <SqlExample example={useSchemaOnly} title="只换帖子表" />

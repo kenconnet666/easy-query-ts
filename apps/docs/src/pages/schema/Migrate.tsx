@@ -47,7 +47,7 @@ export default _component(() => () => (
   <DocPage>
     <Section id="why" title="什么时候用">
       <P text="`syncTables` 适合开发阶段；生产环境要有记录、能审查、能手改的迁移。执行过的迁移记进历史表，下次跳过。" />
-      <P text="几个实例同时启动、同时执行迁移时：PostgreSQL 系按历史表的名字加咨询锁排队，每条迁移只执行一次。别的库没有这种锁，迁移要由一个实例（或部署流程里单独的一步）来跑。" />
+      <P text="几个实例同时启动、同时执行迁移时排队，每条迁移只执行一次：PostgreSQL 系、SQL Server 按历史表的名字加事务级的咨询锁；MySQL、MariaDB 用 `GET_LOCK`，锁拿在另一条连接上，迁移期间要占两条连接（连接池只有一条时传 `{ lock: false }`，自己保证只有一个实例在跑）。别的库（Oracle、达梦、HANA、Db2 等）没有可用的锁，迁移由一个实例或部署流程里单独的一步来跑。" />
       <SimpleTable
         head={['阶段', '做法']}
         rows={[
@@ -73,7 +73,8 @@ export default _component(() => () => (
           '迁移按 id 的字典序执行，生成时用 UTC 时间戳开头，传入的顺序不重要；id 重复报错。',
           '历史表默认 `eqts_migrations`（id、校验和、执行时间），没有就建；`--table`、`{ table }` 换名字。`eqts pull` 不会把它生成成实体。',
           '每条迁移连同它的历史记录在一个事务里（DDL 能放进事务的库：PG、SQLite、SQL Server、Db2 等）；MySQL、Oracle 的 DDL 会隐式提交。',
-          '已经执行过的迁移被改了（校验和对不上）：`migrate` 直接报错，要改就加一条新迁移。',
+          '已经执行过的迁移被改了（校验和对不上）：`migrate` 直接报错，要改就加一条新迁移。函数写的迁移不校验：函数的源码文字随构建方式变，拿它比会把没改的迁移当成改过。',
+          '某条迁移失败时抛 `MigrationError`：`id` 是哪一条、`statement` 是第几条语句、`rolledBack` 是做过的改动有没有回滚，`cause` 是驱动的错误。DDL 能回滚的库改好再跑就行；MySQL、Oracle 这类失败之前的语句留在库里、历史表没有记录，照错误里说的把库修好（或把执行过的语句从迁移里拿掉）再跑。一条迁移里少放几条 DDL，出了事好收拾。',
         ]}
       />
     </Section>

@@ -90,6 +90,11 @@ export default _component(() => () => (
             '开发阶段就会碰到，换写法或换方言',
           ],
           ['`the query returned more than N rows`', '超过 `maxRows`', '加分页或改 `stream`'],
+          [
+            '`MigrationError`',
+            '`db.migrate` 的某条迁移失败',
+            '看 `statement`、`rolledBack` 决定怎么收拾，见“迁移”',
+          ],
           ['别的驱动错误', '断连、语法、权限', '原样抛出'],
         ]}
       />

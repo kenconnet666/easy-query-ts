@@ -304,18 +304,18 @@ easy-query 的 TS 版。阶段编号沿用迁移前 vue-tsx-pro 的 ROADMAP，�
 - [x] 28.3.2 删掉 `docs/features/`，各包 README 改链到文档站（原 25.5.1）
 - [x] 28.3.3 脚本检查每个公开导出都有说明（`pnpm exports:check`，在 `pnpm check` 里；原 25.6 的后半）
 
-### 28.4 审查里记下、还没做的
+### 28.4 审查里记下的后续（0.4.1）
 
-- [ ] 28.4.1 `inSchema` / 带 schema 前缀的实体做 `createTables`、`planSync`：读库结构只看当前 schema，目标 schema 里没有而当前 schema 里有同名的表时会被当成已存在。要让各方言的 introspect 按 schema 读
-- [ ] 28.4.2 DDL 不在事务里的库（MySQL、Oracle 等）迁移中途失败：已执行的语句留在库里、历史表没有记录，重跑会撞上已存在的对象。至少在失败时报出执行到第几条；并发启动的互斥目前只有 PG（advisory lock）
-- [ ] 28.4.3 函数写的迁移用源码文字算校验和：同一份迁移从源码与从构建产物里运行会算出不同的值。改成显式的版本号或只校验 id
-- [ ] 28.4.4 `search` 的区间比较（`rc` 等）在日期时间列上不按整天算（`between` 是按整天的）：与官方 search 扩展一致，但和 `rangeOf` 的约定不同，定下来以哪个为准
+- [x] 28.4.1 带 schema 前缀的实体（`inSchema` 之后）做 `createTables`、`planSync`、`tableExists`、`dropTables`：到它自己的 schema 里读表结构，当前 schema 里的同名表不算。`Dialect.introspect(run, schema?)`，PG 系、MySQL 系、SQLite 附加库、SQL Server、HANA、Db2、DuckDB、ClickHouse 支持；Oracle、达梦只读当前用户（schema 就是用户）。顺带修掉 SQLite 附加库里建索引与外键的写法、SQL Server 的注释与改名只认当前 schema
+- [x] 28.4.2 迁移中途失败：抛 `MigrationError`（哪一条迁移的第几条语句、做过的改动有没有回滚）。同时启动的互斥：PG 系、SQL Server 用事务级的咨询锁（`sp_getapplock`），MySQL、MariaDB 用拿在专门连接上的 `GET_LOCK`；别的库仍由一个进程执行
+- [x] 28.4.3 函数写的迁移不再校验（原来用源码文字算校验和，换个构建方式就对不上）；历史里已有的旧校验和不拿来比
+- [x] 28.4.4 日期时间列上只写了日期的值一律按整天算：条件树与 `search` 的比较（eq、ne、gt、gte、lt、lte）和 `between` 用同一套规则
 
 ### 28.5 1.0 的标准
 
 发 1.0 意味着公开 API 冻结、按语义化版本维护。满足下面几条再发：
 
-- [ ] 28.5.1 28.4 的几条做完或写进文档的已知限制
+- [x] 28.5.1 28.4 的几条做完或写进文档的已知限制
 - [ ] 28.5.2 连续两个次版本（0.4、0.5）没有因为设计问题再改公开 API；改了的都有迁移说明
 - [ ] 28.5.3 每个公开导出都有说明（28.3.3 已经在检查），文档站每页的示例在各方言下都能运行
 - [ ] 28.5.4 支持的库在 CI 里各有一遍共用套件（现在缺金仓：没有可用的容器），HANA 8 GB 的长跑观察有结论
