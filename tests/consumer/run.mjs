@@ -2,8 +2,10 @@
  * 发布产物的检查：真正装到使用方手里的是 pnpm pack 的包，仓库里的测试直接跑源码，发现不了打包的问题。
  *
  *   1. 每个要发布的包：依赖里没有 workspace:、catalog:，exports 指向的文件都在包里
- *   2. 不要外部驱动的几个包装进仓库之外的项目：类型检查、运行一遍，核心包只有一份（表达式靠 instanceof 识别，两份就失灵）
- *   3. 每个包声明同一个 engines.node，并且在声明的最低版本上再运行一遍（npx 取那个版本的 node）
+ *   2. 不要外部驱动的几个包装进仓库之外的项目：用仓库的与支持的最低 TypeScript 各类型检查一遍、运行一遍，
+ *      核心包只有一份（表达式靠 instanceof 识别，两份就失灵）
+ *   3. 每个包声明同一个 engines.node，并且在声明的最低版本与最新的正式版上各运行一遍（npx 取那个版本的 node）
+ *   4. 同一个项目在 Bun、Deno 上各运行一遍（冒烟，不在 engines 里）
  *
  * 用法：pnpm test:consumer
  */
@@ -86,14 +88,37 @@ const NODE_RANGE = JSON.parse(readFileSync(join(root, 'packages/core/package.jso
 const MINIMUM_NODE = /^>=(\d+\.\d+)(\.\d+)?$/.exec(NODE_RANGE);
 if (!MINIMUM_NODE) throw new Error(`engines.node '${NODE_RANGE}' is not of the form >=x.y`);
 
+/** 使用方能用的最低 TypeScript：声明里用到 Uint8Array<…> 这类 5.7 才有的写法 */
+const MINIMUM_TYPESCRIPT = '5.7';
+
+/** npm 上 node 包最高的正式版（它的 latest 标签会指向预发布版） */
+function latestNode() {
+  const versions = JSON.parse(execSync('npm view node versions --json', { env, encoding: 'utf8' }));
+  const released = versions
+    .filter((version) => /^\d+\.\d+\.\d+$/.test(version))
+    .map((version) => version.split('.').map(Number));
+  released.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+  return released.at(-1).join('.');
+}
+
+// 同一个 app.ts 在 Node、Bun、Deno 上都跑：SQLite 用各自自带的同步驱动，Bun 是 bun:sqlite，Node 与 Deno 是 node:sqlite
 const APP = `
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
 import { CalendarDate } from '@internationalized/date';
 import { col, createDb, defineSchema, entity } from '@zerodep-dev/easy-query-ts';
 import { createCache } from '@zerodep-dev/easy-query-ts-cache';
 import { calendarDate } from '@zerodep-dev/easy-query-ts-date';
 import { sqlite } from '@zerodep-dev/easy-query-ts-sqlite';
+
+const runtime = globalThis as { Bun?: { version: string }; Deno?: { version: { deno: string } } };
+async function openDatabase() {
+  if (runtime.Bun) {
+    const { Database } = await import('bun:sqlite' as string);
+    return new Database(':memory:', { safeIntegers: true });
+  }
+  const { DatabaseSync } = await import('node:sqlite');
+  return new DatabaseSync(':memory:');
+}
 
 const User = entity('t_user', {
   id: col.int().primaryKey().generated(),
@@ -104,7 +129,7 @@ const schema = defineSchema({ User });
 const cache = createCache({ entities: [User] });
 const db = createDb({
   schema,
-  adapter: sqlite(new DatabaseSync(':memory:')),
+  adapter: sqlite(await openDatabase()),
   interceptors: [cache.interceptor],
 });
 await db.createTables();
@@ -123,7 +148,12 @@ const cached = cache.of(db).kv(User);
 assert.equal((await cached.find(1))!.name, 'alice');
 await db.update(User).set({ name: 'bob' }).where((u) => u.id.eq(1)).execute();
 assert.equal((await cached.find(1))!.name, 'bob');
-console.log('consumer app ran');
+const on = runtime.Bun
+  ? \`Bun \${runtime.Bun.version}\`
+  : runtime.Deno
+    ? \`Deno \${runtime.Deno.version.deno}\`
+    : \`Node \${process.version}\`;
+console.log(\`consumer app ran on \${on}\`);
 `;
 
 function checkInstall(packed) {
@@ -166,9 +196,15 @@ function checkInstall(packed) {
   );
   run('npm install --no-audit --no-fund', app);
   run('npx tsc -p .', app);
+  // 支持的最低 TypeScript 上也要通过（RELEASE.md 的版本策略）
+  run(`npx --yes -p typescript@${MINIMUM_TYPESCRIPT} tsc -p .`, app);
   run('node app.ts', app);
-  // 声明的最低版本上也要能跑：npm 的 node 包提供各版本的二进制
+  // 声明的最低版本与最新的正式版上也要能跑：npm 的 node 包提供各版本的二进制
   run(`npx --yes node@${MINIMUM_NODE[1]}${MINIMUM_NODE[2] ?? '.0'} app.ts`, app);
+  run(`npx --yes node@${latestNode()} app.ts`, app);
+  // Bun、Deno 不在 engines 里，只做冒烟：取最新版，上游的新版本弄坏了什么，发布前就知道
+  run('npx --yes bun@latest app.ts', app);
+  run('npx --yes deno@latest run --allow-all app.ts', app);
   const copies = installed
     .slice(1)
     .filter((name) =>

@@ -15,6 +15,7 @@
     "typecheck": "tsc -p . --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo && pnpm --filter @easy-query-ts/docs typecheck",
     "test": "vitest run --configLoader native",
     "test:consumer": "node tests/consumer/run.mjs",
+    "api:diff": "node scripts/release/api-diff.mjs",
     "check": "pnpm lint && pnpm format:check && pnpm refs:check && pnpm exports:check && pnpm text:check",
     "lint": "oxlint . --deny-warnings",
     "format": "prettier --write . --cache --cache-strategy content",
