@@ -25,26 +25,30 @@ function pad([value, length, fill]: string[], start: boolean): string {
 /** diff 的单位折合多少秒 */
 const DIFF_SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
 
+/**
+ * 日期时间在 SQLite 里是文字，比较就是比文字：算出来的结果要和存进去的写法（'YYYY-MM-DD HH:MM:SS.mmm'）一模一样，
+ * 少了毫秒的 '… 00:00:00' 和参数 '… 00:00:00.000' 比较不相等、比大小也错位
+ */
 function dateTrunc(x: string, unit: string): string {
   switch (unit) {
     case 'year':
-      return `strftime('%Y-01-01 00:00:00', ${x})`;
+      return `strftime('%Y-01-01 00:00:00.000', ${x})`;
     // 季度：本季第一个月 = ((月 - 1) / 3) * 3 + 1
     case 'quarter':
-      return `(strftime('%Y-', ${x}) || printf('%02d', ((CAST(strftime('%m', ${x}) AS INTEGER) - 1) / 3) * 3 + 1) || '-01 00:00:00')`;
+      return `(strftime('%Y-', ${x}) || printf('%02d', ((CAST(strftime('%m', ${x}) AS INTEGER) - 1) / 3) * 3 + 1) || '-01 00:00:00.000')`;
     case 'month':
-      return `strftime('%Y-%m-01 00:00:00', ${x})`;
+      return `strftime('%Y-%m-01 00:00:00.000', ${x})`;
     // 'weekday 0' 先走到本周日（或当天就是周日），再退 6 天回到周一
     case 'week':
-      return `strftime('%Y-%m-%d 00:00:00', ${x}, 'weekday 0', '-6 days')`;
+      return `strftime('%Y-%m-%d 00:00:00.000', ${x}, 'weekday 0', '-6 days')`;
     case 'day':
-      return `strftime('%Y-%m-%d 00:00:00', ${x})`;
+      return `strftime('%Y-%m-%d 00:00:00.000', ${x})`;
     case 'hour':
-      return `strftime('%Y-%m-%d %H:00:00', ${x})`;
+      return `strftime('%Y-%m-%d %H:00:00.000', ${x})`;
     case 'minute':
-      return `strftime('%Y-%m-%d %H:%M:00', ${x})`;
+      return `strftime('%Y-%m-%d %H:%M:00.000', ${x})`;
     default:
-      return `strftime('%Y-%m-%d %H:%M:%S', ${x})`;
+      return `strftime('%Y-%m-%d %H:%M:%S.000', ${x})`;
   }
 }
 
@@ -204,9 +208,9 @@ export class SqliteDialect extends Dialect {
       floor: (a) => `(CAST(${a[0]} AS INTEGER) - (${a[0]} < CAST(${a[0]} AS INTEGER)))`,
       ceil: (a) => `(CAST(${a[0]} AS INTEGER) + (${a[0]} > CAST(${a[0]} AS INTEGER)))`,
       mod: (a) => `(${a[0]} % ${a[1]})`,
-      // SQLite 的日期时间是文字，用 datetime() 做加减；结果是 'YYYY-MM-DD HH:MM:SS'，不带毫秒
-      add_days: (a) => `datetime(${a[0]}, '${a[1]} days')`,
-      add_months: (a) => `datetime(${a[0]}, '${a[1]} months')`,
+      // SQLite 的日期时间是文字，加减用 strftime 的修饰符；%f 保留毫秒，结果与存进去的写法一致（见 dateTrunc）
+      add_days: (a) => `strftime('%Y-%m-%d %H:%M:%f', ${a[0]}, '${a[1]} days')`,
+      add_months: (a) => `strftime('%Y-%m-%d %H:%M:%f', ${a[0]}, '${a[1]} months')`,
       diff_days: (a) =>
         `CAST(ROUND(julianday(date(${a[0]})) - julianday(date(${a[1]}))) AS INTEGER)`,
       date_trunc: (a) => dateTrunc(a[0]!, a[1]!.replace(/'/g, '')),
@@ -259,7 +263,7 @@ export class SqliteDialect extends Dialect {
       cast_double: (a) => `CAST(${a[0]} AS REAL)`,
       cast_decimal: (a) => `CAST(${a[0]} AS NUMERIC)`,
       cast_date: (a) => `date(${a[0]})`,
-      cast_datetime: (a) => `datetime(${a[0]})`,
+      cast_datetime: (a) => `strftime('%Y-%m-%d %H:%M:%f', ${a[0]})`,
     };
   }
 

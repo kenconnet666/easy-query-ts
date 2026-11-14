@@ -2403,6 +2403,22 @@ export function liveSuite(
         minute: '2026-01-02T03:04:00.000Z',
         second: '2026-01-02T03:04:05.000Z',
       });
+      // 截断出来的值能直接和日期比较（SQLite 里日期是文字，写法差一点就比不上）
+      const day = new Date('2026-01-02T00:00:00.000Z');
+      assert.equal(
+        await db
+          .queryable(User)
+          .where((u) => [u.name.eq('alice'), u.createdAt.dateTrunc('day').eq(day)])
+          .count(),
+        1,
+      );
+      assert.equal(
+        await db
+          .queryable(User)
+          .where((u) => [u.name.eq('alice'), u.createdAt.dateTrunc('day').gt(day)])
+          .count(),
+        0,
+      );
       // 按月分组统计
       const byMonth = await db
         .queryable(User)
