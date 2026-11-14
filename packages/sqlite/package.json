@@ -33,6 +33,9 @@
     "access": "public"
   },
   "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
   "peerDependencies": {
     "@zerodep-dev/easy-query-ts": "workspace:^"
   },

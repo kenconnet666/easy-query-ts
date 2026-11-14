@@ -3,6 +3,7 @@
  *
  *   1. 每个要发布的包：依赖里没有 workspace:、catalog:，exports 指向的文件都在包里
  *   2. 不要外部驱动的几个包装进仓库之外的项目：类型检查、运行一遍，核心包只有一份（表达式靠 instanceof 识别，两份就失灵）
+ *   3. 每个包声明同一个 engines.node，并且在声明的最低版本上再运行一遍（npx 取那个版本的 node）
  *
  * 用法：pnpm test:consumer
  */
@@ -72,10 +73,18 @@ function checkManifests(packed) {
       if (!existsSync(join(unpacked, target))) problems.push(`${name}: ${target} is missing`);
     }
     if (!existsSync(join(unpacked, 'LICENSE'))) problems.push(`${name}: LICENSE is missing`);
+    if (manifest.engines?.node !== NODE_RANGE)
+      problems.push(`${name}: engines.node is ${manifest.engines?.node}, expected ${NODE_RANGE}`);
   }
   if (problems.length) throw new Error(`packed manifests are wrong:\n  ${problems.join('\n  ')}`);
   console.log(`${packed.size} packages: manifests and exports are fine`);
 }
+
+/** 各包声明的 Node 版本范围（取核心包的，checkManifests 核对其余的与它一致）与其中的最低版本 */
+const NODE_RANGE = JSON.parse(readFileSync(join(root, 'packages/core/package.json'), 'utf8'))
+  .engines.node;
+const MINIMUM_NODE = /^>=(\d+\.\d+)(\.\d+)?$/.exec(NODE_RANGE);
+if (!MINIMUM_NODE) throw new Error(`engines.node '${NODE_RANGE}' is not of the form >=x.y`);
 
 const APP = `
 import assert from 'node:assert/strict';
@@ -158,6 +167,8 @@ function checkInstall(packed) {
   run('npm install --no-audit --no-fund', app);
   run('npx tsc -p .', app);
   run('node app.ts', app);
+  // 声明的最低版本上也要能跑：npm 的 node 包提供各版本的二进制
+  run(`npx --yes node@${MINIMUM_NODE[1]}${MINIMUM_NODE[2] ?? '.0'} app.ts`, app);
   const copies = installed
     .slice(1)
     .filter((name) =>
