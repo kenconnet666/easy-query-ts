@@ -42,6 +42,7 @@ import {
   type Session,
   type TransactionOptions,
   type UpdateNode,
+  type DatabaseErrorKind,
 } from '@zerodep-dev/easy-query-ts';
 import { msSqlFunctions } from './functions.ts';
 
@@ -52,8 +53,33 @@ export type SqlServerVersion = 2008 | 2012 | 2014 | 2016 | 2017 | 2019 | 2022 | 
 
 const SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
 
+/** SQL Server 的方言：按服务器版本（2008 起）选分页、JSON、字符串聚合等写法 */
 export class MsSqlDialect extends Dialect {
   readonly name = 'sqlserver';
+
+  /**
+   * 错误的 number：2627 唯一约束、2601 唯一索引，515 非空，1205 死锁的牺牲者，3960 快照隔离下的更新冲突；
+   * 547 是外键与 CHECK 共用的，按消息区分
+   */
+  override errorKind(error: unknown): DatabaseErrorKind | undefined {
+    switch (errorField(error, 'number')) {
+      case 2627:
+      case 2601:
+        return 'unique';
+      case 547:
+        return /FOREIGN KEY|REFERENCE/i.test(String(errorField(error, 'message')))
+          ? 'foreignKey'
+          : undefined;
+      case 515:
+        return 'notNull';
+      case 1205:
+        return 'deadlock';
+      case 3960:
+        return 'serialization';
+      default:
+        return undefined;
+    }
+  }
   /** SQL Server 一条语句最多 2100 个参数 */
   override readonly maxBindParams = 2000;
   /** 注释写成扩展属性 MS_Description（SSMS 等工具认它） */
@@ -572,6 +598,7 @@ class MsSqlDriver extends MsSqlSession implements Driver {
   }
 }
 
+/** mssql() 的选项 */
 export interface MsSqlOptions {
   /** 服务器的主版本：按它选写法，默认最新 */
   readonly version?: SqlServerVersion;
@@ -606,3 +633,10 @@ mssql.detect = async (pool: sql.ConnectionPool): Promise<Adapter<Without<'return
   const version = RELEASES[major] ?? (major > 17 ? undefined : 2008);
   return { dialect: new MsSqlDialect({ version }), driver: new MsSqlDriver(pool) };
 };
+
+/** 驱动的错误对象上的一个字段（错误不一定是对象） */
+function errorField(error: unknown, name: string): unknown {
+  return typeof error === 'object' && error !== null
+    ? (error as Record<string, unknown>)[name]
+    : undefined;
+}

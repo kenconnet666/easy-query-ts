@@ -47,10 +47,12 @@ function paramType(value: unknown): string {
   return 'String';
 }
 
+/** ClickHouse 的方言：查询完整；更新、删除是 mutation，没有事务与自增 */
 export class ClickHouseDialect extends Dialect {
   readonly name = 'clickhouse';
   /** 没有事务，也就没有保存点 */
   override readonly supportsSavepoints = false;
+  override readonly nullOrder = 'last';
   override readonly commentStyle = 'inline' as const;
   override readonly indexIfNotExists = true;
 

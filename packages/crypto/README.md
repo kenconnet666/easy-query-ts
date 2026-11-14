@@ -22,6 +22,6 @@ await db
 ```
 
 `searchable: true` 时按 Java 版的可分段写法加密（从每个字符起取满 4 个单位，中文与 emoji 算 2 个，逐段加密再拼起来），
-至少 4 个单位的搜索词能用 `like` / `startsWith` / `endsWith`。分段与编码与 Java 版一致，同样的密钥能读 Java 版写的数据。
+至少 4 个单位的搜索词能用 `like` / `startsWith` / `endsWith`；`segments(明文)` 是这一步的分段，对照 Java 版的数据时可以单独调用。分段与编码与 Java 版一致，同样的密钥能读 Java 版写的数据。
 
 只在 Node（`node:crypto`）里用；需要同时安装核心包 `@zerodep-dev/easy-query-ts`。许可证：Apache-2.0。

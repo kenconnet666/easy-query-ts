@@ -35,6 +35,8 @@ import {
   type Session,
   type TransactionOptions,
   type UpdateNode,
+  sqlStateKind,
+  type DatabaseErrorKind,
 } from '@zerodep-dev/easy-query-ts';
 
 const SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
@@ -53,8 +55,24 @@ const CASE_TYPES: Record<string, string> = {
   string: 'VARCHAR(4000)',
 };
 
+/** IBM Db2 的方言 */
 export class Db2Dialect extends Dialect {
   readonly name = 'db2';
+
+  /**
+   * SQLSTATE 在 ibm_db 错误的 state / sqlstate 里（没有时取消息末尾的 SQLSTATE=…）。
+   * 23504、23001 是删父行时被外键拦住；40001 在 Db2 上是死锁或锁超时导致的回滚
+   */
+  override errorKind(error: unknown): DatabaseErrorKind | undefined {
+    const state =
+      errorField(error, 'state') ??
+      errorField(error, 'sqlstate') ??
+      /SQLSTATE=(\w{5})/.exec(String(errorField(error, 'message')))?.[1];
+    if (state === '23504' || state === '23001') return 'foreignKey';
+    if (state === '40001') return 'deadlock';
+    return sqlStateKind(state);
+  }
+  override readonly nullOrder = 'largest';
   override readonly transactionalDdl = true;
   /** CREATE INDEX 没有 IF NOT EXISTS */
   override readonly indexIfNotExists = false;
@@ -439,4 +457,11 @@ export function db2(
   connectionString: string,
 ): Adapter<Without<'returning' | 'noWait'>> {
   return { dialect: new Db2Dialect(), driver: new Db2Driver(pool, connectionString) };
+}
+
+/** 驱动的错误对象上的一个字段（错误不一定是对象） */
+function errorField(error: unknown, name: string): unknown {
+  return typeof error === 'object' && error !== null
+    ? (error as Record<string, unknown>)[name]
+    : undefined;
 }

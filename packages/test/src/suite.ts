@@ -19,6 +19,11 @@ import {
   createDb,
   defineSchema,
   defineView,
+  DatabaseError,
+  type CursorPage,
+  ForeignKeyViolationError,
+  NotNullViolationError,
+  UniqueViolationError,
   or,
   sql,
   touch,
@@ -104,6 +109,74 @@ export function liveSuite(
   const seeded = async () => seed(await open());
 
   describe(`${name}: queries`, () => {
+    it('declares where NULL sorts, matching what the database does', async () => {
+      const env = await seeded();
+      // bob 没有年龄；alice 30，carol 17。跨库归并按方言声明的顺序比较，声明错了分页就取错行
+      const names = async (descending: boolean) =>
+        env.db
+          .queryable(User)
+          .orderBy((u) => (descending ? u.age.desc() : u.age))
+          .select((u) => u.name)
+          .toList();
+      const expected = {
+        smallest: [
+          ['bob', 'carol', 'alice'],
+          ['alice', 'carol', 'bob'],
+        ],
+        largest: [
+          ['carol', 'alice', 'bob'],
+          ['bob', 'alice', 'carol'],
+        ],
+        last: [
+          ['carol', 'alice', 'bob'],
+          ['alice', 'carol', 'bob'],
+        ],
+      }[env.adapter.dialect.nullOrder];
+      assert.deepEqual([await names(false), await names(true)], expected);
+    });
+
+    it('pages by cursor: every row once, in the order of the whole query', async () => {
+      const { db } = await seeded();
+      const walk = async <T>(
+        query: { toCursorPage(o: { size: number; after?: string }): Promise<CursorPage<T>> },
+        size: number,
+      ): Promise<T[]> => {
+        const rows: T[] = [];
+        let after: string | undefined;
+        do {
+          const page = await query.toCursorPage(after === undefined ? { size } : { size, after });
+          assert.ok(page.rows.length <= size);
+          rows.push(...page.rows);
+          after = page.next;
+        } while (after !== undefined);
+        return rows;
+      };
+      // 可空的键：bob 没有年龄，NULL 排在哪头按库来，游标跨过它也不丢行
+      for (const descending of [false, true]) {
+        const byAge = db
+          .queryable(User)
+          .orderBy((u) => (descending ? u.age.desc() : u.age))
+          .select((u) => u.name);
+        assert.deepEqual(await walk(byAge, 1), await byAge.toList());
+      }
+      // 键相同的行（三个人同一时刻创建；一个人几篇文章）靠主键分出先后
+      const byTime = db.queryable(User).orderBy((u) => u.createdAt.desc());
+      assert.deepEqual(
+        (await walk(byTime, 2)).map((u) => u.name),
+        ['alice', 'bob', 'carol'],
+      );
+      const byAuthor = db
+        .queryable(Post)
+        .orderBy((p) => [p.userId.desc(), p.amount.desc()])
+        .select((p) => ({ title: p.title, author: p.user.name }));
+      assert.deepEqual(await walk(byAuthor, 3), await byAuthor.toList());
+      // 没写排序：按主键
+      assert.deepEqual(
+        (await walk(db.queryable(Post), 3)).map((p) => p.id),
+        [1, 2, 3, 4],
+      );
+    });
+
     it('reads rows with decoded values', async () => {
       const { db } = await seeded();
       const alice = await db
@@ -2226,6 +2299,47 @@ export function liveSuite(
         }),
       },
     );
+
+    it('reports constraint violations as typed errors, whatever the driver calls them', async () => {
+      const env = await seeded();
+      const db = createDb({ schema: syncSchema, adapter: env.adapter });
+      await db.dropTables(SyncB, SyncA);
+      await db.createTables();
+      const failure = (work: Promise<unknown>): Promise<unknown> =>
+        work.then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      try {
+        await db.insert(SyncA).values({ id: 1, name: 'a' }).execute();
+        const duplicate = await failure(db.insert(SyncA).values({ id: 1, name: 'b' }).execute());
+        assert.ok(duplicate instanceof UniqueViolationError, String(duplicate));
+        // 归一后的错误带着种类与驱动原来的错误
+        assert.equal(duplicate.kind, 'unique');
+        assert.ok(duplicate.cause instanceof Error);
+        assert.ok(duplicate instanceof DatabaseError);
+        const orphan = await failure(db.insert(SyncB).values({ aId: 404, title: 't' }).execute());
+        assert.ok(orphan instanceof ForeignKeyViolationError, String(orphan));
+        const blank = await failure(
+          db
+            .insert(SyncB)
+            .values({ aId: 1, title: null } as never)
+            .execute(),
+        );
+        assert.ok(blank instanceof NotNullViolationError, String(blank));
+        // 事务里的冲突同样归一，事务照常回滚
+        const inside = await failure(
+          db.transaction(async (tx) => {
+            await tx.insert(SyncA).values({ id: 2, name: 'c' }).execute();
+            await tx.insert(SyncA).values({ id: 1, name: 'd' }).execute();
+          }),
+        );
+        assert.ok(inside instanceof UniqueViolationError, String(inside));
+        assert.equal(await db.queryable(SyncA).count(), 1);
+      } finally {
+        await db.dropTables(SyncB, SyncA);
+      }
+    });
 
     it('creates tables with comments, indexes and foreign keys, then finds nothing left to do', async () => {
       const env = await seeded();

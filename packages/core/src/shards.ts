@@ -27,6 +27,7 @@ type KeyOf<S extends AnySchema, E> = {
   [K in EntityKey<S>]: S['entities'][K] extends E ? K : never;
 }[EntityKey<S>];
 
+/** shardDatabases 的选项：有哪些库、各实体按什么分库 */
 export interface ShardOptions<S extends AnySchema> {
   /** 各个库：名字 → 连着那个库的 Db（schema 相同） */
   readonly shards: Readonly<Record<string, Db<S>>>;
@@ -42,6 +43,7 @@ export function shardDatabases<S extends AnySchema>(options: ShardOptions<S>): S
   return new ShardedDb(options);
 }
 
+/** shardDatabases 返回的对象：按分库键把读写路由到某个库，query 跨库查询再归并 */
 export class ShardedDb<S extends AnySchema> {
   private readonly options: ShardOptions<S>;
   private readonly names: readonly string[];
@@ -179,6 +181,12 @@ export class ShardedQuery<Out> {
 
   /** 各库取前 page × size 条，归并后切出这一页；总数是各库之和 */
   async toPage(page: number, size: number): Promise<Page<Out>> {
+    for (const [name, value] of [
+      ['page', page],
+      ['size', size],
+    ] as const)
+      if (!Number.isSafeInteger(value) || value < 1)
+        throw new RangeError(`toPage: ${name} must be a positive integer, got ${value}`);
     const [lists, totals] = await Promise.all([
       this.each((q) => q.limit(page * size).toList()),
       this.each((q) => q.count()),
@@ -187,8 +195,9 @@ export class ShardedQuery<Out> {
     return { rows, total: totals.reduce((a, b) => a + b, 0), page, size };
   }
 
+  /** 各库各取第一行，归并后的第一行（不数行数） */
   async first(): Promise<Out | undefined> {
-    return (await this.toPage(1, 1)).rows[0];
+    return this.merge(await this.each((q) => q.limit(1).toList()))[0];
   }
 
   async count(): Promise<number> {
@@ -224,14 +233,25 @@ export class ShardedQuery<Out> {
     return results;
   }
 
-  /** 按查询的 orderBy 归并各库的结果（各库已排好序）；没有 orderBy 时按库的顺序拼起来 */
+  /**
+   * 按查询的 orderBy 归并各库的结果（各库已排好序）；没有 orderBy 时按库的顺序拼起来。
+   * NULL 排在哪跟着库走（Dialect.nullOrder）：各库只取了自己的前几行，归并的顺序和库里的不一样，切出来的那一页就是错的
+   */
   private merge(lists: readonly Out[][]): Out[] {
     const keys = this.orderKeys();
     const all = lists.flat();
     if (keys.length === 0) return all;
+    const { nullOrder } = this.queries[0]!.buildTree().dialect;
     return all.sort((a, b) => {
       for (const { path, desc } of keys) {
-        const c = compare(read(a, path), read(b, path));
+        const [x, y] = [read(a, path), read(b, path)];
+        const [xNull, yNull] = [x === null || x === undefined, y === null || y === undefined];
+        if (xNull || yNull) {
+          if (xNull && yNull) continue;
+          const nullsFirst = nullOrder === 'smallest' ? !desc : nullOrder === 'largest' && desc;
+          return xNull === nullsFirst ? -1 : 1;
+        }
+        const c = compare(x, y);
         if (c !== 0) return desc ? -c : c;
       }
       return 0;
@@ -261,11 +281,9 @@ function read(row: unknown, path: readonly string[]): unknown {
   );
 }
 
-/** 比较两个值：null 最小（与 MySQL、SQLite 的升序相同），数字、bigint、日期、文字各按自己的序 */
+/** 比较两个非 NULL 的值：数字、bigint、日期、文字各按自己的序 */
 function compare(a: unknown, b: unknown): number {
   if (a === b) return 0;
-  if (a === null || a === undefined) return -1;
-  if (b === null || b === undefined) return 1;
   if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
   if (
     (typeof a === 'number' || typeof a === 'bigint') &&

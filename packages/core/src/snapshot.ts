@@ -24,6 +24,7 @@ interface Renderable {
   toSQL(): Statement | readonly Statement[];
 }
 
+/** SQL 快照的定义：一组语句在几个方言下各渲染成什么，存成文件随代码评审 */
 export interface SnapshotDefinition<S extends AnySchema> {
   readonly schema: S;
   /** 标签 → 方言；标签用在快照的文件名里（同一个方言的不同版本给不同的标签） */

@@ -40,6 +40,7 @@ function literal(text: string): string {
   return `'${text.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
 }
 
+/** TDengine 的方言：时间戳主键、写入即覆盖，没有事务、更新与 join 之外的关联写法 */
 export class TdengineDialect extends Dialect {
   readonly name = 'tdengine';
   /** 没有事务，也就没有保存点 */

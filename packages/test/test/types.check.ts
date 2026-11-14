@@ -11,8 +11,13 @@ import {
   sql,
   win,
   type Adapter,
+  type CursorPage,
   type Expr,
+  type GeneratedKey,
   type Insert,
+  type KeyColumns,
+  type KeyInput,
+  type ResultOf,
   type Row,
   type ViewOf,
 } from '@zerodep-dev/easy-query-ts';
@@ -442,3 +447,75 @@ void db.save(User, { id: 1, posts: { title: 'p' } }, { include: { posts: true } 
 void db.save(User, { id: 1 }, { include: { posts: { key: 'nope' } } });
 // @ts-expect-error 不是 User 的导航
 void db.save(User, { id: 1 }, { include: { comments: true } });
+
+// 主键在列的类型里：find / whereKey / lock / remove 只接受主键的值
+const Member = entity('t_member', {
+  tenantId: col.int().primaryKey(),
+  id: col.int().primaryKey(),
+  name: col.string(),
+});
+const Stamped = entity('t_tagged', {
+  id: col
+    .uuid()
+    .primaryKey()
+    .$default(() => '00000000-0000-7000-8000-000000000000'),
+  serial: col.bigint({ mode: 'bigint' }),
+});
+const Heap = entity('t_heap', { line: col.string() });
+const keyDb = createDb({ schema: defineSchema({ User, Member, Stamped, Heap }), adapter });
+expect<Equal<KeyColumns<typeof Member>, 'tenantId' | 'id'>>();
+expect<Equal<KeyInput<typeof User>, number | { id: number }>>();
+expect<Equal<KeyInput<typeof Member>, { tenantId: number; id: number }>>();
+expect<Equal<KeyInput<typeof Heap>, never>>();
+void keyDb.queryable(User).find(1);
+void keyDb.queryable(User).find({ id: 1 });
+void keyDb.queryable(Stamped).findOrThrow('00000000-0000-7000-8000-000000000000');
+void keyDb.queryable(Member).whereKeys([{ tenantId: 1, id: 7 }]);
+// @ts-expect-error 主键是数字，名字不是主键
+void keyDb.queryable(User).find('alice');
+// @ts-expect-error 不是主键的列不能拿来 find
+void keyDb.queryable(User).find({ name: 'alice' });
+// @ts-expect-error 复合主键不能只给一个值
+void keyDb.queryable(Member).find(7);
+// @ts-expect-error 复合主键少了 id
+void keyDb.queryable(Member).whereKey({ tenantId: 1 });
+// @ts-expect-error 没有主键的实体不能按主键查
+void keyDb.queryable(Heap).find('a');
+// @ts-expect-error uuid 主键不接受数字
+void keyDb.remove(Stamped, 1);
+void keyDb.transaction(async (tx) => {
+  await tx.lock(Member, { tenantId: 1, id: 7 });
+  // @ts-expect-error lock 的键同样要给全
+  await tx.lock(Member, { id: 7 });
+});
+
+// returnId 的类型是主键列的类型；没声明主键时是驱动报的数
+expect<Equal<GeneratedKey<typeof User>, number>>();
+expect<Equal<GeneratedKey<typeof Stamped>, string>>();
+expect<Equal<GeneratedKey<typeof Heap>, number | bigint>>();
+expect<Equal<Awaited<ReturnType<typeof returnedId>>, number>>();
+function returnedId() {
+  return db.insert(User).values({ name: 'a', createdAt: new Date() }).returnId();
+}
+
+// ResultOf：从查询（或返回查询的函数）拿到每行的类型
+const cards = db.queryable(User).select((u) => ({ id: u.id, company: u.company.name }));
+expect<Equal<ResultOf<typeof cards>, { id: number; company: string | null }>>();
+const adults = (age: number) => db.queryable(User).where((u) => u.age.ge(age));
+expect<Equal<ResultOf<typeof adults>, Row<typeof User>>>();
+const prepared = db.prepare((p: { id: number }) =>
+  db
+    .queryable(Post)
+    .where((x) => x.id.eq(p.id))
+    .select((x) => x.title),
+);
+expect<Equal<ResultOf<typeof prepared>, string>>();
+
+// 键集分页：行的类型不变，next 是游标或 undefined
+async function cursorPage() {
+  const page = await cards.toCursorPage({ size: 20, after: undefined });
+  expect<Equal<typeof page.rows, { id: number; company: string | null }[]>>();
+  expect<Equal<typeof page.next, string | undefined>>();
+  expect<Equal<typeof page, CursorPage<{ id: number; company: string | null }>>>();
+}
+void cursorPage;

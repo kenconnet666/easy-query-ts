@@ -20,6 +20,7 @@ export class SqlIdent {
   }
 }
 
+/** `db.sql` 标签模板：手写的 SQL，插值都变成参数 */
 export interface SqlTag {
   /** 执行查询，返回行 */
   <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;

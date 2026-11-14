@@ -18,6 +18,7 @@ import {
 
 const fn = (name: string, args: unknown[]): Pred => dialectFn<boolean>(name, args, codecs.boolean);
 
+/** 全文检索（MySql.match）的模式：自然语言、布尔、查询扩展 */
 export type MatchMode = 'natural' | 'boolean' | 'expansion';
 
 const MODES: Record<MatchMode, string> = {

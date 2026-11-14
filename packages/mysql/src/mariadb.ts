@@ -17,6 +17,7 @@ import {
 } from '@zerodep-dev/easy-query-ts';
 import { MySqlDialect } from './dialect.ts';
 
+/** mariadb() 的选项 */
 export interface MariaDbOptions {
   /** 服务器的 max_allowed_packet（字节）：批量插入按它切分语句；mariadb.detect 自动读 */
   readonly maxPacket?: number | undefined;
@@ -25,6 +26,7 @@ export interface MariaDbOptions {
 /** 写进 JSON 的值（JSON 文字的参数）转成 JSON */
 const json = (value: string) => `JSON_EXTRACT(${value}, '$')`;
 
+/** MariaDB 的方言：与 MySQL 的差异（RETURNING、JSON、upsert 的写法） */
 export class MariaDbDialect extends MySqlDialect {
   override readonly name: string = 'mariadb';
 

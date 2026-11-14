@@ -18,6 +18,7 @@
 import { createCipheriv, createDecipheriv } from 'node:crypto';
 import type { Encryption } from '@zerodep-dev/easy-query-ts';
 
+/** aes() / sm4() 的选项：密钥、初始向量、是否可分段搜索 */
 export interface CipherOptions {
   /** 密钥：AES 是 16 / 24 / 32 字节（对应 AES-128 / 192 / 256），SM4 是 16 字节；字符串按 UTF-8 取字节 */
   readonly key: string | Uint8Array;

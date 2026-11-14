@@ -24,6 +24,7 @@ import {
   type InsertNode,
   type Session,
   type TransactionOptions,
+  type DatabaseErrorKind,
 } from '@zerodep-dev/easy-query-ts';
 import { OracleDialect } from '@zerodep-dev/easy-query-ts-oracle/dialect';
 
@@ -40,8 +41,39 @@ const CASE_TYPES: Record<string, string> = {
   string: 'VARCHAR(4000)',
 };
 
+/** 达梦（DM8）的方言：继承 Oracle 方言，覆盖两者不同的地方 */
 export class DamengDialect extends OracleDialect {
   override readonly name: string = 'dameng';
+
+  /**
+   * dmdb 的错误码写在消息里（"[-6602]:违反表[T]唯一性约束"），字段名各版本不一：先取码，取不到再看消息的用词。
+   * -6602 唯一性约束，-6607 引用约束，-6609 非空约束，-6403 死锁
+   */
+  override errorKind(error: unknown): DatabaseErrorKind | undefined {
+    const message = String(
+      typeof error === 'object' && error !== null
+        ? ((error as { message?: unknown }).message ?? '')
+        : error,
+    );
+    switch (/\[(-\d+)\]/.exec(message)?.[1]) {
+      case '-6602':
+        return 'unique';
+      case '-6607':
+        return 'foreignKey';
+      case '-6609':
+        return 'notNull';
+      case '-6403':
+        return 'deadlock';
+      default:
+        // 取不到码、或是别的码：看消息的用词
+        break;
+    }
+    if (/唯一性约束|unique constraint/i.test(message)) return 'unique';
+    if (/引用约束|referential constraint|foreign key/i.test(message)) return 'foreignKey';
+    if (/非空约束|not null constraint|cannot be null/i.test(message)) return 'notNull';
+    if (/死锁|deadlock/i.test(message)) return 'deadlock';
+    return undefined;
+  }
   protected override readonly caseTypes = CASE_TYPES;
   override readonly indexIfNotExists = true;
   override readonly dropIfExists = true;

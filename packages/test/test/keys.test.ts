@@ -54,8 +54,23 @@ describe('sqlite: primary keys', async () => {
   });
 
   it('复合主键少了列、或只传了一个值时报错，说明要传哪些列', () => {
-    assert.throws(() => db.queryable(Member).whereKey(7).toSQL(), /tenantId, id/);
-    assert.throws(() => db.queryable(Member).whereKey({ tenantId: 1 }).toSQL(), /missing 'id'/);
+    // 类型上已经拦住了（见 types.check.ts）；这里是不经过类型检查的调用方
+    assert.throws(
+      () =>
+        db
+          .queryable(Member)
+          .whereKey(7 as never)
+          .toSQL(),
+      /tenantId, id/,
+    );
+    assert.throws(
+      () =>
+        db
+          .queryable(Member)
+          .whereKey({ tenantId: 1 } as never)
+          .toSQL(),
+      /missing 'id'/,
+    );
   });
 
   it('firstOrThrow / findOrThrow：查不到时抛 NotFoundError，带上说明', async () => {

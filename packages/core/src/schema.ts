@@ -54,6 +54,7 @@ export interface SoftDelete {
   readonly deleted: unknown;
 }
 
+/** 一列的元数据：col.xxx() 与各修饰方法（primaryKey、nullable、named……）累积出来的，建表、读写、拦截器都看它 */
 export interface ColumnOptions {
   readonly nullable: boolean;
   readonly primaryKey: boolean;
@@ -120,11 +121,20 @@ export interface Encryption {
   readonly searchable?: boolean;
 }
 
-/** 一列：T 是 JS 类型，N 是否可空，O 插入时是否可省（自增、有默认值、可空） */
-export class Column<T, N extends boolean = false, O extends boolean = false> {
+/**
+ * 一列：T 是 JS 类型，N 是否可空，O 插入时是否可省（自增、有默认值、可空），P 是不是主键列。
+ * P 没写时是 boolean（不知道是不是）：`Column<any, any, any>` 这样的写法照旧能匹配所有的列
+ */
+export class Column<
+  T,
+  N extends boolean = false,
+  O extends boolean = false,
+  P extends boolean = boolean,
+> {
   declare readonly __type: T;
   declare readonly __nullable: N;
   declare readonly __optional: O;
+  declare readonly __primaryKey: P;
   readonly codec: Codec<T>;
   readonly options: ColumnOptions;
 
@@ -134,21 +144,22 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
   }
 
   /** 可为 NULL：读出的类型带上 null，插入时可省 */
-  nullable(): Column<T, true, true> {
+  nullable(): Column<T, true, true, P> {
     return new Column(this.codec, { ...this.options, nullable: true });
   }
 
-  primaryKey(): Column<T, N, O> {
+  /** 主键列（几列都写就是复合主键）：find / whereKey / lock / remove 的参数类型由它决定 */
+  primaryKey(): Column<T, N, O, true> {
     return new Column(this.codec, { ...this.options, primaryKey: true });
   }
 
   /** 由库生成（自增、IDENTITY）：插入时可省 */
-  generated(): Column<T, N, true> {
+  generated(): Column<T, N, true, P> {
     return new Column(this.codec, { ...this.options, generated: true });
   }
 
   /** 库里有默认值：插入时可省 */
-  defaulted(): Column<T, N, true> {
+  defaulted(): Column<T, N, true, P> {
     return new Column(this.codec, { ...this.options, hasDefault: true });
   }
 
@@ -156,12 +167,12 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
    * 插入时没给值就调用 fn 生成（uuid、雪花 id 等客户端生成的默认值）；插入时这一列可省。
    * 也可以返回 sql 片段，由库里的函数生成（对应 Java 版的 generatedSQLColumnGenerator）：`$default(() => sql\`nextval('order_no')\`)`
    */
-  $default(fn: () => T | Expr<T>): Column<T, N, true> {
+  $default(fn: () => T | Expr<T>): Column<T, N, true, P> {
     return new Column(this.codec, { ...this.options, defaultFn: fn });
   }
 
   /** 更新时没给值就调用 fn（更新时间、更新人） */
-  $onUpdate(fn: () => T): Column<T, N, O> {
+  $onUpdate(fn: () => T): Column<T, N, O, P> {
     return new Column(this.codec, { ...this.options, onUpdateFn: fn });
   }
 
@@ -169,12 +180,12 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
    * 逻辑删除时一并写入 fn 的值（删除人、删除时间）：`deletedBy: col.string().nullable().$onDelete(() => currentUser())`。
    * 只在实体有 softDelete 列、delete 改写成 update 时生效；物理删除不写
    */
-  $onDelete(fn: () => T): Column<T, N, O> {
+  $onDelete(fn: () => T): Column<T, N, O, P> {
     return new Column(this.codec, { ...this.options, onDeleteFn: fn });
   }
 
   /** 只改 TS 类型不改运行时：品牌类型（`col.bigint().$type<UserId>()`）让不同表的 id 不能混用 */
-  $type<U extends T>(): Column<U, N, O> {
+  $type<U extends T>(): Column<U, N, O, P> {
     return new Column(this.codec as unknown as Codec<U>, this.options);
   }
 
@@ -183,7 +194,7 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
    * 插入时没给值就写 active。不传参数时布尔列是 false / true，整数列是 0 / 1；其它类型（如可空时间戳 `{ active: null, deleted: () => new Date() }`）要显式给。
    * 单条语句用 `noInterceptor('softDelete')` 看到已删除的行；`delete(X).hard()` 物理删除。
    */
-  softDelete(values?: { active: T | null; deleted: T | (() => T) }): Column<T, N, true> {
+  softDelete(values?: { active: T | null; deleted: T | (() => T) }): Column<T, N, true, P> {
     const kind = this.codec.kind;
     const chosen =
       values ??
@@ -205,7 +216,7 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
    * 别的类型给出规则，如 UUID：`col.string().version({ initial: '0', next: () => crypto.randomUUID() })`。
    * next 收到当前版本；表达式更新没给 withVersion 时不知道当前版本，收到 undefined
    */
-  version(rule?: { initial: T; next: (current: T | undefined) => T }): Column<T, N, true> {
+  version(rule?: { initial: T; next: (current: T | undefined) => T }): Column<T, N, true, P> {
     if (!rule && this.codec.kind !== 'int' && this.codec.kind !== 'bigint')
       throw new Error(
         `version() on a '${this.codec.kind}' column needs { initial, next }; only integer columns have a default`,
@@ -221,15 +232,15 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
    * UserId 与 OrderId 不能混传；关系的 from / to 品牌对不上在定义处就报错；`find(id)`、条件、结果里的值都带品牌。
    * 品牌值从查询结果里来，手写的值用 `1 as Row<typeof User>['id']`
    */
-  brand<B extends string>(): Column<Branded<T, B>, N, O> {
-    return this as unknown as Column<Branded<T, B>, N, O>;
+  brand<B extends string>(): Column<Branded<T, B>, N, O, P> {
+    return this as unknown as Column<Branded<T, B>, N, O, P>;
   }
 
   /**
    * 枚举列用库里的原生枚举类型：MySQL 建成 `ENUM('a', 'b')`；PG 建成名为 typeName 的类型（`CREATE TYPE … AS ENUM`，
    * 建表前先建，同步时补上新加的值），PG 上必须给名字。别的库照常是 VARCHAR（取值由列的 codec 检查）
    */
-  native(typeName?: string): Column<T, N, O> {
+  native(typeName?: string): Column<T, N, O, P> {
     if (!this.options.enumValues) throw new TypeError('native() is for col.enum(…) columns');
     return new Column(this.codec, { ...this.options, nativeEnum: typeName ?? true });
   }
@@ -239,22 +250,22 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
    * sql 是受信任的 SQL，引用的是库里的列名：`col.int().generatedAs('qty * price')`。stored 默认 true（PG 只有 STORED）；
    * MySQL、SQLite 可以 `{ stored: false }`（VIRTUAL，不占空间、读时算）。PG、MySQL、SQLite 支持，别的库建表时报错
    */
-  generatedAs(sql: string, options: { readonly stored?: boolean } = {}): Column<T, N, true> {
+  generatedAs(sql: string, options: { readonly stored?: boolean } = {}): Column<T, N, true, P> {
     return new Column(this.codec, {
       ...this.options,
       computed: { sql, stored: options.stored ?? true },
-    }) as unknown as Column<T, N, true>;
+    }) as unknown as Column<T, N, true, P>;
   }
 
   /** 无符号（数值列）：MySQL 建成 INT UNSIGNED 等，取值范围翻倍；别的库没有无符号类型，建表时忽略 */
-  unsigned(): Column<T, N, O> {
+  unsigned(): Column<T, N, O, P> {
     if (!['int', 'bigint', 'decimal', 'double'].includes(this.codec.kind))
       throw new TypeError(`unsigned() is for numeric columns, not '${this.codec.kind}'`);
     return new Column(this.codec, { ...this.options, unsigned: true });
   }
 
   /** 只在插入时写入，更新永远不碰；在 set 里给它赋值会报错 */
-  insertOnly(): Column<T, N, O> {
+  insertOnly(): Column<T, N, O, P> {
     return new Column(this.codec, { ...this.options, insertOnly: true });
   }
 
@@ -262,7 +273,7 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
    * 透明加解密（仅字符串列）。等值比较照常可用；like / startsWith 只在策略声明 searchable 时可用（搜索词加密后匹配），
    * 否则报错——要在库里搜索请改用 sqlConvert 由库加解密
    */
-  encrypted(this: Column<string, N, O>, strategy: Encryption): Column<string, N, O> {
+  encrypted(this: Column<string, N, O, P>, strategy: Encryption): Column<string, N, O, P> {
     const inner = this.codec;
     const codec: Codec<string> = {
       kind: inner.kind,
@@ -288,7 +299,7 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
   sqlConvert(convert: {
     read?: (column: Expr<T>) => Expr<unknown>;
     write?: (value: Expr<T>) => Expr<unknown>;
-  }): Column<T, N, O> {
+  }): Column<T, N, O, P> {
     return new Column(this.codec, {
       ...this.options,
       sqlRead: convert.read,
@@ -297,32 +308,32 @@ export class Column<T, N extends boolean = false, O extends boolean = false> {
   }
 
   /** 建表时直接用这个类型，如 `col.json<Tags>().dbType('JSONB')`；不影响读写 */
-  dbType(type: string): Column<T, N, O> {
+  dbType(type: string): Column<T, N, O, P> {
     return new Column(this.codec, { ...this.options, dbType: type });
   }
 
   /** 建表时的 DEFAULT 子句，原样写入（受信任的 SQL）：`.dbDefault("'draft'")`；同时让插入时这一列可省 */
-  dbDefault(sql: string): Column<T, N, true> {
+  dbDefault(sql: string): Column<T, N, true, P> {
     return new Column(this.codec, { ...this.options, dbDefault: sql, hasDefault: true });
   }
 
   /** 建表时加唯一约束 */
-  unique(): Column<T, N, O> {
+  unique(): Column<T, N, O, P> {
     return new Column(this.codec, { ...this.options, unique: true });
   }
 
   /** 库里的列名（默认是属性名转下划线） */
-  named(name: string): Column<T, N, O> {
+  named(name: string): Column<T, N, O, P> {
     return new Column(this.codec, { ...this.options, name });
   }
 
   /** 列注释（建表与 syncTables 写进库里） */
-  comment(text: string): Column<T, N, O> {
+  comment(text: string): Column<T, N, O, P> {
     return new Column(this.codec, { ...this.options, comment: text });
   }
 
   /** 库里原来的列名：改了列名之后 syncTables 把旧列改名，而不是加一列新的 */
-  renamedFrom(oldName: string): Column<T, N, O> {
+  renamedFrom(oldName: string): Column<T, N, O, P> {
     return new Column(this.codec, { ...this.options, renamedFrom: oldName });
   }
 }
@@ -503,7 +514,7 @@ export function uuidv7(): string {
 /** uuidv7 上一次用的毫秒与计数 */
 const v7 = { ms: 0, seq: 0 };
 
-function base<T>(c: Codec<T>, extra: Partial<ColumnOptions> = {}): Column<T, false, false> {
+function base<T>(c: Codec<T>, extra: Partial<ColumnOptions> = {}): Column<T, false, false, false> {
   return new Column(c, {
     nullable: false,
     primaryKey: false,
@@ -526,6 +537,7 @@ export type StandardResult<Output> =
       }[];
     };
 
+/** 符合 Standard Schema 的校验器（zod、valibot、arktype 的 schema 都是）：`col.json(schema)` 接它 */
 export interface StandardSchema<Output = unknown> {
   readonly '~standard': {
     readonly version: 1;
@@ -933,6 +945,7 @@ export type Branded<T, B extends string> = T & { readonly [brandKey]: B };
 /** 值类型上的品牌；没有品牌时是 never */
 export type BrandOf<T> = T extends { readonly [brandKey]: infer B } ? B : never;
 
+/** 一列（或值对象）读出来的类型：可空的列带上 null */
 export type ValueOf<C> =
   C extends Embedded<infer F>
     ? RowOf<F>
@@ -1026,6 +1039,31 @@ export type Row<E extends Entity> = [VariantsOf<E>] extends [never]
   : VariantsOf<E> extends VariantTypes<infer Base, infer D, infer V>
     ? UnionRow<Base, D, V>
     : never;
+
+/** 实体的主键列（属性名）：声明时写了 primaryKey() 的列；没有主键（或类型里看不出）时是 never */
+export type KeyColumns<E extends Entity> = {
+  [K in keyof E['fields']]: E['fields'][K] extends Column<any, any, any, true> ? K : never;
+}[keyof E['fields']];
+
+type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never;
+
+/**
+ * 主键的值：单列主键是那一列的值（也可以写成 `{ 列: 值 }`），复合主键是 `{ 列: 值 }`、每个主键列都要给。
+ * 没有主键的实体是 never（find / whereKey 调不了）；泛型代码里的 Entity 看不出主键，退回成"某一列的值，或一部分列"
+ */
+export type KeyInput<E extends Entity> = string extends keyof E['fields']
+  ? Row<E>[keyof Row<E>] | Partial<Row<E>>
+  : [KeyColumns<E>] extends [never]
+    ? never
+    : | { [K in KeyColumns<E>]: ValueOf<E['fields'][K]> }
+      | (IsUnion<KeyColumns<E>> extends true ? never : ValueOf<E['fields'][KeyColumns<E>]>);
+
+/** returnId() 取回的值：单列主键是那一列的类型；别的情况（没声明主键、复合主键）是驱动报的数 */
+export type GeneratedKey<E extends Entity> = [KeyColumns<E>] extends [never]
+  ? number | bigint
+  : IsUnion<KeyColumns<E>> extends true
+    ? number | bigint
+    : ValueOf<E['fields'][KeyColumns<E>]>;
 
 /** 插入时可省的键：自增、有默认值、可空的列，以及里面全都可省的值对象 */
 type OptionalKeys<F extends Fields> = {

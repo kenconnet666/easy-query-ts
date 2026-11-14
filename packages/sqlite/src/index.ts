@@ -39,6 +39,7 @@ export interface SqliteStatement {
   setReadBigInts?(enabled: boolean): unknown;
 }
 
+/** sqlite() 的选项 */
 export interface SqliteOptions {
   /**
    * 整数列按 bigint 读出（再由列的 codec 转成 number / bigint / string）。

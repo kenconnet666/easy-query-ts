@@ -14,6 +14,8 @@ import {
   type Node,
   type QueryRunner,
   SqlWriter,
+  sqlStateKind,
+  type DatabaseErrorKind,
 } from '@zerodep-dev/easy-query-ts';
 
 /**
@@ -81,6 +83,11 @@ const CASE_TYPES: Readonly<Record<string, string>> = {
 
 export class PostgresDialect extends Dialect {
   readonly name: string = 'postgres';
+
+  /** SQLSTATE 在驱动错误的 code 里：23505 唯一键、23503 外键、23502 非空、40P01 死锁、40001 串行化失败 */
+  override errorKind(error: unknown): DatabaseErrorKind | undefined {
+    return sqlStateKind(errorField(error, 'code'));
+  }
   /** PG 协议里参数个数是 16 位整数，最多 65535 */
   override readonly maxBindParams = 65535;
   override readonly generatedKeys = 'returning' as const;
@@ -263,6 +270,8 @@ export class PostgresDialect extends Dialect {
   /** 名字先哈希成 64 位整数（hashtextextended，PG 11+）；try 版本拿不到就返回假 */
   override readonly advisoryLocks = true;
 
+  override readonly nullOrder = 'largest';
+
   override advisoryLockStatement(key: string, wait: boolean): string {
     return wait
       ? // pg_advisory_xact_lock 返回 void：拿到锁之后才会产出这一行
@@ -339,4 +348,11 @@ export class PostgresDialect extends Dialect {
   override encodeParam(value: unknown, kind?: string): unknown {
     return typeof value === 'boolean' ? value : super.encodeParam(value, kind);
   }
+}
+
+/** 驱动的错误对象上的一个字段（错误不一定是对象） */
+function errorField(error: unknown, name: string): unknown {
+  return typeof error === 'object' && error !== null
+    ? (error as Record<string, unknown>)[name]
+    : undefined;
 }

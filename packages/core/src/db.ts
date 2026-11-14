@@ -20,7 +20,6 @@ import {
   newQueryable,
   recursiveCteEntity,
   prepareQuery,
-  type KeyInput,
   type PreparedQuery,
   type Query,
   type Queryable,
@@ -40,9 +39,10 @@ import {
 } from './relations.ts';
 import type { Expr } from './expr.ts';
 import type { Ref } from './ref.ts';
-import type { DerivedEntity, Entity, Row } from './schema.ts';
+import type { DerivedEntity, Entity, KeyInput, Row } from './schema.ts';
 import { createSqlTag, type SqlTag } from './native.ts';
 import { checksum, historyEntity, ordered, type Migration } from './migrate.ts';
+import { databaseError, DeadlockError, SerializationError } from './errors.ts';
 import type {
   Capability,
   CapabilitiesOf,
@@ -102,6 +102,13 @@ export type WithCte<S extends AnySchema, N extends string, Out> = WithCapabiliti
   CapabilitiesOf<S>
 >;
 
+/** transaction 的重试选项 */
+export interface RetryOptions {
+  /** 遇到死锁、串行化失败时最多重试几次（整个 work 重新执行）；默认 0 */
+  readonly retries?: number;
+}
+
+/** createDb 的选项 */
 export interface DbOptions<S extends AnySchema> {
   readonly schema: S;
   readonly adapter: Adapter;
@@ -758,14 +765,41 @@ export class Db<S extends AnySchema> {
   /**
    * work 里用 tx 执行的语句在同一个事务里；work 抛错时回滚。
    * 已经在事务里再调用，开的是嵌套事务（保存点）：work 抛错只回滚到保存点，外层事务不受影响（异常仍会抛出，由调用方决定要不要吞掉）。
+   *
+   * `retries`：遇到死锁、串行化失败（DeadlockError、SerializationError）时把整个 work 重新执行，最多这么多次，每次之间稍等一下。
+   * 这两种错误是数据库在几个事务相互冲突时挑一个回滚，重来多半能成。work 会被执行几遍：里面不能有回滚不掉的副作用
+   * （发消息、调外部接口放到 afterCommit 里，它只在成功的那一遍之后执行）。默认 0，不重试
+   * ```ts
+   * await db.transaction(transfer, { isolation: 'serializable', retries: 3 });
+   * ```
    */
   transaction<T>(
     this: Requires<S, 'transactions', Db<S>>,
     work: (tx: Db<S>) => Promise<T>,
-    options?: TransactionOptions,
+    options?: TransactionOptions & RetryOptions,
   ): Promise<T>;
-  transaction<T>(work: (tx: Db<S>) => Promise<T>, options?: TransactionOptions): Promise<T> {
-    return this.runInTransaction(work, options);
+  async transaction<T>(
+    work: (tx: Db<S>) => Promise<T>,
+    options: TransactionOptions & RetryOptions = {},
+  ): Promise<T> {
+    const { retries = 0, ...transaction } = options;
+    if (!Number.isSafeInteger(retries) || retries < 0)
+      throw new RangeError(`retries must be a non-negative integer, got ${retries}`);
+    if (retries > 0 && this.inTransaction)
+      throw new Error(
+        'retries only apply to the outermost transaction: a deadlock rolls the whole transaction back, not a savepoint',
+      );
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.runInTransaction(work, transaction);
+      } catch (error) {
+        const retryable = error instanceof DeadlockError || error instanceof SerializationError;
+        if (!retryable || attempt >= retries) throw error;
+        // 冲突的几个事务同时重来又会撞上：等的时间逐次加长，并带上随机量错开
+        const wait = Math.min(1000, 20 * 2 ** attempt) * (0.5 + Math.random() / 2);
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+    }
   }
 
   /** transaction 的实现；内部（save、remove、syncTables）不看能力直接用：没有事务的库由驱动依次执行 */
@@ -791,7 +825,8 @@ export class Db<S extends AnySchema> {
     } catch (error) {
       // 回滚后的钩子出错不盖住原来的错误
       await runHooks(hooks.frames[0]!.rollback).catch(() => undefined);
-      throw error;
+      // 提交时才报的错（串行化失败）没经过语句的执行：在这里归一
+      throw databaseError(this.ctx.dialect, error);
     }
     await runHooks(hooks.frames[0]!.commit);
     return result;

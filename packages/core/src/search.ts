@@ -16,8 +16,15 @@
  * rc ro roc rco（闭、开、左开右闭、左闭右开区间）与 nrc nro nroc nrco（不在区间里）、inn（true 非空 / false 为空）。
  * 严格模式（默认）下不认识的参数、字段、比较方式都报错，与官方的 strict 一致。
  */
-import type { ConditionTree, TableRequest, TableRequestInput } from './table.ts';
+import { InvalidRequestError } from './errors.ts';
+import {
+  MAX_PAGE_SIZE,
+  type ConditionTree,
+  type TableRequest,
+  type TableRequestInput,
+} from './table.ts';
 
+/** search() 的选项：能搜哪些字段、默认排序、每页条数 */
 export interface SearchOptions {
   /** 能搜的字段（结果里的名字，关联表写 'ext.mobile'）；严格模式下别的字段报错 */
   readonly fields?: readonly string[];
@@ -60,16 +67,19 @@ export function parseSearchRequest(
 
   const page = Number(take('current')?.[0] ?? take('page')?.[0] ?? 1);
   const pageSize = Number(take('pageSize')?.[0] ?? options.pageSize ?? 20);
-  if (!Number.isInteger(page) || page < 1) throw new Error(`current must be a positive integer`);
+  if (!Number.isInteger(page) || page < 1)
+    throw new InvalidRequestError(`current must be a positive integer`);
   if (!Number.isInteger(pageSize) || pageSize < 1)
-    throw new Error(`pageSize must be a positive integer`);
+    throw new InvalidRequestError(`pageSize must be a positive integer`);
+  if (pageSize > MAX_PAGE_SIZE)
+    throw new InvalidRequestError(`pageSize must not exceed ${MAX_PAGE_SIZE}, got ${pageSize}`);
   const sortItems = take('sort') ?? options.defaultSort ?? [];
   const sorts = sortItems.flatMap((item) =>
     item.split(',').flatMap((part) => {
       const [key = '', direction = 'asc'] = part.trim().split(':');
       if (!key) return [];
       if (!/^(asc|desc|ascend|descend)$/i.test(direction))
-        throw new Error(`unknown sort direction '${direction}'`);
+        throw new InvalidRequestError(`unknown sort direction '${direction}'`);
       return [{ key, descending: /^desc/i.test(direction) }];
     }),
   );
@@ -78,7 +88,9 @@ export function parseSearchRequest(
   const fields = new Map<string, { values: Map<number, string[]>; op: string | undefined }>();
   const field = (name: string) => {
     if (strict && options.fields && !options.fields.includes(name))
-      throw new Error(`cannot search by '${name}' (allowed: ${options.fields.join(', ')})`);
+      throw new InvalidRequestError(
+        `cannot search by '${name}' (allowed: ${options.fields.join(', ')})`,
+      );
     let entry = fields.get(name);
     if (!entry) fields.set(name, (entry = { values: new Map(), op: undefined }));
     return entry;
@@ -99,7 +111,8 @@ export function parseSearchRequest(
     // name-0、name-1、name-2 按序号排在 name 的值后面；区间的两端是序号 1、2
     const ordered = [...values].sort(([a], [b]) => a - b);
     const all = ordered.flatMap(([, v]) => v);
-    const at = (i: number) => values.get(i)?.[0] ?? (i === 1 ? values.get(-1)?.[0] : undefined);
+    // 区间的第 i 端：name-i，没有时取不带序号的第 i 个值（name=1&name=9）
+    const at = (i: number) => values.get(i)?.[0] ?? values.get(-1)?.[i - 1];
     const leaf = condition(name, op, all, at, strict);
     if (leaf) leaves.push(leaf);
   }
@@ -127,9 +140,9 @@ function condition(
     tree && { not: tree };
   const range = (code: string): ConditionTree | undefined => {
     const [lowInclusive, highInclusive] = RANGES[code]!;
-    // 区间的两端：name-1 / name-2，或者 name 给了两个值
-    const low = at(1) ?? values[0];
-    const high = at(2) ?? values[1];
+    // 区间的两端：name-1 / name-2，或者 name 给了两个值。只给了 name-2 时没有下限
+    const low = at(1);
+    const high = at(2);
     const items: ConditionTree[] = [];
     if (low) items.push({ field, op: lowInclusive ? 'gte' : 'gt', value: low });
     if (high) items.push({ field, op: highInclusive ? 'lte' : 'lt', value: high });
@@ -194,7 +207,7 @@ function condition(
       return { field, op: /^(true|1)$/i.test(value) ? 'notNull' : 'isNull' };
     }
     default:
-      if (strict) throw new Error(`unknown search op '${op}' on '${field}'`);
+      if (strict) throw new InvalidRequestError(`unknown search op '${op}' on '${field}'`);
       return undefined;
   }
 }

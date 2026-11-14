@@ -5,7 +5,9 @@ import type { Capability, Capable } from './capabilities.ts';
 import type { AnySchema } from './relations.ts';
 import type { Dialect, Statement } from './dialect.ts';
 import type { Interceptors } from './interceptor.ts';
+import { databaseError } from './errors.ts';
 
+/** 写语句的执行结果：影响的行数，驱动报得出时还有自增主键 */
 export interface ExecuteResult {
   readonly affected: number;
   /** 自增主键（单行插入时有意义） */
@@ -34,15 +36,18 @@ export interface Session {
   ): AsyncIterable<Record<string, unknown>[]>;
 }
 
+/** 事务的隔离级别 */
 export type IsolationLevel =
   'read uncommitted' | 'read committed' | 'repeatable read' | 'serializable';
 
+/** 事务的选项：隔离级别、只读（嵌套事务不能改） */
 export interface TransactionOptions {
   readonly isolation?: IsolationLevel;
   /** 只读事务：数据库会拒绝其中的写入，部分库还能据此做优化 */
   readonly readOnly?: boolean;
 }
 
+/** 驱动适配要实现的接口：执行语句（Session），以及在一条连接上开事务 */
 export interface Driver extends Session {
   /** 在同一条连接上开事务执行 work，正常返回时提交、抛错时回滚 */
   transaction<T>(work: (session: Session) => Promise<T>, options?: TransactionOptions): Promise<T>;
@@ -191,7 +196,9 @@ async function observe<T>(
   let result: T;
   try {
     result = await abortable(signal, () => run(signal));
-  } catch (error) {
+  } catch (raw) {
+    // 驱动的错误先归一（唯一键冲突等各有一个类），钩子与调用方看到的是同一个
+    const error = databaseError(ctx.dialect, raw);
     ctx.onExecute?.({
       statement,
       dialect: ctx.dialect.name,
@@ -223,6 +230,7 @@ export async function explain(
   return ctx.dialect.explainResult(await query(ctx, { sql, params: statement.params }));
 }
 
+/** explain() 的选项 */
 export interface ExplainOptions {
   /** 真的执行一遍，计划里带实际的行数与耗时（PG EXPLAIN ANALYZE、MySQL 8.0.18+ EXPLAIN ANALYZE）；写语句别用 */
   readonly analyze?: boolean;
@@ -284,9 +292,9 @@ export async function* streamRows(
       rows += batch.length;
       yield batch;
     }
-  } catch (error) {
-    failure = error;
-    throw error;
+  } catch (raw) {
+    failure = databaseError(ctx.dialect, raw);
+    throw failure;
   } finally {
     ctx.onExecute?.({
       statement,

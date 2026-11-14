@@ -13,11 +13,12 @@
  * 键是 select 里的名字（没有 select 时是实体的列），相当于白名单，请求碰不到结果以外的列；嵌套对象、一对多的数组不能筛、不能排。
  * 前端已知总数时（只翻页、换排序）带上 total，不再执行 COUNT。
  */
+import { InvalidRequestError } from './errors.ts';
 import { and, Expr, not, or, type Cond } from './expr.ts';
 import { REF, type AnyRef } from './ref.ts';
 
 /** 每页条数的上限：超过时报错，不悄悄少给（同 Spring Data 的 max-page-size） */
-const MAX_PAGE_SIZE = 2000;
+export const MAX_PAGE_SIZE = 2000;
 
 /** 解析后的列表请求 */
 export interface TableRequest {
@@ -63,7 +64,7 @@ export function parseTableRequest(input: TableRequestInput): TableRequest {
   const page = positiveInt(one('page') ?? '1', 'page');
   const pageSize = positiveInt(one('pageSize') ?? '10', 'pageSize');
   if (pageSize > MAX_PAGE_SIZE)
-    throw new Error(`pageSize must not exceed ${MAX_PAGE_SIZE}, got ${pageSize}`);
+    throw new InvalidRequestError(`pageSize must not exceed ${MAX_PAGE_SIZE}, got ${pageSize}`);
   const totalText = one('total');
   const total =
     totalText === undefined || totalText === '' ? undefined : nonNegativeInt(totalText, 'total');
@@ -90,7 +91,7 @@ export function parseTableRequest(input: TableRequestInput): TableRequest {
     try {
       condition = JSON.parse(conditionText) as ConditionTree;
     } catch {
-      throw new Error('condition must be JSON (the value of ConditionBuilder)');
+      throw new InvalidRequestError('condition must be JSON (the value of ConditionBuilder)');
     }
   }
   return {
@@ -108,14 +109,14 @@ export function parseTableRequest(input: TableRequestInput): TableRequest {
 function positiveInt(text: string, name: string): number {
   const value = Number(text);
   if (!Number.isInteger(value) || value < 1)
-    throw new Error(`${name} must be a positive integer, got '${text}'`);
+    throw new InvalidRequestError(`${name} must be a positive integer, got '${text}'`);
   return value;
 }
 
 function nonNegativeInt(text: string, name: string): number {
   const value = Number(text);
   if (!Number.isInteger(value) || value < 0)
-    throw new Error(`${name} must be a non-negative integer, got '${text}'`);
+    throw new InvalidRequestError(`${name} must be a non-negative integer, got '${text}'`);
   return value;
 }
 
@@ -127,7 +128,7 @@ export function resultColumn(shape: unknown, key: string, use: string): Expr<unk
   const columns = Object.entries((shape ?? {}) as Record<string, unknown>)
     .filter(([, item]) => item instanceof Expr)
     .map(([name]) => name);
-  throw new Error(
+  throw new InvalidRequestError(
     `cannot ${use} by '${key}': not a column of the result (columns: ${columns.join(', ')})`,
   );
 }
@@ -156,15 +157,15 @@ export function parseColumnText(column: Expr<unknown>, text: string, key: string
   if (kind === 'boolean') {
     if (text === 'true' || text === '1') return true;
     if (text === 'false' || text === '0') return false;
-    throw new Error(`'${key}' expects true or false, got '${text}'`);
+    throw new InvalidRequestError(`'${key}' expects true or false, got '${text}'`);
   }
   if (kind === 'json' || kind === 'bytes')
-    throw new Error(`'${key}' (${kind}) cannot be filtered by text`);
+    throw new InvalidRequestError(`'${key}' (${kind}) cannot be filtered by text`);
   const value = column.codec!.decode(text);
   if (typeof value === 'number' && Number.isNaN(value))
-    throw new Error(`'${key}' expects a number, got '${text}'`);
+    throw new InvalidRequestError(`'${key}' expects a number, got '${text}'`);
   if (value instanceof Date && Number.isNaN(value.getTime()))
-    throw new Error(`'${key}' expects a date-time, got '${text}'`);
+    throw new InvalidRequestError(`'${key}' expects a date-time, got '${text}'`);
   return value;
 }
 
@@ -198,8 +199,29 @@ export type ConditionTree =
   | { readonly any: readonly ConditionTree[] }
   | { readonly not: ConditionTree };
 
+/** 条件树来自客户端：形状不对时报请求不合法，而不是在后面炸出 TypeError */
+function checkedTree(tree: unknown): ConditionTree {
+  const node = tree as Record<string, unknown> | null;
+  const ok =
+    typeof node === 'object' &&
+    node !== null &&
+    !Array.isArray(node) &&
+    (Object.hasOwn(node, 'all')
+      ? Array.isArray(node['all'])
+      : Object.hasOwn(node, 'any')
+        ? Array.isArray(node['any'])
+        : Object.hasOwn(node, 'not') ||
+          (typeof node['field'] === 'string' && typeof node['op'] === 'string'));
+  if (!ok)
+    throw new InvalidRequestError(
+      'a condition must be { field, op, value }, { all: [...] }, { any: [...] } or { not: ... }',
+    );
+  return tree as ConditionTree;
+}
+
 /** 条件树里用到的字段 */
-export function conditionFields(tree: ConditionTree): string[] {
+export function conditionFields(input: ConditionTree): string[] {
+  const tree = checkedTree(input);
   if ('all' in tree) return tree.all.flatMap(conditionFields);
   if ('any' in tree) return tree.any.flatMap(conditionFields);
   if ('not' in tree) return conditionFields(tree.not);
@@ -282,7 +304,7 @@ export function compareColumn(
       return rangeOf(column, key, start, end);
     }
     default:
-      throw new Error(`unknown filter op '${String(op)}' on '${key}'`);
+      throw new InvalidRequestError(`unknown filter op '${String(op)}' on '${key}'`);
   }
 }
 
@@ -296,14 +318,24 @@ export interface DayOptions {
  * 条件树转成条件：字段只认 shape 里的列（结果列，相当于白名单），值按列的类型读。
  * between 的任一端为空时不限；日期时间列上只写了日期的一端按整天算（起端是那天的零点，止端是"早于后一天的零点"）
  */
-export function conditionOf(tree: ConditionTree, shape: unknown, options: DayOptions = {}): Cond {
+export function conditionOf(input: ConditionTree, shape: unknown, options: DayOptions = {}): Cond {
+  const tree = checkedTree(input);
   if ('all' in tree) return and(...tree.all.map((item) => conditionOf(item, shape, options)));
   if ('any' in tree) return or(...tree.any.map((item) => conditionOf(item, shape, options)));
   if ('not' in tree) return not(conditionOf(tree.not, shape, options));
   const { field, op, value } = tree;
   const column = resultColumn(shape, field, 'filter');
   const text = column as Expr<string | null>;
-  const read = (item: unknown) => columnValue(column, item, field);
+  const read = (item: unknown) => {
+    // 和 NULL 比用 isNull / notNull；对象、数组不是能比较的值
+    if (
+      item === null ||
+      item === undefined ||
+      (typeof item === 'object' && !(item instanceof Date))
+    )
+      throw new InvalidRequestError(`'${field}' expects a value to compare with`);
+    return columnValue(column, item, field);
+  };
   switch (op) {
     case 'eq':
       return column.eq(read(value) as never);
@@ -318,7 +350,8 @@ export function conditionOf(tree: ConditionTree, shape: unknown, options: DayOpt
     case 'lte':
       return column.le(read(value) as never);
     case 'between': {
-      const [start, end] = Array.isArray(value) ? value : [];
+      // 不是一对值时报错：当成"两端都没填"会悄悄变成不筛选
+      const [start, end] = asArray(value, field);
       return rangeOf(column, field, start, end, options);
     }
     case 'in':
@@ -342,7 +375,7 @@ export function conditionOf(tree: ConditionTree, shape: unknown, options: DayOpt
     case 'empty':
       return isText(column) ? or(column.isNull(), text.eq('')) : column.isNull();
     default:
-      throw new Error(`unknown condition op '${String(op)}' on '${field}'`);
+      throw new InvalidRequestError(`unknown condition op '${String(op)}' on '${field}'`);
   }
 }
 
@@ -387,13 +420,13 @@ function columnValue(column: Expr<unknown>, value: unknown, field: string): unkn
 function textOf(value: unknown, field: string): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number') return String(value);
-  throw new Error(`'${field}' expects text to search for`);
+  throw new InvalidRequestError(`'${field}' expects text to search for`);
 }
 
 const isText = (column: Expr<unknown>) => (column.codec?.kind ?? 'string') === 'string';
 
 function asArray(value: unknown, field: string): readonly unknown[] {
-  if (!Array.isArray(value)) throw new Error(`'${field}' expects an array of values`);
+  if (!Array.isArray(value)) throw new InvalidRequestError(`'${field}' expects an array of values`);
   return value;
 }
 
@@ -407,9 +440,13 @@ function nextDay(text: string): string {
 function dayStart(text: string, { timeZone = 'UTC' }: DayOptions): Date {
   const [year, month, day] = text.split('-').map(Number) as [number, number, number];
   const guess = Date.UTC(year, month - 1, day);
-  // 先按 UTC 零点猜，再减去那个时刻在目标时区的偏移；跨夏令时的那天再校一次
+  // 先按 UTC 零点猜，再减去那个时刻在目标时区的偏移；夏令时切换的那天偏移有两个，各算一个候选
   const first = guess - zoneOffset(guess, timeZone);
-  return new Date(guess - zoneOffset(first, timeZone));
+  const second = guess - zoneOffset(first, timeZone);
+  // 取落在这一天里最早的那个：零点被拨过去的时区（圣保罗、开罗、哈瓦那）这一天从 01:00 开始，另一个候选是前一天的 23:00
+  const onDay = (instant: number) =>
+    new Date(instant + zoneOffset(instant, timeZone)).toISOString().slice(0, 10) === text;
+  return new Date([first, second].sort((a, b) => a - b).find(onDay) ?? second);
 }
 
 /** 时区在某个时刻比 UTC 快多少毫秒 */

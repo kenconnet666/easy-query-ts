@@ -175,6 +175,7 @@ class OracleDriver extends OracleSession implements Driver {
   }
 }
 
+/** oracle() 的选项 */
 export interface OracleOptions {
   /** 服务器版本：按它选写法，默认最新（23ai） */
   readonly version?: OracleVersion;

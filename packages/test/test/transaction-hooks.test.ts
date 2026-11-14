@@ -1,7 +1,8 @@
 // 事务的钩子（afterCommit / afterRollback）与保存点、begin() 的配合，lock() 在 SQLite 上的写法；跨方言的行为在 src/suite.ts
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { createDb } from '@zerodep-dev/easy-query-ts';
+import { createDb, DeadlockError } from '@zerodep-dev/easy-query-ts';
+import { SqliteDialect } from '@zerodep-dev/easy-query-ts-sqlite';
 import { schema, seed, User } from '../src/fixture.ts';
 import { memoryDb } from '../src/sqlite-env.ts';
 
@@ -100,6 +101,55 @@ describe('sqlite: transaction hooks and lock', () => {
     assert.deepEqual(
       env.statements.map((s) => s.sql).filter((sql) => sql.startsWith('SAVEPOINT')),
       ['SAVEPOINT eqts_sp_1', 'SAVEPOINT eqts_sp_2'],
+    );
+  });
+
+  it('retries：死锁、串行化失败时把整个事务重来；别的错误、用完次数就抛出', async () => {
+    const { adapter } = await seed(await memoryDb());
+    // 方言把消息里带 deadlock 的错误认成死锁：模拟库挑中这个事务回滚
+    const dialect = new (class extends SqliteDialect {
+      override errorKind(error: unknown) {
+        return /deadlock/.test(String(error)) ? ('deadlock' as const) : super.errorKind(error);
+      }
+    })();
+    const db = createDb({ schema, adapter: { ...adapter, dialect } });
+    const seen: string[] = [];
+    let attempts = 0;
+    const flaky = (failures: number) => async (tx: typeof db) => {
+      attempts += 1;
+      await tx
+        .update(User)
+        .set({ age: attempts })
+        .where((u) => u.id.eq(1))
+        .execute();
+      tx.afterCommit(() => seen.push(`committed on attempt ${attempts}`));
+      if (attempts <= failures) throw new Error('deadlock detected');
+      return attempts;
+    };
+    assert.equal(await db.transaction(flaky(2), { retries: 3 }), 3);
+    // 前两遍回滚了：提交后的事只做了一次，库里是第三遍写的值
+    assert.deepEqual(seen, ['committed on attempt 3']);
+    assert.equal((await db.queryable(User).findOrThrow(1)).age, 3);
+
+    attempts = 0;
+    await assert.rejects(db.transaction(flaky(5), { retries: 1 }), DeadlockError);
+    assert.equal(attempts, 2);
+
+    attempts = 0;
+    await assert.rejects(
+      db.transaction(
+        async () => {
+          attempts += 1;
+          throw new Error('something else');
+        },
+        { retries: 3 },
+      ),
+      /something else/,
+    );
+    assert.equal(attempts, 1);
+    await assert.rejects(
+      db.transaction((tx) => tx.transaction(async () => 1, { retries: 1 })),
+      /outermost transaction/,
     );
   });
 

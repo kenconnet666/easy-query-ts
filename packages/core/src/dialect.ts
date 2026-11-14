@@ -19,7 +19,9 @@ export { dateFormatParts, type DatePart, type DateToken };
 import { bareName, type DbTable, type ForeignKeySpec, type QueryRunner } from './ddl.ts';
 import { utcText, type ColumnOptions, type Entity, type TableIndex } from './schema.ts';
 import { Placeholder, PreparedParam } from './placeholder.ts';
+import type { DatabaseErrorKind } from './errors.ts';
 
+/** 一条渲染好的语句：SQL 与按占位符顺序排好的参数 */
 export interface Statement {
   readonly sql: string;
   readonly params: readonly unknown[];
@@ -664,6 +666,21 @@ export abstract class Dialect {
   /** 忽略大小写的 LIKE：默认两边都 LOWER（PG 覆盖成 ILIKE） */
   protected likeIgnoreCase(e: string, pattern: string, not: boolean): string {
     return `LOWER(${e}) ${not ? 'NOT ' : ''}LIKE LOWER(${pattern})${this.likeEscape()}`;
+  }
+
+  /**
+   * ORDER BY 里 NULL 排在哪：'smallest' 当最小值（升序在前、降序在后：MySQL、SQLite、SQL Server、HANA），
+   * 'largest' 当最大值（升序在后、降序在前：PostgreSQL、Oracle、Db2），'last' 两个方向都在最后（DuckDB、ClickHouse）。
+   * 跨库查询在内存里归并各库排好序的结果时按它比较，和库里的顺序才对得上
+   */
+  readonly nullOrder: 'smallest' | 'largest' | 'last' = 'smallest';
+
+  /**
+   * 驱动抛出的错误是哪一种（唯一键、外键、非空、死锁、串行化失败）；认不出返回 undefined，错误原样抛给调用方。
+   * 各库的错误码不同，由方言包按自己的驱动实现
+   */
+  errorKind(_error: unknown): DatabaseErrorKind | undefined {
+    return undefined;
   }
 
   /** DISTINCT ON (…)：只有 PG 有 */

@@ -90,7 +90,8 @@ export function migrationSource(
     lines.push(
       '',
       '// 不会自动改的差异（需要的话把对应的语句写进 up）：',
-      ...plan.differences.map((d) => `// - ${d}`),
+      // 差异里有库里读出来的名字：换行并成空格，注释不会被截断
+      ...plan.differences.map((d) => `// - ${d.replace(/\s*[\r\n\u2028\u2029]+\s*/g, ' ')}`),
     );
   return lines.join('\n') + '\n';
 }

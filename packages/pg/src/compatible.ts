@@ -6,6 +6,7 @@
 import type { ColumnOptions, ConflictNode, FunctionRenderer } from '@zerodep-dev/easy-query-ts';
 import { PostgresDialect } from './dialect.ts';
 
+/** openGauss 的方言：与 PostgreSQL 的差异（upsert、JSON、没有的函数） */
 export class OpenGaussDialect extends PostgresDialect {
   override readonly name: string = 'opengauss';
 
@@ -48,6 +49,7 @@ export class OpenGaussDialect extends PostgresDialect {
   }
 }
 
+/** 人大金仓（PG 模式）的方言：与 PostgreSQL 的差异 */
 export class KingbaseDialect extends PostgresDialect {
   override readonly name: string = 'kingbase';
 }

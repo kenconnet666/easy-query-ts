@@ -13,6 +13,7 @@ import {
   type FunctionRenderer,
   type Node,
   type SqlWriter,
+  type DatabaseErrorKind,
 } from '@zerodep-dev/easy-query-ts';
 /** SQLite 的日期时间是文字：用 strftime 取整，结果仍是 'YYYY-MM-DD HH:MM:SS' */
 /** LPAD / RPAD 的 SQLite 写法：比 length 长时截到 length，否则用 fill 补足（fill 重复 length 次再截取） */
@@ -52,8 +53,31 @@ function dateTrunc(x: string, unit: string): string {
   }
 }
 
+/** SQLite 的方言（node:sqlite、bun:sqlite、libSQL、D1 共用） */
 export class SqliteDialect extends Dialect {
   readonly name = 'sqlite';
+
+  /**
+   * node:sqlite 的 errcode 是扩展错误码：2067 / 1555 唯一键与主键、787 外键、1299 非空。
+   * bun:sqlite、libSQL、D1 的错误没有它，消息却是 SQLite 自己的固定写法，按消息认
+   */
+  override errorKind(error: unknown): DatabaseErrorKind | undefined {
+    switch (errorField(error, 'errcode')) {
+      case 2067:
+      case 1555:
+        return 'unique';
+      case 787:
+        return 'foreignKey';
+      case 1299:
+        return 'notNull';
+    }
+    const text = errorField(error, 'message');
+    const message = typeof text === 'string' ? text : '';
+    if (/UNIQUE constraint failed|PRIMARY KEY constraint failed/.test(message)) return 'unique';
+    if (/FOREIGN KEY constraint failed/.test(message)) return 'foreignKey';
+    if (/NOT NULL constraint failed/.test(message)) return 'notNull';
+    return undefined;
+  }
   /** SQLite 的 IS 就是 null 安全的相等 */
   override readonly nullSafeEquals = 'IS';
   /** SQLite 3.35+（node:sqlite 自带的版本满足） */
@@ -315,4 +339,11 @@ export class SqliteDialect extends Dialect {
   override get rowLocks(): boolean {
     return false;
   }
+}
+
+/** 驱动的错误对象上的一个字段（错误不一定是对象） */
+function errorField(error: unknown, name: string): unknown {
+  return typeof error === 'object' && error !== null
+    ? (error as Record<string, unknown>)[name]
+    : undefined;
 }

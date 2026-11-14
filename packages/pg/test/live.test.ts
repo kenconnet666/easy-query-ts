@@ -6,7 +6,13 @@
 import { afterAll, describe, it } from 'vitest';
 import pg from 'pg';
 import assert from 'node:assert/strict';
-import { createDb, defineMigration, sql, type Statement } from '@zerodep-dev/easy-query-ts';
+import {
+  createDb,
+  defineMigration,
+  SerializationError,
+  sql,
+  type Statement,
+} from '@zerodep-dev/easy-query-ts';
 import { Post, schema, seed, User, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
 import { listen, Pg, postgres } from '../src/index.ts';
@@ -71,6 +77,31 @@ for (const url of urls) {
         await pool.query(`DROP TABLE IF EXISTS ${table}`);
         await pool.query('DROP TABLE IF EXISTS t_race');
       }
+    });
+  });
+
+  describe(`postgres ${new URL(url).port}: serialization failures`, () => {
+    it('are reported as SerializationError and go away with retries', async () => {
+      const { db } = await seed(await open());
+      // 三个可串行化的事务都先数行数再按它插入：相互冲突，库会回滚其中几个
+      const numbered = (retries: number) =>
+        db.transaction(
+          async (tx) => {
+            const n = await tx.queryable(Post).count();
+            await tx
+              .insert(Post)
+              .values({ userId: 1, title: `no ${n}`, amount: '1.00' })
+              .execute();
+          },
+          { isolation: 'serializable', retries },
+        );
+      const once = await Promise.allSettled([numbered(0), numbered(0), numbered(0)]);
+      const failed = once.filter((r) => r.status === 'rejected');
+      assert.ok(failed.length > 0, 'expected at least one serialization failure');
+      for (const r of failed) assert.ok(r.reason instanceof SerializationError, String(r.reason));
+      const before = await db.queryable(Post).count();
+      await Promise.all([numbered(10), numbered(10), numbered(10)]);
+      assert.equal(await db.queryable(Post).count(), before + 3);
     });
   });
 

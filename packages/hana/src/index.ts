@@ -26,6 +26,7 @@ import {
   type Session,
   type TransactionOptions,
   type UpdateNode,
+  type DatabaseErrorKind,
 } from '@zerodep-dev/easy-query-ts';
 
 export { Hana } from './functions.ts';
@@ -39,8 +40,28 @@ const PACKET_SIZE_LIMIT = 2 ** 24;
 /** HANA 的 LIMIT 不能省、OFFSET 前必须有 LIMIT */
 const NO_LIMIT = 2147483647;
 
+/** SAP HANA 的方言：SQL 写法与函数的差异（见这个包的 README） */
 export class HanaDialect extends Dialect {
   readonly name = 'hana';
+
+  /** hdb 错误的 code：301 唯一键，461 / 462 外键，287 非空，133 死锁，138 串行化失败 */
+  override errorKind(error: unknown): DatabaseErrorKind | undefined {
+    switch (errorField(error, 'code')) {
+      case 301:
+        return 'unique';
+      case 461:
+      case 462:
+        return 'foreignKey';
+      case 287:
+        return 'notNull';
+      case 133:
+        return 'deadlock';
+      case 138:
+        return 'serialization';
+      default:
+        return undefined;
+    }
+  }
   /** HANA 没有 WITH RECURSIVE（层级查询用 HIERARCHY 函数） */
   override readonly supportsRecursiveCte = false;
   /** 条件不能直接当值（`SELECT a > b` 不合法）：写成 CASE WHEN … THEN 1 ELSE 0 END，布尔列当条件写成 = 1 */
@@ -358,6 +379,7 @@ export interface HdbClientOptions {
   [option: string]: unknown;
 }
 
+/** hana() 的选项：hdb 的连接参数，加上默认 schema 与连接池上限 */
 export interface HanaOptions extends HdbClientOptions {
   /** 连接后 SET SCHEMA */
   schema?: string;
@@ -493,4 +515,11 @@ export function closeHana(adapter: Adapter): void {
 
 export function hana(options: HanaOptions): Adapter<Without<'returning'>> {
   return { dialect: new HanaDialect(), driver: new HanaDriver(new Pool(options)) };
+}
+
+/** 驱动的错误对象上的一个字段（错误不一定是对象） */
+function errorField(error: unknown, name: string): unknown {
+  return typeof error === 'object' && error !== null
+    ? (error as Record<string, unknown>)[name]
+    : undefined;
 }

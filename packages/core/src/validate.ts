@@ -20,6 +20,7 @@ import {
   type Update,
 } from './schema.ts';
 
+/** 校验没通过的一项：原因与字段的路径（值对象里的是 ['address', 'city']） */
 export interface Issue {
   readonly message: string;
   readonly path: readonly (string | number)[];
@@ -106,14 +107,18 @@ function checkObject(
     return;
   }
   const input = value as Record<string, unknown>;
+  // 只认自有属性：`in` 会把 constructor、toString 这些继承来的名字当成认识的字段放过去
   for (const key of Object.keys(input))
-    if (!(key in fields)) issues.push({ message: 'unknown field', path: [...path, key] });
+    if (!Object.hasOwn(fields, key))
+      issues.push({ message: 'unknown field', path: [...path, key] });
   for (const [key, field] of Object.entries(fields)) {
     const at = [...path, key];
     const v = input[key];
     if (field instanceof Embedded) {
       if (v === undefined) {
         if (mode === 'row') issues.push({ message: 'required', path: at });
+        // 插入时整个省掉：里面必填的列逐个报出来（都可省时没有问题）
+        else if (mode === 'insert') checkObject(field.fields, {}, mode, at, issues);
       } else if (v === null) {
         if (!allNullable(field.fields)) issues.push({ message: 'cannot be null', path: at });
       } else checkObject(field.fields, v, mode, at, issues);
@@ -156,6 +161,20 @@ function allNullable(fields: Fields): boolean {
   );
 }
 
+/** 扩展类型的值（Decimal、CalendarDate……都是类的实例）；普通对象、数组不算 */
+function isValueObject(v: unknown): boolean {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const prototype: unknown = Object.getPrototypeOf(v);
+  return prototype !== Object.prototype && prototype !== null;
+}
+
+/** 'YYYY-MM-DD' 而且真有这一天（Date.parse 会放过 02-30） */
+function isCalendarDate(text: string): boolean {
+  if (!DATE.test(text)) return false;
+  const time = Date.parse(`${text}T00:00:00Z`);
+  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === text;
+}
+
 /** 一个值合不合列的类型；不合格时返回原因 */
 function checkValue(column: AnyColumn, v: unknown): string | undefined {
   const o = column.options;
@@ -166,8 +185,13 @@ function checkValue(column: AnyColumn, v: unknown): string | undefined {
         if (o.length !== undefined && codePoints(v) > o.length)
           return `must be at most ${o.length} characters`;
         return undefined;
-      case 'int':
-        return typeof v === 'number' && Number.isInteger(v) ? undefined : 'expected an integer';
+      case 'int': {
+        if (typeof v !== 'number' || !Number.isInteger(v)) return 'expected an integer';
+        // 默认建成 32 位整数（MySQL 的 unsigned 是 0 … 2^32-1）；自己给了 dbType 的列宽度不知道，不查
+        if (o.dbType !== undefined) return undefined;
+        const [min, max] = o.unsigned ? [0, 4294967295] : [-2147483648, 2147483647];
+        return v < min || v > max ? `must be between ${min} and ${max}` : undefined;
+      }
       case 'bigint':
         return (typeof v === 'number' && Number.isSafeInteger(v)) ||
           typeof v === 'bigint' ||
@@ -177,7 +201,7 @@ function checkValue(column: AnyColumn, v: unknown): string | undefined {
       case 'decimal': {
         const text = typeof v === 'number' ? String(v) : typeof v === 'string' ? v : undefined;
         // 扩展类型（decimal.js 等）的值对象交给列的编码检查
-        if (text === undefined) return typeof v === 'object' ? undefined : 'expected a decimal';
+        if (text === undefined) return isValueObject(v) ? undefined : 'expected a decimal';
         if (!DECIMAL.test(text)) return 'expected a decimal';
         const [whole = '', fraction = ''] = text.replace('-', '').split('.');
         if (o.scale !== undefined && fraction.length > o.scale)
@@ -194,13 +218,11 @@ function checkValue(column: AnyColumn, v: unknown): string | undefined {
       case 'boolean':
         return typeof v === 'boolean' ? undefined : 'expected a boolean';
       case 'date':
-        return typeof v === 'string' && DATE.test(v) && !Number.isNaN(Date.parse(v))
+        return (typeof v === 'string' && isCalendarDate(v)) || isValueObject(v)
           ? undefined
-          : typeof v === 'object'
-            ? undefined
-            : 'expected a date (YYYY-MM-DD)';
+          : 'expected a date (YYYY-MM-DD)';
       case 'time':
-        return (typeof v === 'string' && TIME.test(v)) || typeof v === 'object'
+        return (typeof v === 'string' && TIME.test(v)) || isValueObject(v)
           ? undefined
           : 'expected a time (HH:MM:SS)';
       case 'datetime':
@@ -208,7 +230,7 @@ function checkValue(column: AnyColumn, v: unknown): string | undefined {
           ? Number.isNaN(v.getTime())
             ? 'invalid date'
             : undefined
-          : typeof v === 'object'
+          : isValueObject(v)
             ? undefined
             : 'expected a Date';
       case 'bytes':

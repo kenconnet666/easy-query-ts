@@ -146,27 +146,17 @@ export class Scope {
     return `t${this.counter.n++}`;
   }
 
-  /** 子查询用的现场：别名不与外层重复；toggles 是导航上单独的拦截器开关 */
-  child(toggles: readonly InterceptorToggle[] = []): Scope {
-    return new Scope(
-      this.schema,
-      this.counter,
-      true,
-      this.interceptors.configure(...toggles),
-      this.kind,
-      this.ctes,
-    );
+  /**
+   * 子查询用的现场：别名不与外层重复。导航上单独的拦截器开关（noInterceptor、关系的 interceptors）不放在现场上：
+   * 它只管这个导航自己的表，由 filters 的 toggles 传；放在现场上会连带关掉里面嵌套的导航的拦截器（租户条件也在其中）
+   */
+  child(): Scope {
+    return new Scope(this.schema, this.counter, true, this.interceptors, this.kind, this.ctes);
   }
 
   /** 与本现场共用别名计数、但 CTE 单独统计：toList 的第二条查询是独立的语句，只该带它自己用到的 WITH */
-  detached(toggles: readonly InterceptorToggle[] = []): Scope {
-    return new Scope(
-      this.schema,
-      this.counter,
-      true,
-      this.interceptors.configure(...toggles),
-      this.kind,
-    );
+  detached(): Scope {
+    return new Scope(this.schema, this.counter, true, this.interceptors, this.kind);
   }
 
   /** 实体的根引用 */
@@ -268,6 +258,14 @@ function joinOne(
 }
 
 /**
+ * ROW_NUMBER 的窗口里的排序。SQL Server、Oracle 要求它非空：没有可排的（没写 orderBy、目标表也没有主键）就按分区列排——
+ * 同一个分区里它们都相等，等于没排，各库都认
+ */
+export function windowOrder(order: readonly OrderNode[], partition: readonly Node[]): OrderNode[] {
+  return order.length > 0 ? [...order] : partition.map((e) => ({ e, desc: false }));
+}
+
+/**
  * oneOfMany 的 JOIN：把目标表按关联列分区编号，只连每个父行的第 1 条。ON 里不放子查询（Oracle、Db2、分析型库不支持），
  * 导航的固定条件、拦截器都在编号之前过滤。排序后面补上主键，顺序相同的行每次取到同一条
  */
@@ -275,12 +273,12 @@ function pickedRowJoin(parent: AnyRef, rel: One, alias: string) {
   const { navigation, orderBy } = rel.ofMany!;
   const nav = (parent as unknown as Record<string, ManyRef<AnySchema, string>>)[navigation]!;
   const toggles = rel.interceptors ? [...nav.toggles, rel.interceptors] : nav.toggles;
-  const scope = nav.scope.child(toggles);
+  const scope = nav.scope.child();
   const target = scope.schema.entities[rel.target]!;
   const root = scope.root(rel.target);
   const rootAlias = root[REF].alias;
-  const link = linkColumns(scope, nav.relation, root);
-  const where = scope.filters(root);
+  const link = linkColumns(scope, nav.relation, root, toggles);
+  const where = scope.filters(root, toggles);
   for (const filter of rel.where ? [...nav.filters, rel.where] : nav.filters) {
     const condition = condNode(filter(root));
     if (condition) where.push(condition);
@@ -295,7 +293,7 @@ function pickedRowJoin(parent: AnyRef, rel: One, alias: string) {
     k: 'over',
     fn: { k: 'lit', sql: 'ROW_NUMBER()' },
     partition: link,
-    order: [...order, ...tieBreak],
+    order: windowOrder([...order, ...tieBreak], link),
     frame: undefined,
   };
   const sub: SelectNode = {
@@ -345,7 +343,12 @@ export function allOf(items: readonly Node[]): Node {
  * 直连时是目标表的 to 列；多对多时先把中间表 inner join 到目标表上，返回中间表引用父表的那几列。
  * 导出给 toList 的第二条查询复用，两处的连接方式必须一致。
  */
-export function linkColumns(scope: Scope, relation: Many, targetRoot: AnyRef): Node[] {
+export function linkColumns(
+  scope: Scope,
+  relation: Many,
+  targetRoot: AnyRef,
+  toggles: readonly InterceptorToggle[] = [],
+): Node[] {
   const info = targetRoot[REF];
   const target = scope.schema.entities[relation.target]!;
   const col = (
@@ -353,7 +356,7 @@ export function linkColumns(scope: Scope, relation: Many, targetRoot: AnyRef): N
     entity: { columnNames: Record<string, string> },
     prop: string,
   ): Node => ({ k: 'col', alias, name: entity.columnNames[prop]! });
-  if (relation.hops) return bridgeColumns(scope, relation, targetRoot);
+  if (relation.hops) return bridgeColumns(scope, relation, targetRoot, toggles);
   if (relation.on) return conditionColumns(scope, relation, targetRoot);
   const through = relation.through;
   if (!through) return relation.to.map((c) => col(info.alias, target, c));
@@ -368,7 +371,7 @@ export function linkColumns(scope: Scope, relation: Many, targetRoot: AnyRef): N
     })),
   );
   // 拦截器（租户、逻辑删除等）也要作用在中间表上，条件放进 ON
-  const extra = scope.filters(makeRef(scope, through.entity, alias, false));
+  const extra = scope.filters(makeRef(scope, through.entity, alias, false), toggles);
   scope.joins.push({
     table: middle.table,
     alias,
@@ -383,7 +386,12 @@ export function linkColumns(scope: Scope, relation: Many, targetRoot: AnyRef): N
  * 桥是 DISTINCT 的：同一个目标经几条路径到达也只出现一次，count、sum、toList 不会重复。
  * 各段的目标表与中间表都带上拦截器条件，中间各段的固定条件也在桥里；最后一段的固定条件由 ManyRef 加在目标上
  */
-function bridgeColumns(scope: Scope, relation: Many, targetRoot: AnyRef): Node[] {
+function bridgeColumns(
+  scope: Scope,
+  relation: Many,
+  targetRoot: AnyRef,
+  toggles: readonly InterceptorToggle[],
+): Node[] {
   const hops = relation.hops!;
   const first = hops[0]!;
   const last = hops.at(-1)!;
@@ -391,16 +399,20 @@ function bridgeColumns(scope: Scope, relation: Many, targetRoot: AnyRef): Node[]
   const where: Node[] = [];
   const columnsOf = (ref: AnyRef, props: readonly string[]) =>
     props.map((p) => columnNode(inner, ref[REF], p));
+  /** 一段导航上的表用的拦截器开关：直达关系自己的，加上这一段定义时写的 */
+  const togglesOf = (hop: Relation) =>
+    hop.interceptors ? [...toggles, hop.interceptors] : toggles;
   /** inner join 一张表：props 列等于 keys（按位置），并带上拦截器条件与固定条件 */
   const joinOn = (
     key: string,
     props: readonly string[],
     keys: readonly Node[],
+    hop: Relation,
     fixed?: RelationFilter,
   ): AnyRef => {
     const alias = inner.nextAlias();
     const ref = makeRef(inner, key, alias, false);
-    const extra = inner.filters(ref);
+    const extra = inner.filters(ref, togglesOf(hop));
     const condition = fixed ? condNode(fixed(ref as never)) : undefined;
     if (condition) extra.push(condition);
     const on = columnsOf(ref, props).map((l, i): Node => ({ k: 'op', op: '=', l, r: keys[i]! }));
@@ -415,10 +427,10 @@ function bridgeColumns(scope: Scope, relation: Many, targetRoot: AnyRef): Node[]
   const step = (ref: AnyRef, hop: Relation): AnyRef => {
     let keys = columnsOf(ref, hop.from);
     if (hop.kind === 'many' && hop.through) {
-      const middle = joinOn(hop.through.entity, hop.through.from, keys);
+      const middle = joinOn(hop.through.entity, hop.through.from, keys, hop);
       keys = columnsOf(middle, hop.through.to);
     }
-    return joinOn(hop.target, hop.to, keys, hop.where);
+    return joinOn(hop.target, hop.to, keys, hop, hop.where);
   };
 
   // 桥从第一段的目标表开始（多对多时从中间表开始），父键是第一段"孩子一侧"的列
@@ -427,12 +439,18 @@ function bridgeColumns(scope: Scope, relation: Many, targetRoot: AnyRef): Node[]
   let parentKeys: Node[];
   if (first.kind === 'many' && first.through) {
     start = inner.root(first.through.entity);
-    where.push(...inner.filters(start));
+    where.push(...inner.filters(start, togglesOf(first)));
     parentKeys = columnsOf(start, first.through.from);
-    current = joinOn(first.target, first.to, columnsOf(start, first.through.to), first.where);
+    current = joinOn(
+      first.target,
+      first.to,
+      columnsOf(start, first.through.to),
+      first,
+      first.where,
+    );
   } else {
     start = current = inner.root(first.target);
-    where.push(...inner.filters(start));
+    where.push(...inner.filters(start, togglesOf(first)));
     const fixed = first.where ? condNode(first.where(start as never)) : undefined;
     if (fixed) where.push(fixed);
     parentKeys = columnsOf(start, first.to);
@@ -441,7 +459,7 @@ function bridgeColumns(scope: Scope, relation: Many, targetRoot: AnyRef): Node[]
   // 最后一段只走到目标键为止，目标表本身在外层
   let targetKeys = columnsOf(current, last.from);
   if (last.kind === 'many' && last.through) {
-    const middle = joinOn(last.through.entity, last.through.from, targetKeys);
+    const middle = joinOn(last.through.entity, last.through.from, targetKeys, last);
     targetKeys = columnsOf(middle, last.through.to);
   }
   const bridge: SelectNode = {
@@ -751,11 +769,11 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
       throw new Error(
         'limit() on a navigation only applies to toList() / first(); filter with where() before any / count / sum',
       );
-    const scope = this.scope.child(this.toggles);
+    const scope = this.scope.child();
     const target = scope.schema.entities[this.relation.target]!;
     const root = scope.root(this.relation.target);
     const alias = root[REF].alias;
-    const link = linkColumns(scope, this.relation, root);
+    const link = linkColumns(scope, this.relation, root, this.toggles);
     const where: Node[] = [
       allOf(
         link.map((l, i): Node => ({
@@ -766,7 +784,7 @@ export class ManyRef<S extends AnySchema, K extends EntityKey<S>> {
         })),
       ),
     ];
-    where.push(...scope.filters(root));
+    where.push(...scope.filters(root, this.toggles));
     for (const f of filter ? [...this.filters, filter] : this.filters) {
       const n = condNode(f(root));
       if (n) where.push(n);
@@ -873,10 +891,15 @@ export class GroupJoin<S extends AnySchema, K extends EntityKey<S>> {
     if (this.joined) return this.joined;
     const { scope, relation, parent } = this.many;
     if (!scope.allowJoins) throw new Error('groupJoin() needs a JOIN, which is not available here');
-    const inner = scope.child(this.many.toggles);
+    if (this.many.take !== undefined)
+      throw new Error(
+        'limit() on a navigation only applies to toList() / first(); groupJoin() aggregates every row',
+      );
+    const toggles = this.many.toggles;
+    const inner = scope.child();
     const root = inner.root(relation.target);
-    const link = linkColumns(inner, relation, root);
-    const where = [...inner.filters(root), ...this.many.rebuild(root).where];
+    const link = linkColumns(inner, relation, root, toggles);
+    const where = [...inner.filters(root, toggles), ...this.many.rebuild(root).where];
     // 关联列占前几列（g0…），聚合在后面按用到的顺序追加（a…）
     const columns = link.map((e, i) => ({ e, as: `g${i}` }));
     const alias = scope.nextAlias();

@@ -127,12 +127,13 @@ export function planSync(
   // 类型排在最前面：新表、新列可能用到它
   const { statements: typeStatements, differences } = dialect.typeStatements(entities, types);
   const statements: string[] = [];
+  const renames: string[] = [];
   const created: Entity[] = [];
   for (const entity of entities) {
     let table = findTable(tables, entity.table);
     if (!table && entity.renamedFrom) {
       table = findTable(tables, entity.renamedFrom);
-      if (table) statements.push(dialect.renameTable(entity.renamedFrom, entity.table));
+      if (table) renames.push(dialect.renameTable(entity.renamedFrom, entity.table));
     }
     if (!table) {
       created.push(entity);
@@ -140,10 +141,11 @@ export function planSync(
     }
     diffTable(dialect, schema, entity, table, statements, differences);
   }
-  // 新表一起建：外键排在所有建表之后
+  // 改表名排在最前面：新表的外键可能引用改名后的表。新表一起建，外键排在所有建表之后
   return {
     statements: [
       ...typeStatements,
+      ...renames,
       ...createStatements(dialect, schema, created, false, false),
       ...statements,
     ],

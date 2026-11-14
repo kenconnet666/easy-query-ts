@@ -11,7 +11,7 @@ import {
   type SelectNode,
   type TableRef,
 } from './ast.ts';
-import { SqlWriter, type Statement } from './dialect.ts';
+import { SqlWriter, type Dialect, type Statement } from './dialect.ts';
 import {
   aggregate,
   aggregateCodec,
@@ -21,6 +21,7 @@ import {
   condNode,
   or,
   Expr,
+  orderKeys,
   orderNodes,
   SUBQUERY,
   type Cond,
@@ -37,6 +38,7 @@ import {
   REF,
   refColumn,
   Scope,
+  windowOrder,
   type AnyRef,
   type Ref,
   type RefInfo,
@@ -54,6 +56,7 @@ import {
   type Codec,
   type DerivedEntity,
   type Entity,
+  type KeyInput,
   type Row,
   type VariantsOf,
   type VariantTypes,
@@ -73,6 +76,8 @@ import {
 } from './table.ts';
 import { assembleTree, type TreeNode } from './tree.ts';
 import { explain, query, streamRows, type Context, type ExplainOptions } from './session.ts';
+import { InvalidRequestError, NotFoundError } from './errors.ts';
+import { afterCursor, cursorValue, decodeCursor, encodeCursor, type OrderKey } from './cursor.ts';
 import { shardedFrom, shardTables } from './sharding.ts';
 
 /** 构建时求值的 lambda：单表查询收到一个表引用，join 之后按 join 顺序收到多个 */
@@ -119,6 +124,8 @@ interface State {
   readonly lockMode?: 'share' | 'noKeyUpdate';
   /** 优化器提示（optimizerHint） */
   readonly hints?: readonly string[];
+  /** 键集分页（toCursorPage）：排序补上主键、排序键另选出来；after 是游标里的值，第一页没有 */
+  readonly keyset?: { readonly after: readonly unknown[] | undefined };
 }
 
 /**
@@ -188,6 +195,22 @@ export interface Page<T> {
   readonly size: number;
 }
 
+/** toCursorPage 的一页：next 是取下一页用的游标，已经是最后一页时没有 */
+export interface CursorPage<T> {
+  readonly rows: T[];
+  readonly next: string | undefined;
+}
+
+/**
+ * 一条查询每行的类型：`type UserCard = ResultOf<typeof cardQuery>`。查询（db.queryable(…) 的链、prepare、跨库查询）
+ * 与返回查询的函数都可以，不用为了拿类型再把结果的形状手写一遍
+ */
+export type ResultOf<Q> = Q extends (...args: never[]) => infer R
+  ? ResultOf<R>
+  : Q extends { toList(...args: never[]): Promise<readonly (infer Out)[]> }
+    ? Out
+    : never;
+
 /** 所有查询（普通的、分组的）共用的类型：Db.with、union 等接受它 */
 export type Query<Out> = Executable<Out>;
 
@@ -217,11 +240,6 @@ export type FilterRules<I, Refs extends readonly unknown[]> = {
       };
 };
 
-/** 查不到要的行（firstOrThrow、findOrThrow）：接口层据此回 404 */
-export class NotFoundError extends Error {
-  override readonly name = 'NotFoundError';
-}
-
 /**
  * 主键的写法：单列主键是那一列的值，复合主键是 `{ 列: 值 }`。
  * 列定义的类型上没有标出哪些是主键，所以类型只约束到"某一列的值或部分行"，少列、多给了值在运行时报错
@@ -243,8 +261,6 @@ type NarrowVariant<Out, E, N extends string> =
 interface MissingColumns<C> {
   readonly 'error: the entity lacks columns this scope needs': keyof C;
 }
-
-export type KeyInput<E extends Entity> = Row<E>[keyof Row<E>] | Partial<Row<E>>;
 
 type Columns = Record<string, Expr<unknown>>;
 
@@ -459,6 +475,45 @@ abstract class Executable<Out> implements Subquery<Out> {
   }
 
   /**
+   * 键集分页（游标分页）：不用 OFFSET，而是"排在上一页最后一行之后的 size 行"——翻到多深都一样快，
+   * 翻页途中有行插入、删除也不会漏行或重复。适合"加载更多"、按批导出、同步；要跳到第 N 页、要总数用 toPage。
+   * ```ts
+   * const first = await db.queryable(Post).orderBy((p) => p.createdAt.desc()).toCursorPage({ size: 20 });
+   * const second = await db.queryable(Post).orderBy((p) => p.createdAt.desc())
+   *   .toCursorPage({ size: 20, after: first.next });
+   * ```
+   * 排序就是查询自己的 orderBy，后面自动补上主键，保证每一行的位置唯一（主表没有主键、或者 join 之后一行主表对多行时，
+   * 自己把 orderBy 写到唯一）。排序键可以为 NULL。next 是不透明的文字，原样交给客户端；同一个游标只对同样排序的查询有效，
+   * 不是 toCursorPage 给出的游标抛 InvalidCursorError。分组、去重之后的结果先 asTable() 再分页
+   */
+  async toCursorPage(options: {
+    readonly size: number;
+    readonly after?: string | null | undefined;
+  }): Promise<CursorPage<Out>> {
+    const { size, after } = options;
+    if (!Number.isSafeInteger(size) || size < 1)
+      throw new RangeError(`toCursorPage: size must be a positive integer, got ${size}`);
+    if (this.state.limit !== undefined || this.state.offset !== undefined)
+      throw new Error('toCursorPage() sets the limit itself; remove limit() / offset()');
+    // 多取一行：取到了就说明后面还有
+    const built = build(this.ctx, {
+      ...this.state,
+      limit: size + 1,
+      keyset: { after: after ? decodeCursor(after) : undefined },
+    });
+    const raw = await query(this.ctx, render(this.ctx, built.select));
+    const page = raw.slice(0, size);
+    const rows = page.map(built.shape.read) as Out[];
+    await complete(this.ctx, built.shape);
+    const last = page.at(-1);
+    const next =
+      raw.length > size && last
+        ? encodeCursor(built.keys!.map((key, i) => cursorValue(key, last[`eq_k${i}`])))
+        : undefined;
+    return { rows, next };
+  }
+
+  /**
    * 已知总数时取一页。偏移量过了 reversePageAfter、且超过总数一半时，按相反的排序取（偏移量变小、库里少跳过很多行），再翻回来
    */
   protected async pageRows(total: number, page: number, size: number): Promise<Out[]> {
@@ -634,7 +689,9 @@ export class Queryable<
     ) => {
       const bad = allowed ? keys.filter((key) => !allowed.includes(key)) : [];
       if (bad.length > 0)
-        throw new Error(`cannot ${what} by ${bad.join(', ')} (allowed: ${allowed!.join(', ')})`);
+        throw new InvalidRequestError(
+          `cannot ${what} by ${bad.join(', ')} (allowed: ${allowed!.join(', ')})`,
+        );
     };
     check(
       [
@@ -1139,6 +1196,7 @@ export interface Group<
   min<V>(value: (...refs: Refs) => Expr<V>): Expr<NonNullable<V> | null>;
 }
 
+/** groupBy 之后的查询：having、orderBy、select 的回调收到的是分组（键与聚合函数） */
 export class GroupedQueryable<
   S extends AnySchema,
   K extends EntityKey<S>,
@@ -1340,6 +1398,10 @@ function refColumns(ref: AnyRef): Record<string, unknown> {
 export interface Built {
   readonly select: SelectNode;
   readonly shape: ShapeCompiler;
+  /** 渲染这条查询的方言（跨库归并要知道它怎么排 NULL） */
+  readonly dialect: Dialect;
+  /** 键集分页的排序键：第 i 个的值在结果行的 eq_k{i} 里 */
+  readonly keys?: readonly OrderKey[];
 }
 
 /** 在新的构建现场里求值所有 lambda；bare 为 true 时不求值 select（count / any 用） */
@@ -1354,7 +1416,34 @@ function build(ctx: Context, state: State, bare = false): Built {
   const shape = new ShapeCompiler(ctx);
   let groupBy: Node[] = [];
   let having: Node[] = [];
-  let orderBy: OrderNode[] = state.orderBy.flatMap((o) => orderNodes(o(...refs)));
+  let keys: OrderKey[] = state.orderBy.flatMap((o) => orderKeys(o(...refs)));
+  if (state.keyset) {
+    if (state.group || state.distinct || state.distinctOn)
+      throw new Error(
+        'toCursorPage() pages plain rows: after groupBy / distinct, wrap the query with asTable() first',
+      );
+    // 主键垫底：排序键相同的行也有确定的先后，游标才指得准
+    for (const column of ctx.schema.entities[state.key]!.primaryKey) {
+      const e = (root as unknown as Record<string, Expr<unknown>>)[column]!;
+      const text = JSON.stringify(e.node);
+      if (!keys.some((k) => JSON.stringify(k.e) === text))
+        keys.push({ e: e.node, desc: false, codec: e.codec });
+    }
+    if (keys.length === 0)
+      throw new Error('toCursorPage() needs an orderBy: the query has none and no primary key');
+    // 主表上不可空的列不会是 NULL（派生表的列说不准；right join 之后主表的列也可能是 NULL）
+    const table = ctx.schema.entities[state.key]!;
+    const notNull = (e: Node): boolean => {
+      if (e.k !== 'col' || e.alias !== root[REF].alias || table.derived || rightJoined)
+        return false;
+      const column = Object.keys(table.columnNames).find((p) => table.columnNames[p] === e.name);
+      return column !== undefined && !table.columns[column]!.options.nullable;
+    };
+    keys = keys.map((key) => ({ ...key, notNull: notNull(key.e) }));
+    if (state.keyset.after)
+      where.push(...conds([afterCursor(keys, state.keyset.after, ctx.dialect.nullOrder)]));
+  }
+  let orderBy: OrderNode[] = keys.map(({ e, desc }) => ({ e, desc }));
 
   if (state.group) {
     const keys = state.group(...refs);
@@ -1389,7 +1478,9 @@ function build(ctx: Context, state: State, bare = false): Built {
     groupBy,
     having,
     orderBy,
-    columns: shape.columns,
+    columns: state.keyset
+      ? [...shape.columns, ...keys.map((k, i) => ({ e: k.e, as: `eq_k${i}` }))]
+      : shape.columns,
     distinct: state.distinct,
     limit: state.limit,
     offset: state.offset,
@@ -1401,7 +1492,7 @@ function build(ctx: Context, state: State, bare = false): Built {
     groupMode: state.group ? state.groupMode : undefined,
     ctes: scope.ctes.size > 0 ? [...scope.ctes.values()] : undefined,
   };
-  return { select, shape };
+  return { select, shape, dialect: ctx.dialect, ...(state.keyset ? { keys } : {}) };
 }
 
 /**
@@ -1927,16 +2018,21 @@ async function fillLists(ctx: Context, lists: readonly PendingList[]): Promise<v
     const many = pending.list.many;
     // 与父查询共用别名计数：filters 里误用父查询的导航时别名对不上，checkAliases 能报出来
     // CTE 单独统计：第二条查询是独立的语句，只带它自己用到的 WITH
-    const scope = many.scope.detached(many.toggles);
+    const scope = many.scope.detached();
     const root = scope.root(many.relation.target);
     const { where, orderBy } = many.rebuild(root);
-    where.push(...scope.filters(root));
+    where.push(...scope.filters(root, many.toggles));
     const shape = new ShapeCompiler(ctx);
     shape.compile(pending.list.shape ? pending.list.shape(root) : root);
     // 孩子一侧的关联列（多对多时已经把中间表 join 进 scope）
-    const toNodes = linkColumns(scope, many.relation, root);
+    const toNodes = linkColumns(scope, many.relation, root, many.toggles);
     const keyAs = toNodes.map((n) => shape.hidden(n));
     const target = ctx.schema.entities[many.relation.target]!;
+    // 每个父行取前几条时排序要确定：没写 orderBy 就按主键
+    const perParentOrder = windowOrder(
+      orderBy.length > 0 ? orderBy : orderNodes(target.primaryKey.map((c) => refColumn(root, c))),
+      toNodes,
+    );
     const slots = [...pending.slots.values()];
     // 参数个数 = 键个数 × 列数，复合外键时每块少放一些
     const chunk = Math.max(1, Math.floor(IN_CHUNK / toNodes.length));
@@ -1963,7 +2059,12 @@ async function fillLists(ctx: Context, lists: readonly PendingList[]): Promise<v
       };
       for (const row of await query(
         ctx,
-        render(ctx, many.take === undefined ? select : perParent(select, toNodes, many.take)),
+        render(
+          ctx,
+          many.take === undefined
+            ? select
+            : perParent({ ...select, orderBy: perParentOrder }, toNodes, many.take),
+        ),
       )) {
         const item = shape.read(row);
         for (const array of pending.slots.get(keyText(keyAs.map((as) => row[as])))?.arrays ?? [])

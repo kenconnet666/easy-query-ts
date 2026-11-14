@@ -70,6 +70,7 @@ type Unbranded<T> = T extends number
       ? string
       : T;
 
+/** 算术方法（plus、times……）右边可以写的值：同类型的值或表达式；小数还能和数字、整数列运算 */
 export type Arith<T> =
   | Operand<T>
   | Operand<Unbranded<T>>
@@ -251,10 +252,10 @@ export class Expr<T> {
   }
 
   asc(): Order {
-    return new Order({ e: this.node, desc: false });
+    return new Order({ e: this.node, desc: false }, this.codec);
   }
   desc(): Order {
-    return new Order({ e: this.node, desc: true });
+    return new Order({ e: this.node, desc: true }, this.codec);
   }
 
   /** 为 NULL 时取 fallback（COALESCE） */
@@ -1194,8 +1195,11 @@ function branchValue(value: unknown): [Node, Codec<any> | undefined] {
 
 export class Order {
   readonly node: OrderNode;
-  constructor(node: OrderNode) {
+  /** 排序表达式的 codec：键集分页把游标里的值编码回参数时用 */
+  readonly codec: Codec<any> | undefined;
+  constructor(node: OrderNode, codec?: Codec<any>) {
     this.node = node;
+    this.codec = codec;
   }
 }
 
@@ -1237,6 +1241,16 @@ function combine(kind: 'and', conds: readonly Cond[]): Node | undefined {
 export function orderNodes(items: OrderItem | readonly OrderItem[]): OrderNode[] {
   const list = Array.isArray(items) ? items : [items];
   return list.map((o: OrderItem) => (o instanceof Order ? o.node : { e: o.node, desc: false }));
+}
+
+/** 同 orderNodes，各项带上表达式的 codec */
+export function orderKeys(
+  items: OrderItem | readonly OrderItem[],
+): (OrderNode & { readonly codec: Codec<any> | undefined })[] {
+  const list = Array.isArray(items) ? items : [items];
+  return list.map((o: OrderItem) =>
+    o instanceof Order ? { ...o.node, codec: o.codec } : { e: o.node, desc: false, codec: o.codec },
+  );
 }
 
 export function toNode(value: unknown, codec: Codec<any> | undefined): Node {
@@ -1315,6 +1329,7 @@ function isNode(value: unknown): value is Node {
 
 /** 日期格式里认得的部分（写法同 Java 的 DateTimeFormatter） */
 export type DateToken = 'yyyy' | 'yy' | 'MM' | 'dd' | 'HH' | 'mm' | 'ss';
+/** format() 的格式拆出来的一段：日期记号，或原样输出的文字；方言据此拼各库自己的格式串 */
 export type DatePart = { readonly token: DateToken } | { readonly text: string };
 const DATE_TOKENS: readonly DateToken[] = ['yyyy', 'yy', 'MM', 'dd', 'HH', 'mm', 'ss'];
 

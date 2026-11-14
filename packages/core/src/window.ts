@@ -21,6 +21,7 @@ export type Bound =
   | { readonly preceding: number }
   | { readonly following: number };
 
+/** 窗口的定义：`win.rowNumber((w) => w.partitionBy(…).orderBy(…))` 回调里的 w */
 export class WindowSpec {
   readonly partition: readonly Node[];
   readonly order: readonly OrderNode[];

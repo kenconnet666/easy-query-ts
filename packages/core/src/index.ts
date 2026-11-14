@@ -23,8 +23,11 @@ export type {
   Entity,
   EntityOptions,
   Fields,
+  GeneratedKey,
   Insert,
   InsertOf,
+  KeyColumns,
+  KeyInput,
   Row,
   RowOf,
   StandardResult,
@@ -123,19 +126,36 @@ export type {
 } from './expr.ts';
 export { Fill, GroupJoin, ListOf, ManyRef, refColumn } from './ref.ts';
 export type { ColumnRefs, Ref, Selected } from './ref.ts';
-export { GroupedQueryable, NotFoundError, Queryable } from './query.ts';
+export { GroupedQueryable, Queryable } from './query.ts';
+export {
+  ChildOwnershipError,
+  DatabaseError,
+  databaseError,
+  DeadlockError,
+  ForeignKeyViolationError,
+  InvalidCursorError,
+  InvalidRequestError,
+  NotFoundError,
+  NotNullViolationError,
+  OptimisticLockError,
+  SerializationError,
+  sqlStateKind,
+  UniqueViolationError,
+} from './errors.ts';
+export type { DatabaseErrorKind } from './errors.ts';
 export type {
+  CursorPage,
   DerivedSchema,
   Group,
   JoinedQueryRows,
   JoinedRows,
   NullableRefs,
-  KeyInput,
   NullableKeys,
   Page,
   FilterRule,
   FilterRules,
   Query,
+  ResultOf,
   SubqueryRef,
   TableOptions,
 } from './query.ts';
@@ -171,7 +191,7 @@ export type {
   WriteDetail,
   WriteEvent,
 } from './interceptor.ts';
-export type { DbOptions, KeyOf, TreeWalk, WithCte } from './db.ts';
+export type { DbOptions, KeyOf, RetryOptions, TreeWalk, WithCte } from './db.ts';
 export type { RemovedPolicy, SaveInclude, SaveNode, SaveValue } from './save.ts';
 export { compareVersions, Dialect, SqlWriter } from './dialect.ts';
 export type {

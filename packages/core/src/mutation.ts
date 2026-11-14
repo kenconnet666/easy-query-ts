@@ -25,6 +25,7 @@ import {
   type AllNullable,
   type Fields,
   type Insert,
+  type GeneratedKey,
   type Row,
   type UpdateOf,
   type ValueOf,
@@ -36,10 +37,12 @@ import {
   type WriteDetail,
 } from './interceptor.ts';
 import { execute, query, type Context } from './session.ts';
+import { OptimisticLockError } from './errors.ts';
 import { shardTables } from './sharding.ts';
 
 type EntityOf<S extends AnySchema, K extends EntityKey<S>> = S['entities'][K];
 
+/** `db.insert(实体)` 返回的构建器：values(行) 插入给定的行，select(查询) 插入查询的结果 */
 export class Insertable<S extends AnySchema, K extends EntityKey<S>> {
   private readonly ctx: Context;
   private readonly key: K;
@@ -358,8 +361,9 @@ export class BatchUpdate {
     return update.expectRows(
       rows.length,
       (affected) =>
-        new Error(
+        new OptimisticLockError(
           `optimistic lock failed: ${rows.length - affected} of ${rows.length} ${entity.table} rows were changed or deleted by someone else`,
+          entity.table,
         ),
     );
   }
@@ -463,6 +467,7 @@ type Columns<S extends AnySchema, K extends EntityKey<S>> = (
   r: Ref<S, K>,
 ) => Expr<unknown> | readonly Expr<unknown>[];
 
+/** `db.insert(实体).values(…)` 之后的构建器：onConflict、returning、returnId、execute */
 export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
   private readonly ctx: Context;
   private readonly key: K;
@@ -601,10 +606,17 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     return affected;
   }
 
-  /** 单行插入，返回自增主键 */
-  returnId(this: Requires<S, 'generatedKeys', InsertValues<S, K>>): Promise<number | bigint>;
-  returnId(): Promise<number | bigint> {
-    return this.generatedId();
+  /**
+   * 单行插入，返回库生成的主键。值按主键列的类型读出：`col.bigint({ mode: 'bigint' })` 给 bigint，
+   * 带品牌的列给带品牌的值；实体没声明主键时是驱动报的数
+   */
+  returnId(
+    this: Requires<S, 'generatedKeys', InsertValues<S, K>>,
+  ): Promise<GeneratedKey<EntityOf<S, K>>>;
+  async returnId(): Promise<unknown> {
+    const id = await this.generatedId();
+    const [key, ...rest] = this.entity.primaryKey;
+    return key !== undefined && rest.length === 0 ? this.entity.columns[key]!.codec.decode(id) : id;
   }
 
   private async generatedId(): Promise<number | bigint> {
@@ -1064,10 +1076,13 @@ abstract class Filtered {
     const expect = this.state.expect;
     if (expect && affected !== expect.count) throw expect.error(affected);
     // 带乐观锁条件却一行也没改到：行已被删除或已被别人改过
-    if (affected === 0 && this.state.version)
-      throw new Error(
-        `optimistic lock failed: ${this.ctx.schema.entities[this.key]!.table} row was changed or deleted by someone else`,
+    if (affected === 0 && this.state.version) {
+      const table = this.ctx.schema.entities[this.key]!.table;
+      throw new OptimisticLockError(
+        `optimistic lock failed: ${table} row was changed or deleted by someone else`,
+        table,
       );
+    }
   }
 
   /** 执行一条语句；checks 为 false 时由调用方合计后再检查 */
@@ -1128,6 +1143,7 @@ abstract class Filtered {
   protected abstract build(): { statement: Statement; detail: WriteDetail };
 }
 
+/** `db.update(实体)` 返回的构建器：set / entity / changes 给出要改的值，where 之后 execute */
 export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filtered {
   protected readonly verb = 'update';
   private readonly values: ((r: any) => Record<string, unknown>) | undefined;
@@ -1401,6 +1417,7 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
   }
 }
 
+/** `db.delete(实体)` 返回的构建器：where / whereKey 之后 execute；有逻辑删除列时改写成 update */
 export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filtered {
   protected readonly verb = 'delete';
 

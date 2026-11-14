@@ -22,6 +22,7 @@
 import type { Db } from './db.ts';
 import { and, or, type Cond, type Expr } from './expr.ts';
 import type { AnySchema, EntityKey, Many, Member, One, Relation } from './relations.ts';
+import { ChildOwnershipError } from './errors.ts';
 import { flattenRow, keyText, type Entity, type UpdateOf } from './schema.ts';
 
 /** 不在输入里的子项怎么处理 */
@@ -201,7 +202,7 @@ export class AggregateSaver {
     const linked = rel.to.some((c) => row[c] !== null && row[c] !== undefined);
     const here = rel.to.every((c) => keyText([row[c]]) === keyText([link[c]]));
     if (linked && !here && !node.adopt)
-      throw new Error(
+      throw new ChildOwnershipError(
         `save: ${rel.target} (${pk.map((k) => `${k} = ${String(child[k])}`).join(', ')}) belongs to another parent; ` +
           `set adopt: true on this navigation to move it`,
       );

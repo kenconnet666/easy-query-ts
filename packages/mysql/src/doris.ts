@@ -24,11 +24,13 @@ import {
 } from '@zerodep-dev/easy-query-ts';
 import { MySqlDialect } from './dialect.ts';
 
+/** doris() 的选项 */
 export interface DorisOptions {
   /** 建表时的副本数（PROPERTIES replication_num）；不给按集群默认（3），单 BE 的测试环境给 1 */
   readonly replication?: number;
 }
 
+/** Apache Doris 的方言：走 MySQL 协议，主键模型的表，分析型查询 */
 export class DorisDialect extends MySqlDialect {
   override readonly name: string = 'doris';
   /** 事务不能回滚，语句依次执行：没有保存点 */

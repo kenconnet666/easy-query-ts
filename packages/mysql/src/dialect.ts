@@ -18,6 +18,7 @@ import {
   type SelectNode,
   type TableIndex,
   type UpdateNode,
+  type DatabaseErrorKind,
 } from '@zerodep-dev/easy-query-ts';
 import { mysqlFunctions } from './functions.ts';
 
@@ -43,6 +44,26 @@ const MYSQL_MINIMUM: Record<string, string> = {
 };
 
 export class MySqlDialect extends Dialect {
+  /** mysql2 的 errno：1062 唯一键，1451 / 1452（旧写法 1216 / 1217）外键，1048 / 1364 非空，1213 死锁 */
+  override errorKind(error: unknown): DatabaseErrorKind | undefined {
+    switch (errorField(error, 'errno')) {
+      case 1062:
+        return 'unique';
+      case 1216:
+      case 1217:
+      case 1451:
+      case 1452:
+        return 'foreignKey';
+      case 1048:
+      case 1364:
+        return 'notNull';
+      case 1213:
+        return 'deadlock';
+      default:
+        return undefined;
+    }
+  }
+
   /** 按序号分组：only_full_group_by 下，键里带参数时认不出 SELECT 与 GROUP BY 是同一个表达式 */
   override readonly groupByOrdinal: boolean = true;
 
@@ -329,4 +350,11 @@ export class MySqlDialect extends Dialect {
       return ` LIMIT ${NO_LIMIT} OFFSET ${offset}`;
     return super.limitOffset(limit, offset, ordered);
   }
+}
+
+/** 驱动的错误对象上的一个字段（错误不一定是对象） */
+function errorField(error: unknown, name: string): unknown {
+  return typeof error === 'object' && error !== null
+    ? (error as Record<string, unknown>)[name]
+    : undefined;
 }

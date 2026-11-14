@@ -223,6 +223,7 @@ class MySqlDriver extends MySqlSession implements Driver {
   }
 }
 
+/** mysql() 的选项 */
 export interface MySqlOptions {
   /** 服务器版本：按它选写法（如 8.0.18 的 upsert 用 VALUES()），用到更高版本的特性时报错；默认最新 */
   readonly version?: MySqlVersion;

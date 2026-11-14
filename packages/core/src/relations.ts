@@ -119,6 +119,7 @@ export interface Computed<V = unknown> {
   readonly value: (ref: any) => Expr<V>;
 }
 
+/** 一个关系：对一（r.one）或对多（r.many、多对多） */
 export type Relation = One | Many;
 
 /** schema 关系表里的一项：导航，或计算属性 */
@@ -263,7 +264,9 @@ export interface Schema<
   readonly relations: R;
 }
 
+/** 任意一个 schema（defineSchema 的结果）：写接受各种 schema 的泛型时用 */
 export type AnySchema = Schema<Record<string, Entity>, Record<string, Record<string, Member>>>;
+/** schema 里实体的键（defineSchema 第一个参数的属性名） */
 export type EntityKey<S extends AnySchema> = keyof S['entities'] & string;
 
 /** 表达式的值类型 */
@@ -509,6 +512,9 @@ function resolvePath(
       throw new Error(
         `${where}: '${hop}' is a manyOn / oneOn relation and cannot be part of a path`,
       );
+    // oneOfMany 没有关联列（它是"某个对多导航里的第一条"），桥接不上
+    if (next.kind === 'one' && next.ofMany)
+      throw new Error(`${where}: '${hop}' is a oneOfMany relation and cannot be part of a path`);
     hops.push(next);
     current = next.target;
   }
@@ -555,7 +561,8 @@ function check(entities: Record<string, Entity>, key: string, name: string, rel:
   const source = entities[key]!;
   const target = entities[rel.target];
   if (!target) throw new Error(`${where}: unknown entity '${rel.target}'`);
-  if (name in source.columns) throw new Error(`${where} has the same name as a column`);
+  // 看声明的列（fields）：值对象在 columns 里是展开后的 'address.city'，按它查会漏掉与值对象同名的导航
+  if (name in source.fields) throw new Error(`${where} has the same name as a column`);
   // 直达关系的各段在定义它们的地方已经核对过；任意条件的关系没有关联列要核对
   if (rel.path || rel.on || (rel.kind === 'one' && rel.ofMany)) return;
   const columns = (entity: Entity, entityKey: string, names: readonly string[], what: string) => {

@@ -32,10 +32,26 @@ import {
   type SqlWriter,
   type Session,
   type TransactionOptions,
+  type DatabaseErrorKind,
 } from '@zerodep-dev/easy-query-ts';
 
+/** DuckDB 的方言 */
 export class DuckDbDialect extends Dialect {
   readonly name = 'duckdb';
+
+  /** DuckDB 的错误没有码，按消息认："Constraint Error: Duplicate key …"、"… foreign key constraint …"、"NOT NULL constraint failed" */
+  override errorKind(error: unknown): DatabaseErrorKind | undefined {
+    const message = String(
+      typeof error === 'object' && error !== null
+        ? ((error as { message?: unknown }).message ?? '')
+        : error,
+    );
+    if (/Duplicate key|violates (primary key|unique) constraint/i.test(message)) return 'unique';
+    if (/foreign key constraint/i.test(message)) return 'foreignKey';
+    if (/NOT NULL constraint failed/i.test(message)) return 'notNull';
+    if (/write-write conflict|Conflict on (tuple|update)/i.test(message)) return 'serialization';
+    return undefined;
+  }
   override readonly supportsReturning = true;
   override readonly generatedKeys = 'returning';
   override readonly nullSafeEquals = 'IS NOT DISTINCT FROM';
@@ -77,6 +93,7 @@ export class DuckDbDialect extends Dialect {
   }
 
   override readonly supportsSavepoints = false;
+  override readonly nullOrder = 'last';
 
   override savepoint(): string {
     throw new Error('nested transactions are not supported by the duckdb dialect (no SAVEPOINT)');

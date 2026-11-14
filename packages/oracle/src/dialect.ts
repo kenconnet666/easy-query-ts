@@ -18,6 +18,7 @@ import {
   type QueryRunner,
   type SelectNode,
   type UpdateNode,
+  type DatabaseErrorKind,
 } from '@zerodep-dev/easy-query-ts';
 
 /** 支持的服务器版本 */
@@ -37,8 +38,30 @@ const CASE_TYPES: Record<string, string> = {
 
 const SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
 
+/** Oracle 的方言：按服务器版本（11.2 起）选分页、JSON、布尔等写法 */
 export class OracleDialect extends Dialect {
   readonly name: string = 'oracle';
+
+  /** oracledb 的 errorNum：ORA-00001 唯一键，02291 / 02292 外键，01400 / 01407 非空，00060 死锁，08177 串行化失败 */
+  override errorKind(error: unknown): DatabaseErrorKind | undefined {
+    switch (errorField(error, 'errorNum')) {
+      case 1:
+        return 'unique';
+      case 2291:
+      case 2292:
+        return 'foreignKey';
+      case 1400:
+      case 1407:
+        return 'notNull';
+      case 60:
+        return 'deadlock';
+      case 8177:
+        return 'serialization';
+      default:
+        return undefined;
+    }
+  }
+  override readonly nullOrder: 'smallest' | 'largest' | 'last' = 'largest';
   /** CASE 分支里参数要转成的类型（Oracle 兼容的库按自己的类型名覆盖） */
   protected readonly caseTypes: Record<string, string> = CASE_TYPES;
   /** Oracle 一条语句最多 65535 个绑定变量；IN 列表最多 1000 项另由核心切分 */
@@ -390,4 +413,11 @@ export class OracleDialect extends Dialect {
   override renameTable(from: string, to: string): string {
     return `ALTER TABLE ${this.table(from)} RENAME TO ${this.quote(bareName(to))}`;
   }
+}
+
+/** 驱动的错误对象上的一个字段（错误不一定是对象） */
+function errorField(error: unknown, name: string): unknown {
+  return typeof error === 'object' && error !== null
+    ? (error as Record<string, unknown>)[name]
+    : undefined;
 }

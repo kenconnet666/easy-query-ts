@@ -78,7 +78,7 @@ export function byTime<C extends string>(
   },
 ): ShardingRule<C> {
   const toDate = (value: unknown): Date => {
-    const d = value instanceof Date ? value : new Date(String(value));
+    const d = value instanceof Date ? value : new Date(utcIso(String(value)));
     if (Number.isNaN(d.getTime())) throw new Error(`byTime: '${String(value)}' is not a date`);
     return d;
   };
@@ -139,6 +139,18 @@ export function byTime<C extends string>(
       return between(base, from, to);
     },
   };
+}
+
+/**
+ * 时间文字 → 能交给 Date 的 ISO 写法。没写时区的（'2026-01-02 03:04:05'、日历日期时间类型的文字）按 UTC 读：
+ * Date 会按本机时区读它，两台时区不同的机器就把同一行路由到不同的表。结尾的 [Asia/Shanghai] 这类时区名去掉，偏移已经在前面
+ */
+function utcIso(text: string): string {
+  const iso = text
+    .trim()
+    .replace(/\[[^\]]*\]$/, '')
+    .replace(' ', 'T');
+  return /T/.test(iso) && !/(Z|[+-]\d{2}(:?\d{2})?)$/i.test(iso) ? `${iso}Z` : iso;
 }
 
 /** 按年 / 月 / 日分表的简写 */

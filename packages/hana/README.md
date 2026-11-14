@@ -14,5 +14,7 @@ easy-query 的 TypeScript 版（[kenconnet666/easy-query-ts](https://github.com/
 - 事务的隔离级别、只读设置在 HANA 里是会话级的：适配器在事务结束、连接还回池之前改回默认值（`READ COMMITTED`、可写）。
 - 连接默认把 hdb 的 `packetSizeLimit` 提到 16 MB（hdb 默认 128 KB，多行插入的语句发不出去）；要别的值在 `hana({ … })` 里自己给。
 
-- 总览与各特性文档：https://github.com/kenconnet666/easy-query-ts/tree/master/docs
+- 进程退出、测试结束时 `closeHana(adapter)` 关掉连接池里空闲的连接。
+
+- 总览与各特性文档：https://easy-query-ts.zerodep.dpdns.org
 - 许可证：Apache-2.0
