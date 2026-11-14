@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { createDb } from '@zerodep-dev/easy-query-ts';
+import { caseWhen, createDb, sql } from '@zerodep-dev/easy-query-ts';
 import { ddlSchema, Gadget, Post, schema, User } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { MsSql, mssql } from '../src/index.ts';
 
@@ -48,6 +48,34 @@ describe('sqlserver: SQL text', () => {
       sql,
       'SELECT CASE WHEN t0.[age] >= @p1 THEN 1 ELSE 0 END AS [c0] FROM [t_user] t0',
     );
+  });
+
+  it('条件当排序键也写成 CASE WHEN；sql 片段放在条件里原样输出，不补 = 1', () => {
+    const { sql: text } = db
+      .queryable(User)
+      .where((u) => sql<boolean>`${u.age} % 2 = 0`)
+      .orderBy((u) => [u.age.isNull().asc(), u.age.desc()])
+      .select((u) => u.id)
+      .toSQL();
+    assert.equal(
+      text,
+      'SELECT t0.[id] AS [c0] FROM [t_user] t0 WHERE t0.[age] % 2 = 0' +
+        ' ORDER BY CASE WHEN t0.[age] IS NULL THEN 1 ELSE 0 END ASC, t0.[age] DESC',
+    );
+  });
+
+  it('分组键带参数：GROUP BY 照抄 SELECT 里的写法，用的还是同几个 @p 参数', () => {
+    const { sql: text, params } = db
+      .queryable(User)
+      .groupBy((u) => ({ stage: caseWhen(u.age.ge(18), '成年').else('未成年') }))
+      .select((g) => ({ stage: g.key.stage, n: g.count() }))
+      .toSQL();
+    assert.equal(
+      text,
+      'SELECT CASE WHEN t0.[age] >= @p1 THEN @p2 ELSE @p3 END AS [c0], COUNT(*) AS [c1] FROM [t_user] t0' +
+        ' GROUP BY CASE WHEN t0.[age] >= @p1 THEN @p2 ELSE @p3 END',
+    );
+    assert.deepEqual(params, [18, '成年', '未成年']);
   });
 
   it('UPDATE / DELETE 写成 t0 … FROM；upsert 写成 MERGE；给自增列写值时打开 IDENTITY_INSERT', () => {

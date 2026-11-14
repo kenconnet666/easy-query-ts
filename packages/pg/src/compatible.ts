@@ -37,9 +37,18 @@ export class OpenGaussDialect extends PostgresDialect {
     return ` ON DUPLICATE KEY UPDATE ${c.update.map((u) => `${this.quote(u)} = VALUES(${this.quote(u)})`).join(', ')}`;
   }
 
-  /** 7.0 没有 websearch_to_tsquery 和 cardinality：全文检索用到时报不支持，数组长度换成 array_length（空数组是 NULL） */
+  /**
+   * 7.0 没有 websearch_to_tsquery 和 cardinality：全文检索用到时报不支持，数组长度换成 array_length（空数组是 NULL）。
+   * 也没有 jsonb 的 #- 运算符和 jsonb_build_array(jsonb)：jsonRemove、jsonAppend 报不支持
+   */
   protected override functions(): Record<string, FunctionRenderer> {
-    const { 'pg.ts_match': _match, 'pg.ts_rank': _rank, ...functions } = super.functions();
+    const {
+      'pg.ts_match': _match,
+      'pg.ts_rank': _rank,
+      json_remove: _remove,
+      json_append: _append,
+      ...functions
+    } = super.functions();
     return { ...functions, array_length: (a) => `coalesce(array_length(${a[0]}, 1), 0)` };
   }
 

@@ -36,9 +36,18 @@ import {
   sqlString,
 } from '@zerodep-dev/easy-query-ts';
 
+/** 自增列用的序列：建在表所在的 schema 里（不然另一个 schema 的同名表会共用一个序列），建表、删表时都按它找 */
+function sequenceName(entity: Entity, prop: string): string {
+  const parts = entity.table.split('.');
+  const name = `seq_${parts.pop()}_${entity.columnNames[prop]}`;
+  return [...parts, name].join('.');
+}
+
 /** DuckDB 的方言 */
 export class DuckDbDialect extends Dialect {
   readonly name = 'duckdb';
+  /** 分组键带参数时写 SELECT 列的序号（同 PG）：两份参数认不出是同一个表达式 */
+  override readonly groupByOrdinal = true;
 
   /** DuckDB 的错误没有码，按消息认："Constraint Error: Duplicate key …"、"… foreign key constraint …"、"NOT NULL constraint failed" */
   override errorKind(error: unknown): DatabaseErrorKind | undefined {
@@ -170,8 +179,8 @@ export class DuckDbDialect extends Dialect {
     const columns = Object.fromEntries(
       Object.entries(entity.columns).map(([prop, column]) => {
         if (!column.options.generated) return [prop, column];
-        const name = `seq_${entity.table.split('.').pop()}_${entity.columnNames[prop]}`;
-        sequences.push(`CREATE SEQUENCE IF NOT EXISTS ${this.quote(name)}`);
+        const name = sequenceName(entity, prop);
+        sequences.push(`CREATE SEQUENCE IF NOT EXISTS ${this.table(name)}`);
         const options = { ...column.options, generated: false, dbDefault: `nextval('${name}')` };
         return [
           prop,
@@ -184,6 +193,14 @@ export class DuckDbDialect extends Dialect {
     return [...sequences, super.createTable({ ...entity, columns }, ifNotExists, foreignKeys)].join(
       '; ',
     );
+  }
+
+  /** 连同自增列的序列一起删：留着的话，重建的表接着旧序列的值编号 */
+  override dropTable(table: string, entity?: Entity): string {
+    const sequences = Object.entries(entity?.columns ?? {})
+      .filter(([, column]) => column.options.generated)
+      .map(([prop]) => `DROP SEQUENCE IF EXISTS ${this.table(sequenceName(entity!, prop))}`);
+    return [super.dropTable(table, entity), ...sequences].join('; ');
   }
 
   override readonly introspectsSchemas = true;

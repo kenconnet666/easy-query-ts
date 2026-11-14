@@ -528,7 +528,7 @@ export class Db<S extends AnySchema> {
     await this.runDdl(
       targets
         .filter((e) => findTable(tables, e.table))
-        .map((e) => this.ctx.dialect.dropTable(e.table)),
+        .map((e) => this.ctx.dialect.dropTable(e.table, e)),
     );
   }
 

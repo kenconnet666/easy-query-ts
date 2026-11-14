@@ -206,6 +206,7 @@ export type {
 export {
   coalesceEach,
   dateFormatParts,
+  isBoundParam,
   jsonPathParts,
   pgJsonPath,
   standardJsonPath,

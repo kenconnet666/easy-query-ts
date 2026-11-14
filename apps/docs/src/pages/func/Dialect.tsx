@@ -304,7 +304,7 @@ export default _component(() => () => (
           [
             'openGauss 7.0',
             '`Pg`',
-            '没有 `websearch_to_tsquery`：`Pg.fulltext` 报不支持。`Pg.array().length()` 换成 `array_length`。JSONPath 只认它自己的路径写法，`pathMatch` 的谓词语法用不了',
+            '没有 `websearch_to_tsquery`：`Pg.fulltext` 报不支持。`Pg.array().length()` 换成 `array_length`。JSONPath 只认它自己的路径写法，`pathMatch` 的谓词语法用不了。没有 jsonb 的 `#-` 与 `jsonb_build_array`：`jsonRemove`、`jsonAppend` 报不支持',
           ],
           ['KingbaseES（PG 模式）', '`Pg`', '方言与 PostgreSQL 相同；这些函数没有单独核对过'],
           [

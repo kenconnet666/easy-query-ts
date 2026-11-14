@@ -212,7 +212,7 @@ export class HanaDialect extends Dialect {
    * upsert 写成 MERGE：USING 里每行一个 SELECT … FROM DUMMY（多行 UNION ALL），按 target 列匹配；ignore 时没有 WHEN MATCHED。
    */
   override insert(q: InsertNode, w: SqlWriter = new SqlWriter()): string {
-    if (!q.conflict && q.rows.length === 1) return super.insert(q, w);
+    if (q.source || (!q.conflict && q.rows.length === 1)) return super.insert(q, w);
     const cols = q.columns.map((c) => this.quote(c));
     // 渲染时参数按出现顺序收集，所以 source 只渲染一次
     const source = q.rows

@@ -122,6 +122,9 @@ export class MsSqlDialect extends Dialect {
     return `@p${index}`;
   }
 
+  /** 参数按名字绑定：分组键里的 @p1 与 SELECT 里的是同一个参数 */
+  override readonly reusablePlaceholders = true;
+
   // ---- 值与条件 ----
 
   /** 条件不能直接当值、BIT 列不能直接当条件 */
@@ -342,7 +345,8 @@ export class MsSqlDialect extends Dialect {
         json('OPENJSON'),
         `(SELECT COUNT(*) FROM OPENJSON(${a[0]}, ${standardJsonPath(a[1]!)}))`
       ),
-      cast_string: (a) => `CAST(${a[0]} AS NVARCHAR(4000))`,
+      // 不限长：字符串参数绑成 NVARCHAR(MAX)，拼进去结果也是 MAX；递归 CTE 两部分的类型要完全一致
+      cast_string: (a) => `CAST(${a[0]} AS NVARCHAR(MAX))`,
       cast_double: (a) => `CAST(${a[0]} AS FLOAT)`,
       cast_datetime: (a) => `CAST(${a[0]} AS DATETIME2(3))`,
       ...msSqlFunctions,

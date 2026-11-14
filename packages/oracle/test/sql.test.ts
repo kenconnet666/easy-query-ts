@@ -10,6 +10,20 @@ describe('oracle: SQL text', () => {
   const db = createDb({ schema, adapter: oracle(pool) });
   const old = createDb({ schema, adapter: oracle(pool, { version: '11.2' }) });
 
+  it('分页的查询不能加 FOR UPDATE（ORA-02014）：渲染时就报出来，说明怎么改', () => {
+    for (const target of [db, old])
+      assert.throws(
+        () =>
+          target
+            .queryable(User)
+            .orderBy((u) => u.id)
+            .limit(2)
+            .forUpdate()
+            .toSQL(),
+        /forUpdate\(\) with limit\(\).*not supported by the oracle dialect.*db\.lock/,
+      );
+  });
+
   it(':n 参数、表别名不写 AS、OFFSET … FETCH；日期时间参数写成 TO_TIMESTAMP', () => {
     const { sql, params } = db
       .queryable(User)

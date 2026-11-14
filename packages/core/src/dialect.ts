@@ -48,6 +48,11 @@ export class SqlWriter {
 
 export type FunctionRenderer = (args: string[]) => string;
 
+/** 函数渲染器拿到的这一项是不是一个绑定参数（而不是列、字面量或表达式） */
+export function isBoundParam(arg: string): boolean {
+  return new RegExp(`^${PARAM_MARK.source}$`).test(arg);
+}
+
 /** 渲染函数参数用：参数先记下、返回记号，函数拼好文字后再按记号的顺序绑定 */
 class DeferredWriter extends SqlWriter {
   readonly values: unknown[] = [];
@@ -269,7 +274,7 @@ export abstract class Dialect {
   /** 聚合函数里的 ORDER BY 子句（没有时为空） */
   protected aggOrder(order: readonly OrderNode[], w: SqlWriter): string {
     if (order.length === 0) return '';
-    return ` ORDER BY ${order.map((o) => this.node(o.e, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
+    return ` ORDER BY ${order.map((o) => this.value(o.e, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
   }
 
   /**
@@ -300,9 +305,12 @@ export abstract class Dialect {
     return `CASE WHEN ${this.node(n, w)} THEN 1 ELSE 0 END`;
   }
 
-  /** 当作条件用的表达式（WHERE、AND / OR / NOT 的项、CASE 的 WHEN） */
+  /**
+   * 当作条件用的表达式（WHERE、AND / OR / NOT 的项、CASE 的 WHEN）。
+   * sql`…` 片段是用户写的原生 SQL，放在条件的位置就是一段条件，原样输出
+   */
   protected condition(n: Node, w: SqlWriter): string {
-    if (this.booleanValues || this.isCondition(n)) return this.node(n, w);
+    if (this.booleanValues || this.isCondition(n) || n.k === 'raw') return this.node(n, w);
     return `${this.node(n, w)} = 1`;
   }
 
@@ -568,7 +576,8 @@ export abstract class Dialect {
   /** DROP TABLE 认不认 IF EXISTS（HANA 不认） */
   readonly dropIfExists: boolean = true;
 
-  dropTable(table: string): string {
+  /** 删表；entity 是这张表的实体（dropTables 传），建表时连带建了别的对象（DuckDB 的自增序列）的方言据此一起删 */
+  dropTable(table: string, _entity?: Entity): string {
     return `DROP TABLE ${this.dropIfExists ? 'IF EXISTS ' : ''}${this.table(table)}`;
   }
 
@@ -723,13 +732,22 @@ export abstract class Dialect {
    */
   readonly groupByOrdinal: boolean = false;
 
-  /** GROUP BY、ORDER BY 里的一项：带参数、也选出来了的写成序号，其余照常渲染 */
-  private selectedKey(key: Node, q: SelectNode, w: SqlWriter): string {
-    if (this.groupByOrdinal && hasParam(key)) {
+  /**
+   * 占位符带编号、同一个编号写两次绑的是同一个值（SQL Server 的 @p1）：分组键带参数时，把 SELECT 里那一列的写法原样再写一次，
+   * 用的还是那几个参数，库认得出是同一个表达式
+   */
+  readonly reusablePlaceholders: boolean = false;
+
+  /**
+   * GROUP BY、ORDER BY 里的一项：带参数、也选出来了的写成序号或照抄 SELECT 里的写法，其余当值渲染
+   * （条件当排序、分组键时，没有布尔值的库要写成 CASE WHEN，和 SELECT 里的写法一致才认得出是同一个表达式）
+   */
+  private selectedKey(key: Node, q: SelectNode, selected: readonly string[], w: SqlWriter): string {
+    if ((this.groupByOrdinal || this.reusablePlaceholders) && hasParam(key)) {
       const index = q.columns.findIndex((column) => column.e === key);
-      if (index >= 0) return String(index + 1);
+      if (index >= 0) return this.groupByOrdinal ? String(index + 1) : selected[index]!;
     }
-    return this.node(key, w);
+    return this.value(key, w);
   }
 
   /** GROUP BY 子句里的键列表：rollup / cube 默认写成 ROLLUP(…) / CUBE(…)（PG、HANA）；MySQL 等写法不同的库覆盖 */
@@ -792,10 +810,11 @@ export abstract class Dialect {
   }
 
   private selectCore(q: SelectNode, w: SqlWriter): string {
+    const selected = q.columns.map((c) => this.value(c.e, w));
     const cols =
       q.columns.length === 0
         ? '1'
-        : q.columns.map((c) => `${this.value(c.e, w)} AS ${this.quote(c.as)}`).join(', ');
+        : q.columns.map((c, i) => `${selected[i]} AS ${this.quote(c.as)}`).join(', ');
     const hints = q.hints?.length ? `/*+ ${q.hints.join(' ')} */ ` : '';
     const distinct = q.distinctOn?.length
       ? this.distinctOn(q.distinctOn.map((d) => this.node(d, w)))
@@ -807,12 +826,12 @@ export abstract class Dialect {
     if (q.where.length > 0) s += ` WHERE ${this.conjunction(q.where, w)}`;
     if (q.groupBy.length > 0)
       s += ` GROUP BY ${this.groupByKeys(
-        q.groupBy.map((g) => this.selectedKey(g, q, w)),
+        q.groupBy.map((g) => this.selectedKey(g, q, selected, w)),
         q.groupMode,
       )}`;
     if (q.having.length > 0) s += ` HAVING ${this.conjunction(q.having, w)}`;
     if (q.orderBy.length > 0)
-      s += ` ORDER BY ${q.orderBy.map((o) => this.selectedKey(o.e, q, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
+      s += ` ORDER BY ${q.orderBy.map((o) => this.selectedKey(o.e, q, selected, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`;
     s += this.limitOffset(q.limit, q.offset, q.orderBy.length > 0);
     if (q.forUpdate) s += this.rowLock(q.lockMode, q.lockWait);
     return s;
@@ -1003,7 +1022,7 @@ export abstract class Dialect {
           parts.push(`PARTITION BY ${n.partition.map((p) => this.node(p, w)).join(', ')}`);
         if (n.order.length > 0)
           parts.push(
-            `ORDER BY ${n.order.map((o) => this.node(o.e, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`,
+            `ORDER BY ${n.order.map((o) => this.value(o.e, w) + (o.desc ? ' DESC' : ' ASC')).join(', ')}`,
           );
         if (n.frame) parts.push(n.frame);
         return `${this.node(n.fn, w)} OVER (${parts.join(' ')})`;

@@ -18,6 +18,33 @@ describe('hana: SQL text', () => {
     adapter: hana({ host: 'unused', port: 0, user: 'x', password: 'x' }),
   });
 
+  it('writes INSERT … SELECT from a query as is, not as rows FROM DUMMY', () => {
+    const { sql } = db
+      .insert(Company)
+      .fromQuery(
+        db
+          .queryable(User)
+          .where((u) => u.age.ge(18))
+          .select((u) => ({ name: u.name })),
+      )
+      .toSQL();
+    assert.equal(
+      sql,
+      'INSERT INTO "t_company" ("name") SELECT t0."name" AS "c0" FROM "t_user" t0 WHERE t0."age" >= ?',
+    );
+  });
+
+  it('wraps a bound side of diff in TO_TIMESTAMP: hdb rejects date-only text for a TIMESTAMP parameter', () => {
+    const { sql } = db
+      .queryable(User)
+      .select((u) => ({ days: u.createdAt.diff(new Date('2026-01-01T00:00:00Z'), 'day') }))
+      .toSQL();
+    assert.equal(
+      sql,
+      'SELECT CAST(SECONDS_BETWEEN(TO_TIMESTAMP(?), t0."created_at") / 86400 AS BIGINT) AS "c0" FROM "t_user" t0',
+    );
+  });
+
   it('writes multi-row inserts as SELECT … FROM DUMMY UNION ALL', () => {
     const [s] = db
       .insert(Post)

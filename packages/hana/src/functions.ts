@@ -8,6 +8,7 @@
 import {
   codecs,
   dialectFn,
+  isBoundParam,
   jsonPathParts,
   sqlString,
   unquoteSql,
@@ -60,6 +61,9 @@ export const Hana = {
 /** add / diff 的时、分、秒折合多少秒 */
 const HANA_SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
 
+/** 绑定参数当时刻用时写成 TO_TIMESTAMP(?)，别的原样 */
+const timestampArg = (arg: string) => (isBoundParam(arg) ? `TO_TIMESTAMP(${arg})` : arg);
+
 const columnList = (cols: string[]) => (cols.length === 1 ? cols[0]! : `(${cols.join(', ')})`);
 
 /** 加进 HANA 方言的函数表 */
@@ -76,8 +80,9 @@ export const hanaFunctions: Record<string, FunctionRenderer> = {
     if (unit === 'day') return `ADD_DAYS(${a[0]}, ${a[1]})`;
     return `ADD_SECONDS(${a[0]}, (${a[1]}) * ${HANA_SECONDS[unit]})`;
   },
+  // 参数那一端包上 TO_TIMESTAMP：不然服务器把参数推成 TIMESTAMP，hdb 不收只有日期的文字（'2026-01-01'）
   diff_time: (a) =>
-    `CAST(SECONDS_BETWEEN(${a[1]}, ${a[0]}) / ${HANA_SECONDS[unquoteSql(a[2]!)]} AS BIGINT)`,
+    `CAST(SECONDS_BETWEEN(${timestampArg(a[1]!)}, ${timestampArg(a[0]!)}) / ${HANA_SECONDS[unquoteSql(a[2]!)]} AS BIGINT)`,
   hour: (a) => `HOUR(${a[0]})`,
   minute: (a) => `MINUTE(${a[0]})`,
   second: (a) => `CAST(FLOOR(SECOND(${a[0]})) AS INTEGER)`,

@@ -54,6 +54,7 @@ export default _component(() => () => (
       <P text="要锁一批行，或者要带条件时，加在查询上。切换方言看 SQL Server 的表提示。" />
       <SqlExample example={lock} title="锁一行，再改" />
       <SqlExample example={forUpdateThenWrite} title="锁一批，再改" />
+      <Note text="Oracle 不允许分页的查询加 FOR UPDATE（ORA-02014）：`limit`、`offset`、`first` 和 `forUpdate` 一起用时渲染就报错。锁一行用 `db.lock(实体, 主键)`；锁一批先查出主键，再按主键 `forUpdate().toList()`。" />
       <CodeBlock code={locks} lang="ts" />
       <SimpleTable
         head={['方法', '渲染', '没有的库']}

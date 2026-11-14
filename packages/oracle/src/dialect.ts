@@ -127,8 +127,14 @@ export class OracleDialect extends Dialect {
   }
 
   override select(q: SelectNode, w: SqlWriter = new SqlWriter()): string {
-    if (!this.atLeast('12.1') && (q.limit !== undefined || (q.offset ?? 0) > 0))
-      return this.rownumPage(q, w);
+    const paged = q.limit !== undefined || (q.offset ?? 0) > 0;
+    // FETCH FIRST、ROWNUM 子查询都不能和 FOR UPDATE 一起用（ORA-02014）：提前说清楚，不让库报一句看不出原因的错
+    if (paged && q.forUpdate)
+      throw new Error(
+        'forUpdate() with limit() / offset() / first() is not supported by the oracle dialect (ORA-02014); ' +
+          'lock one row with db.lock(Entity, key), or pick the keys first and lock them with forUpdate().toList()',
+      );
+    if (!this.atLeast('12.1') && paged) return this.rownumPage(q, w);
     return super.select(q, w);
   }
 
