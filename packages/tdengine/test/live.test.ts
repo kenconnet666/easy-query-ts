@@ -6,7 +6,14 @@
 import assert from 'node:assert/strict';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import { sqlConnect, WSConfig, type WsSql } from '@tdengine/websocket';
-import { col, createDb, defineSchema, entity, type Statement } from '@zerodep-dev/easy-query-ts';
+import {
+  col,
+  createDb,
+  defineSchema,
+  entity,
+  text,
+  type Statement,
+} from '@zerodep-dev/easy-query-ts';
 import { tdengine } from '../src/index.ts';
 
 const Reading = entity(
@@ -114,6 +121,17 @@ if (!raw) {
         { device: 'a', n: 2, total: 5.5 },
         { device: "b'x", n: 1, total: 2.5 },
       ]);
+    });
+
+    it('拼接：为 NULL 的项当空串（没有 COALESCE，写成 CASE）', async () => {
+      assert.deepEqual(
+        await db
+          .queryable(Reading)
+          .orderBy((r) => r.ts)
+          .select((r) => text`${r.device}/${r.count}`)
+          .toList(),
+        ['a/10', "b'x/20", 'a/'],
+      );
     });
 
     it('同一时间戳再插入就是覆盖给出的列；删除按条件；没有 UPDATE', async () => {

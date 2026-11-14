@@ -9,6 +9,7 @@ import {
   createDb,
   defineSchema,
   entity,
+  text,
   win,
   type Adapter,
   type Statement,
@@ -186,6 +187,25 @@ export function analyticSuite(name: string, env: AnalyticEnv, checks: AnalyticCh
           hasTags: true,
           adult: true,
         },
+      );
+    });
+
+    it('拼接：为 NULL 的项当空串', async () => {
+      // bob 没有年龄；公司表是空的，导航出来的名字都是 NULL
+      assert.deepEqual(
+        await db
+          .queryable(User)
+          .orderBy((u) => u.id)
+          .select((u) => ({
+            label: text`${u.name}/${u.age}`,
+            joined: u.name.concat('@', u.company.name),
+          }))
+          .toList(),
+        [
+          { label: 'alice/30', joined: 'alice@' },
+          { label: 'bob/', joined: 'bob@' },
+          { label: '张三/17', joined: '张三@' },
+        ],
       );
     });
 
