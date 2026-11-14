@@ -10,6 +10,7 @@
  */
 import type { DbColumn, DbTable } from '@zerodep-dev/easy-query-ts';
 
+/** entitySource()（eqts pull）的选项：生成哪些表、实体怎么命名 */
 export interface EntitySourceOptions {
   /** 只生成这些表（默认全部） */
   readonly tables?: readonly string[];
@@ -28,7 +29,8 @@ export function entitySource(
   const picked = options.tables
     ? tables.filter((t) => options.tables!.some((n) => n.toLowerCase() === t.name.toLowerCase()))
     : tables;
-  const names = new Map(picked.map((t) => [t.name, entityName(t.name, prefix)]));
+  const taken = new Set<string>();
+  const names = new Map(picked.map((t) => [t.name, entityName(t.name, prefix, taken)]));
   const lines = [
     '// 由 eqts pull 根据库里的表结构生成；改动表结构后可以重新生成，或改这里再用 db.planSync() 同步回库',
     `import { col, defineSchema, entity } from '${options.importFrom ?? '@zerodep-dev/easy-query-ts'}';`,
@@ -41,7 +43,7 @@ export function entitySource(
 
 function entityLines(table: DbTable, name: string): string[] {
   const out: string[] = [];
-  if (table.comment) out.push(`/** ${table.comment} */`);
+  if (table.comment) out.push(`/** ${inComment(table.comment)} */`);
   out.push(`export const ${name} = entity(${quote(table.name)}, {`);
   const props = new Map(table.columns.map((c) => [c.name, propertyName(c.name)]));
   for (const column of table.columns) {
@@ -60,7 +62,7 @@ function entityLines(table: DbTable, name: string): string[] {
     ]
       .filter(Boolean)
       .join('；');
-    out.push(`  ${safeKey(prop)}: ${expr},${trailing ? ` // ${trailing}` : ''}`);
+    out.push(`  ${safeKey(prop)}: ${expr},${trailing ? ` // ${inComment(trailing)}` : ''}`);
   }
   const options: string[] = [];
   if (table.comment) options.push(`comment: ${quote(table.comment)}`);
@@ -180,6 +182,9 @@ function columnBuilder(column: DbColumn): { builder: string; note?: string } {
     return { builder: 'col.double()' };
   if (base === 'date') return { builder: 'col.date()' };
   if (base === 'time') return { builder: 'col.time()' };
+  // PG 的 timestamp with time zone：不带精度时上面按括号截断去不掉后半句，带精度时又只剩下 timestamp
+  if (base === 'timestamptz' || /^timestamp\b.*with time zone$/.test(t))
+    return { builder: 'col.datetime({ timeZone: true })' };
   if (/^(datetime|timestamp|seconddate)$/.test(base)) return { builder: 'col.datetime()' };
   if (/^(json|jsonb)$/.test(base))
     return { builder: 'col.json<unknown>()', note: '补上 JSON 的类型' };
@@ -197,15 +202,28 @@ function columnBuilder(column: DbColumn): { builder: string; note?: string } {
   };
 }
 
-/** t_order_item → OrderItem（去掉前缀、schema 前缀） */
-function entityName(table: string, prefix: string): string {
+/**
+ * t_order_item → OrderItem（去掉前缀、schema 前缀）。结果要能当变量名：别的字符去掉，数字开头的前面加 T（2024_orders → T2024Orders）；
+ * 两张表算出同一个名字（t_user 与 user）时后一张加序号
+ */
+function entityName(table: string, prefix: string, taken: Set<string>): string {
   const bare = table.split('.').pop()!;
   const trimmed =
     prefix && bare.toLowerCase().startsWith(prefix.toLowerCase())
       ? bare.slice(prefix.length)
       : bare;
-  const name = propertyName(trimmed);
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  const name = propertyName(trimmed).replace(/[^\w$]/g, '');
+  const capital = name.charAt(0).toUpperCase() + name.slice(1);
+  const base = /^[A-Za-z_$]/.test(capital) ? capital : `T${capital}`;
+  let unique = base;
+  for (let n = 2; taken.has(unique); n++) unique = `${base}${n}`;
+  taken.add(unique);
+  return unique;
+}
+
+/** 写进注释的文字（表注释、默认值都是库里读出来的）：换行并成空格，结束注释的记号拆开，后面的内容不会变成代码 */
+function inComment(text: string): string {
+  return text.replace(/\s*[\r\n\u2028\u2029]+\s*/g, ' ').replaceAll('*/', '* /');
 }
 
 /** shelf_id → shelfId；全大写的列名（HANA、Oracle）先转小写 */
@@ -241,6 +259,17 @@ function list(items: readonly string[]): string {
   return items.length === 1 ? quote(items[0]!) : `[${items.map(quote).join(', ')}]`;
 }
 
+const BACKSLASH = String.fromCharCode(92);
+
+/** 单引号的字符串字面量：反斜杠、引号、换行与控制字符都转义（库里的名字、注释、默认值什么都可能有） */
 function quote(text: string): string {
-  return `'${text.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+  let escaped = '';
+  for (const c of text) {
+    const code = c.codePointAt(0)!;
+    if (c === BACKSLASH || c === "'") escaped += BACKSLASH + c;
+    else if (code < 0x20 || code === 0x2028 || code === 0x2029)
+      escaped += `${BACKSLASH}u${code.toString(16).padStart(4, '0')}`;
+    else escaped += c;
+  }
+  return `'${escaped}'`;
 }
