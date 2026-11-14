@@ -55,11 +55,17 @@ for (const url of urls) {
   describe(`postgres ${new URL(url).port}: serialization failures`, () => {
     it('are reported as SerializationError and go away with retries', async () => {
       const { db } = await seed(await open());
-      // 三个可串行化的事务都先数行数再按它插入：相互冲突，库会回滚其中几个
-      const numbered = (retries: number) =>
+      // 三个可串行化的事务都先数行数再按它插入：相互冲突，库会回滚其中几个。
+      // 第一轮等三个都数完再插入，冲突一定发生（不等的话，CI 上可能一个做完另一个才开始，碰不上）
+      let counted = 0;
+      let allCounted!: () => void;
+      const barrier = new Promise<void>((resolve) => (allCounted = resolve));
+      const numbered = (retries: number, wait = false) =>
         db.transaction(
           async (tx) => {
             const n = await tx.queryable(Post).count();
+            if (wait && ++counted === 3) allCounted();
+            if (wait) await barrier;
             await tx
               .insert(Post)
               .values({ userId: 1, title: `no ${n}`, amount: '1.00' })
@@ -67,7 +73,11 @@ for (const url of urls) {
           },
           { isolation: 'serializable', retries },
         );
-      const once = await Promise.allSettled([numbered(0), numbered(0), numbered(0)]);
+      const once = await Promise.allSettled([
+        numbered(0, true),
+        numbered(0, true),
+        numbered(0, true),
+      ]);
       const failed = once.filter((r) => r.status === 'rejected');
       assert.ok(failed.length > 0, 'expected at least one serialization failure');
       for (const r of failed) assert.ok(r.reason instanceof SerializationError, String(r.reason));
