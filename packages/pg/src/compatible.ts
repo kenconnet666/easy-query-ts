@@ -10,6 +10,11 @@ import { PostgresDialect } from './dialect.ts';
 export class OpenGaussDialect extends PostgresDialect {
   override readonly name: string = 'opengauss';
 
+  /** 内核是老版本的 PG，没有 hashtextextended：用 32 位的 hashtext */
+  protected override lockKey(key: string): string {
+    return `hashtext(${key}::text)`;
+  }
+
   /** 自增列写成 SERIAL / BIGSERIAL（不支持 GENERATED … AS IDENTITY） */
   override columnType(kind: string, o: ColumnOptions): string {
     if (o.generated && !o.dbType) return kind === 'int' ? 'SERIAL' : 'BIGSERIAL';

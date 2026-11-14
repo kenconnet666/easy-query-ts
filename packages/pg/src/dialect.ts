@@ -277,8 +277,13 @@ export class PostgresDialect extends Dialect {
   override advisoryLockStatement(key: string, wait: boolean): string {
     return wait
       ? // pg_advisory_xact_lock 返回 void：拿到锁之后才会产出这一行
-        `SELECT 1 AS ok FROM (SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))) eq_l`
-      : `SELECT pg_try_advisory_xact_lock(hashtextextended(${key}, 0)) AS ok`;
+        `SELECT 1 AS ok FROM (SELECT pg_advisory_xact_lock(${this.lockKey(key)})) eq_l`
+      : `SELECT pg_try_advisory_xact_lock(${this.lockKey(key)}) AS ok`;
+  }
+
+  /** 锁的名字哈希成整数的写法 */
+  protected lockKey(key: string): string {
+    return `hashtextextended(${key}, 0)`;
   }
 
   override notifyStatement(channel: string, payload: string): string {

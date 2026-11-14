@@ -37,6 +37,8 @@ import {
   type UpdateNode,
   sqlStateKind,
   type DatabaseErrorKind,
+  schemaOf,
+  type TableIndex,
 } from '@zerodep-dev/easy-query-ts';
 
 const SECONDS: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
@@ -271,6 +273,15 @@ export class Db2Dialect extends Dialect {
   }
 
   override readonly introspectsSchemas = true;
+
+  /** 不带 schema 的索引名落在当前 schema，不跟着表走：表名带前缀时索引名也带上，免得和当前 schema 里同名的索引撞上 */
+  override createIndex(table: string, index: TableIndex, ifNotExists: boolean): string {
+    const schemaName = schemaOf(table);
+    const sql = super.createIndex(table, index, ifNotExists);
+    if (schemaName === undefined) return sql;
+    const name = this.quote(index.name);
+    return sql.replace(name, `${this.quote(schemaName)}.${name}`);
+  }
 
   /** SYSCAT 目录（当前模式） */
   override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
