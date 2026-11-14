@@ -61,6 +61,12 @@ const PREREQUISITES: readonly Prerequisite[] = [
       'CREATE FULLTEXT INDEX ft_docs_profile_bio ON t_profile (bio, website) WITH PARSER ngram',
     ],
   },
+  {
+    // 表的 DDL 时间按秒记：刚重建完表、同一秒里开只读事务去读，报 ORA-01466（表定义已改变）
+    dialect: 'oracle',
+    needs: (key) => key === 'src/pages/write/write.examples.ts#readOnly',
+    statements: ['BEGIN DBMS_SESSION.SLEEP(1.5); END;'],
+  },
 ];
 
 /** 把一组示例标成同一个原因 */
@@ -120,6 +126,7 @@ export const KNOWN_DOCS_FAILURES: Record<string, Record<string, string>> = {
     ),
   },
   dameng: { ...UPPER_CASE_NAMES, ...GROUP_KEY_PARAMS },
+  db2: { ...UPPER_CASE_NAMES, ...GROUP_KEY_PARAMS },
   oracle: {
     ...UPPER_CASE_NAMES,
     ...GROUP_KEY_PARAMS,
