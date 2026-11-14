@@ -254,4 +254,5 @@ easy-query 的 TS 版。阶段编号沿用迁移前 vue-tsx-pro 的 ROADMAP，�
       `infra/dev/hana/volume.sh save / restore` 把卷存成约 100 MB 的包，本机实测恢复 53 秒、启动 31 秒
 - [x] 26.3 修 HANA 适配器在实库上暴露的问题（之前不在 CI，41 个用例失败）：`SET TRANSACTION` 的只读与隔离级别留在连接上、
       带导航的 UPDATE 写法、NCLOB（json 列）读成字节、条件当值、AVG 丢小数位、JSON 路径、多行插入超出 hdb 的包大小
-- [x] 26.4 CI 的 `db-hana` 任务：数据卷按镜像与密码缓存，命中时不用再初始化
+- [x] 26.4 CI 的 `db-hana` 任务：数据卷按镜像与密码缓存，命中时不用再初始化。
+      runner 上实测：没命中时整个任务 5 分钟（初始化启动 3 分 7 秒，缓存 57 MiB），命中时 1 分 34 秒
