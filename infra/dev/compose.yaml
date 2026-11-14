@@ -12,12 +12,15 @@
 #   bash infra/dev/db.sh --profile oracle up -d   # 再加 Oracle 23ai Free（端口 31521，服务名 FREEPDB1，用户 eqts）
 #   bash infra/dev/db.sh --profile mariadb up -d  # 再加 MariaDB 11.4（端口 33307）
 #   bash infra/dev/db.sh stop
+# 每个服务的 mem_limit 与 memswap_limit 相同：超了就地报错，不去占交换区拖慢整台机器。
 # 密码与连接串在 .local/（不提交），首次由 db.sh 生成；实库测试从 .local/db.env 里的 EQTS_* 环境变量读连接。
 name: easy-query-ts-dev
 
 x-mysql: &mysql
   restart: unless-stopped
-  mem_limit: 1g
+  # 这个容器同时装着 C# 版（EasyQuerySharp）的测试库：1g 时顶着上限，建表慢到用例超时
+  mem_limit: 2g
+  memswap_limit: 2g
   environment:
     MYSQL_ROOT_PASSWORD: ${EQTS_DEV_MYSQL_PASSWORD:?run infra/dev/db.sh to create .local/db.env}
     MYSQL_DATABASE: eqts
@@ -67,6 +70,7 @@ services:
     image: mariadb:11.4.13@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620
     restart: unless-stopped
     mem_limit: 1g
+    memswap_limit: 1g
     environment:
       MARIADB_ROOT_PASSWORD: ${EQTS_DEV_MARIADB_PASSWORD:?run infra/dev/db.sh to create .local/db.env}
       MARIADB_DATABASE: eqts
@@ -89,6 +93,7 @@ services:
     image: postgres:17.11-bookworm@sha256:66aafa11cf15800a3c94763f7e11d1e7b2e37e5e84bc4ce027cb6e1e4bfaf4df
     restart: unless-stopped
     mem_limit: 1g
+    memswap_limit: 1g
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${EQTS_DEV_PG_PASSWORD:?run infra/dev/db.sh to create .local/db.env}
@@ -110,6 +115,7 @@ services:
     image: redis:8.2.3-alpine@sha256:08ad0b1d280850169a790dba1393ff7a90aef951fc19632cf4d3ce4f78e679ba
     restart: unless-stopped
     mem_limit: 256m
+    memswap_limit: 256m
     environment:
       REDISCLI_AUTH: ${EQTS_DEV_REDIS_PASSWORD:?run infra/dev/db.sh to create .local/db.env}
     command: [sh, -c, 'exec redis-server --requirepass "$$REDISCLI_AUTH" --save "" --appendonly no']
@@ -129,6 +135,7 @@ services:
     platform: linux/amd64
     restart: unless-stopped
     mem_limit: 2g
+    memswap_limit: 2g
     environment:
       ACCEPT_EULA: 'Y'
       MSSQL_PID: Developer
@@ -155,6 +162,7 @@ services:
     image: gvenzl/oracle-free:23-slim@sha256:6d61d267a3b978c24c5ac1790e62e927416a0aec446bd86e4b3a1527562757bd
     restart: unless-stopped
     mem_limit: 2g
+    memswap_limit: 2g
     environment:
       ORACLE_PASSWORD: ${EQTS_DEV_ORACLE_PASSWORD:?add EQTS_DEV_ORACLE_PASSWORD to .local/db.env}
       APP_USER: eqts
@@ -218,6 +226,7 @@ services:
     image: xuxuclassmate/dameng:latest@sha256:c4088323442747a45d58bd33ef59e657c9b85f9e7dd956ba60b36d04a35b141d
     restart: unless-stopped
     mem_limit: 2g
+    memswap_limit: 2g
     environment:
       SYSDBA_PWD: ${EQTS_DEV_DAMENG_PASSWORD:?run infra/dev/db.sh to add EQTS_DEV_DAMENG_PASSWORD}
       UNICODE_FLAG: 1
@@ -236,6 +245,7 @@ services:
     restart: unless-stopped
     privileged: true
     mem_limit: 2g
+    memswap_limit: 2g
     environment:
       GS_PASSWORD: ${EQTS_DEV_OPENGAUSS_PASSWORD:?run infra/dev/db.sh to add EQTS_DEV_OPENGAUSS_PASSWORD}
       TZ: Asia/Shanghai
@@ -250,6 +260,7 @@ services:
     image: clickhouse/clickhouse-server:25.8@sha256:0152dd511befe6a2c2ef53e930726179669b08116da78500b37c51c96ff5ee77
     restart: unless-stopped
     mem_limit: 2g
+    memswap_limit: 2g
     environment:
       CLICKHOUSE_USER: eqts
       CLICKHOUSE_PASSWORD: ${EQTS_DEV_CLICKHOUSE_PASSWORD:?run infra/dev/db.sh to add EQTS_DEV_CLICKHOUSE_PASSWORD}
@@ -270,6 +281,7 @@ services:
     image: apache/doris:all-in-one-4.1.3@sha256:82a5cabc7900ebcd3d080412d636c0cebd6602799fffe2605c652b2ea7d42609
     restart: unless-stopped
     mem_limit: 8g
+    memswap_limit: 8g
     ports:
       - '39030:9030'
       - '38030:8030'
@@ -281,6 +293,7 @@ services:
     restart: unless-stopped
     privileged: true
     mem_limit: 4g
+    memswap_limit: 4g
     environment:
       LICENSE: accept
       DB2INSTANCE: db2inst1
@@ -300,6 +313,7 @@ services:
     image: tdengine/tdengine:3.3.6.13@sha256:79d32ce8a42f64c7dbfc33946a36b3e176ea23c0cd695a1bc9e8aa889ca03b88
     restart: unless-stopped
     mem_limit: 2g
+    memswap_limit: 2g
     environment:
       TZ: UTC
     ports:
