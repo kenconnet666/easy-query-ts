@@ -161,8 +161,9 @@ services:
     profiles: [oracle]
     image: gvenzl/oracle-free:23-slim@sha256:6d61d267a3b978c24c5ac1790e62e927416a0aec446bd86e4b3a1527562757bd
     restart: unless-stopped
-    mem_limit: 2g
-    memswap_limit: 2g
+    # SGA 的共享内存约 1.6 GB 也算在上限里：2g 时进程内存一涨就顶在上限上反复回收，启动卡在重置密码那一步
+    mem_limit: 3g
+    memswap_limit: 3g
     environment:
       ORACLE_PASSWORD: ${EQTS_DEV_ORACLE_PASSWORD:?add EQTS_DEV_ORACLE_PASSWORD to .local/db.env}
       APP_USER: eqts
