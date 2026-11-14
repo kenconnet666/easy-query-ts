@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-duckdb",
-  "version": "0.2.8",
+  "version": "0.3.0",
   "description": "DuckDB dialect and driver adapter (@duckdb/node-api) for @zerodep-dev/easy-query-ts",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",

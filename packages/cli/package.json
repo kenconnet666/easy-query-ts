@@ -1,6 +1,6 @@
 {
   "name": "@zerodep-dev/easy-query-ts-cli",
-  "version": "0.2.8",
+  "version": "0.3.0",
   "description": "eqts command line: generate easy-query-ts entities from an existing database (eqts pull)",
   "license": "Apache-2.0",
   "author": "lionheart (https://github.com/kenconnet666)",
