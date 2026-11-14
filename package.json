@@ -15,11 +15,12 @@
     "typecheck": "tsc -p . --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo && pnpm --filter @easy-query-ts/docs typecheck",
     "test": "vitest run --configLoader native",
     "test:consumer": "node tests/consumer/run.mjs",
-    "check": "pnpm lint && pnpm format:check && pnpm refs:check && pnpm text:check",
+    "check": "pnpm lint && pnpm format:check && pnpm refs:check && pnpm exports:check && pnpm text:check",
     "lint": "oxlint . --deny-warnings",
     "format": "prettier --write . --cache --cache-strategy content",
     "format:check": "prettier --check . --cache --cache-strategy content",
     "refs:check": "node scripts/structure/doc-refs.mjs",
+    "exports:check": "node scripts/structure/export-docs.mjs",
     "text:check": "node scripts/text/check.mjs"
   },
   "devDependencies": {

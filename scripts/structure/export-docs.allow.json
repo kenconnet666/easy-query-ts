@@ -1,0 +1,26 @@
+{
+  "core": {
+    "flattenRow": "写入时把值对象展开成列，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "nestRow": "读出时把列放回值对象，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "toDate": "驱动读出的日期时间 → Date，给扩展列类型（date 包）复用",
+    "toDateText": "驱动读出的日期 → 'YYYY-MM-DD'，给扩展列类型（date 包）复用",
+    "utcText": "Date → 各库都认的 UTC 文字，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "checksum": "迁移内容的校验和，CLI（eqts migrate）用",
+    "migrationSource": "生成迁移文件的源码，CLI（eqts migrate generate）用",
+    "assembleTables": "把读库结构的几条查询拼成表的描述，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "bareName": "去掉表名里的 schema 前缀，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "ShardTimeUnit": "sharding.ts 里 TimeUnit 的别名（与日期函数的 TimeUnit 区分），就是 byTime 的第二个参数",
+    "isSubquery": "给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "sqlString": "字符串字面量的转义，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "unquoteSql": "给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "databaseError": "把驱动的错误归一成 DatabaseError，给方言包、驱动适配用的工具，不是应用代码要调用的（应用代码用 instanceof 判断）",
+    "sqlStateKind": "SQLSTATE → 错误种类，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "compareVersions": "比较服务器版本号，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "coalesceEach": "给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "dateFormatParts": "拆 format() 的格式串，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "jsonPathParts": "拆 JSON 路径，给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "pgJsonPath": "给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "standardJsonPath": "给方言包、驱动适配用的工具，不是应用代码要调用的",
+    "checkAliases": "检查语法树里的别名，给方言包、驱动适配用的工具，不是应用代码要调用的"
+  }
+}
