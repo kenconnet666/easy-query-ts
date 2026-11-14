@@ -24,6 +24,16 @@ await tx.commit(); // 提交之后离开作用域是安全的`;
 const options = `await db.transaction(work, { isolation: 'serializable' });
 await db.transaction(work, { readOnly: true });`;
 
+const retries = `await db.transaction(
+  async (tx) => {
+    const from = await tx.queryable(Account).findOrThrow(fromId);
+    await tx.update(Account).set({ balance: minus(from.balance, amount) }).whereKey(fromId).execute();
+    await tx.update(Account).set((a) => ({ balance: a.balance.plus(amount) })).whereKey(toId).execute();
+    tx.afterCommit(() => notify(toId)); // 只在成功的那一遍之后执行
+  },
+  { isolation: 'serializable', retries: 3 },
+);`;
+
 const cancel = `const ac = new AbortController();
 req.on('close', () => ac.abort()); // 客户端断开就取消
 
@@ -56,6 +66,17 @@ export default _component(() => () => (
       <CodeBlock code={options} lang="ts" />
       <P text="隔离级别按方言渲染。只读事务适合要一致快照的报表：MySQL、PG 是 READ ONLY，SQLite 没有只读事务，用 `PRAGMA query_only` 拒绝写入，结束后还原。" />
       <SqlExample example={readOnly} title="只读事务：两个数来自同一个快照" />
+    </Section>
+    <Section id="retries" title="死锁与串行化失败时重试">
+      <P text="几个事务相互冲突时，库会挑一个回滚：死锁（`DeadlockError`），或可串行化、可重复读下的串行化失败（`SerializationError`）。这两种错误重来多半能成，`retries` 让 `transaction` 把整个回调重新执行，最多这么多次，每次之间等一小会儿（逐次加长、带随机量）。默认 0，不重试。" />
+      <CodeBlock code={retries} lang="ts" />
+      <Points
+        items={[
+          '回调会被执行几遍：里面不能有回滚不掉的副作用。发消息、调外部接口放进 `afterCommit`。',
+          '只有最外层的事务能重试：死锁回滚的是整个事务，不是保存点；嵌套事务上写 `retries` 报错。',
+          '别的错误（唯一键冲突、业务错误）不重试，原样抛出；用完次数后抛最后一次的错误。',
+        ]}
+      />
     </Section>
     <Section id="hooks" title="提交之后做的事">
       <P text="`afterCommit` 登记提交之后才执行的动作，发邮件、发消息、清缓存放这里；回滚了就不执行。`afterRollback` 反过来。" />

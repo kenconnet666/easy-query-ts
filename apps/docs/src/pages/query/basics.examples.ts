@@ -320,17 +320,20 @@ export const pageWithTree = example((db) =>
 );
 
 export const cursorPage = example(async (db) => {
-  // 按主键游标翻页：记下上一页最后一行的 id，翻多深都一样快
-  const page = (after: number) =>
-    db
-      .queryable(Post)
-      .where((p) => p.id.gt(after))
-      .orderBy((p) => p.id)
-      .limit(3)
-      .select((p) => ({ id: p.id, title: p.title }))
-      .toList();
+  // 接着上一页的最后一行往下取：排序后面自动补上主键，next 原样交给前端、下一页带回来
+  const latest = db
+    .queryable(Post)
+    .orderBy((p) => p.views.desc())
+    .select((p) => ({
+      id: p.id,
+      title: p.title,
+      views: p.views,
+    }));
 
-  const first = await page(0);
-  const second = await page(first.at(-1)!.id);
+  const first = await latest.toCursorPage({ size: 3 });
+  const second = await latest.toCursorPage({
+    size: 3,
+    after: first.next,
+  });
   return { first, second };
 });

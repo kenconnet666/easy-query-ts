@@ -46,8 +46,16 @@ export default _component(() => () => (
       <SqlExample example={pageBeyond} title="页码超出" />
     </Section>
     <Section id="cursor" title="深分页">
-      <P text="OFFSET 越大，库要跳过的行越多。能接受“只能下一页”时，按主键游标翻页，翻多深都一样快。" />
+      <P text="OFFSET 越大，库要跳过的行越多；翻页途中有行插入、删除，还会漏行或重复。能接受“只能下一页”时（加载更多、按批导出、同步），用 `toCursorPage`：条件是“排在上一页最后一行之后”，翻多深都一样快。" />
       <SqlExample example={cursorPage} title="游标翻页" />
+      <Points
+        items={[
+          '排序就是查询自己的 `orderBy`，后面自动补上主键，每一行的位置才唯一。主表没有主键（派生表）、或 join 之后一行主表对多行时，自己把排序写到唯一。',
+          '`next` 是不透明的文字，最后一页是 `undefined`。它只对同样排序的查询有效；被改过的、别的查询的游标抛 `InvalidCursorError`，接口层回 400。',
+          '排序键可以为 NULL，NULL 排在哪头按各库自己的规则算。分组、去重的结果先 `asTable()` 再分页。',
+          '没有总数、不能跳页：要这两样用 `toPage`。',
+        ]}
+      />
       <Points
         items={[
           '必须用偏移翻页时：`createDb({ reversePageAfter })`，偏移超过它、也超过总数一半时倒序取再翻回来。',

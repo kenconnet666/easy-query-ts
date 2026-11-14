@@ -22,6 +22,14 @@ const ofTenant = defineScope<{ tenantId: number }, [tenantId: number]>(
 
 await db.queryable(Order).apply(ofTenant, 7).toList();`;
 
+const handle = `try {
+  await db.insert(User).values(form).execute();
+} catch (error) {
+  if (error instanceof UniqueViolationError) return conflict('邮箱已注册');
+  if (error instanceof InvalidRequestError) return badRequest(error.message);
+  throw error;
+}`;
+
 export default _component(() => () => (
   <DocPage>
     <Section id="entity" title="实体怎么设计">
@@ -57,7 +65,22 @@ export default _component(() => () => (
         head={['错误', '什么时候', '怎么办']}
         rows={[
           ['`NotFoundError`', '`findOrThrow` 找不到', '接口层翻译成 404'],
-          ['`optimistic lock failed`', '带版本的写入没改到行', '提示刷新后重试，或重读再试一次'],
+          ['`OptimisticLockError`', '带版本的写入没改到行', '提示刷新后重试，或重读再试一次'],
+          [
+            '`UniqueViolationError`、`ForeignKeyViolationError`、`NotNullViolationError`',
+            '唯一键、外键、非空约束',
+            '翻译成 409 / 400；各库的错误码已经归一，不用按驱动判断',
+          ],
+          [
+            '`DeadlockError`、`SerializationError`',
+            '事务被库选中回滚',
+            '重来多半能成：`transaction(work, { retries: 3 })`',
+          ],
+          [
+            '`InvalidRequestError`',
+            '列表请求的页码、排序、筛选、条件树、游标不合法',
+            '接口层翻译成 400',
+          ],
           ['`expectRows` 给的错误', '改到的行数不对', '自己抛业务错误，事务回滚'],
           ['`TimeoutError`', '`withTimeout` 到点', '语句已被取消，按超时处理'],
           ['信号的 `reason`', '`withSignal` 取消', '客户端断开时通常不用处理'],
@@ -67,9 +90,11 @@ export default _component(() => () => (
             '开发阶段就会碰到，换写法或换方言',
           ],
           ['`the query returned more than N rows`', '超过 `maxRows`', '加分页或改 `stream`'],
-          ['驱动的错误', '唯一约束、外键、断连', '原样抛出，按驱动的错误码判断'],
+          ['别的驱动错误', '断连、语法、权限', '原样抛出'],
         ]}
       />
+      <P text="上面带名字的都是类，用 `instanceof` 判断，不用匹配消息文字。约束、死锁这几种是 `DatabaseError` 的子类：`kind` 是种类，`cause` 是驱动原来的错误，驱动错误上的字段（`code`、`constraint`、`detail`……）也照搬过来。" />
+      <CodeBlock code={handle} lang="ts" />
       <P text="错误都原样抛给调用方，不吞错。事务里抛错就回滚；`onExecute` 的 `error` 能看到失败的语句，错误仍会照常抛出。" />
     </Section>
     <Section id="faq" title="常见问题">

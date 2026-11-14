@@ -28,7 +28,7 @@ export default _component(() => () => (
           ['`execute()`', '影响的行数', ''],
           [
             '`returnId()`',
-            '自增主键',
+            '自增主键，类型是主键列的类型',
             'PG、SQLite 是 RETURNING，MySQL 从驱动的结果里取，SQL Server 是 SCOPE_IDENTITY',
           ],
           [

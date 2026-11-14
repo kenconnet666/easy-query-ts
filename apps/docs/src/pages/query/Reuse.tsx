@@ -24,7 +24,10 @@ export function publishedPosts(db: AppDb, keyword?: string) {
     .where((p) => [p.status.eq('published'), keyword && p.title.like(keyword)]);
 }
 
-await publishedPosts(tx, '缓存').count(); // 传 tx 就在事务里`;
+await publishedPosts(tx, '缓存').count(); // 传 tx 就在事务里
+
+// 要给结果的行起名字（组件的 props、接口的返回类型）时，从查询里取，不用照着 select 再写一遍
+export type PublishedPost = ResultOf<typeof publishedPosts>;`;
 
 export default _component(() => () => (
   <DocPage>
@@ -36,7 +39,7 @@ export default _component(() => () => (
       <SqlExample example={reuseAsSubquery} title="存下来当子查询" />
     </Section>
     <Section id="function" title="封装成函数">
-      <P text="最常用的复用就是写个函数返回查询。类型都是推出来的，不用写返回类型。" />
+      <P text="最常用的复用就是写个函数返回查询。类型都是推出来的，不用写返回类型；`ResultOf` 从查询（或返回查询的函数、预编译查询）取出每行的类型。" />
       <CodeBlock code={typed} lang="ts" title="posts.ts" />
       <SqlExample example={queryFunction} title="一个函数，数和查" />
     </Section>

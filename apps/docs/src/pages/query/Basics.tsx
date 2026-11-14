@@ -53,6 +53,7 @@ export default _component(() => () => (
       <SqlExample example={firstMissing} title="取不到" />
       <SqlExample example={findThrows} title="findOrThrow 抛错" />
       <P text="`whereKey`、`whereKeys` 只是加条件，之后还能接 `select`。复合主键传对象。" />
+      <P text="哪几列是主键写在实体的类型里：`find`、`whereKey`、`db.lock`、`db.remove` 只接受主键的值。传错类型、复合主键少给一列、实体没有主键，都是编译错误，不用等到运行时。" />
       <SqlExample example={whereKey} title="按主键，再选列" />
       <SqlExample example={whereKeys} title="一组主键" />
       <SqlExample example={compositeKey} title="复合主键" />

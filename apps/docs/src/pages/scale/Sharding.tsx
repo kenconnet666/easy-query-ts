@@ -50,6 +50,11 @@ export default _component(() => () => (
           ['`byYear(列, 选项)`', '`表_2025`', '`eq`、`in`、范围'],
           ['`byMonth(列, 选项)`', '`表_202501`', '`eq`、`in`、范围'],
           ['`byDay(列, 选项)`', '`表_20250101`', '`eq`、`in`、范围'],
+          [
+            "`byTime(列, 'year' | 'month' | 'day', 选项)`",
+            '同上面三个',
+            '粒度来自配置时用它，上面三个是它的简写',
+          ],
         ]}
       />
       <P text="`createTables`、`createTablesSql` 展开成每一张实际的表。" />

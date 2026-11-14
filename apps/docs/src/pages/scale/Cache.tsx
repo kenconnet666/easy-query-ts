@@ -68,7 +68,7 @@ export default _component(() => () => (
           ],
         ]}
       />
-      <Note text="本库不带 Redis 驱动和 MQ 通知，后两种按自己的客户端实现接口。下面的完整示例在仓库的 packages/test/src/redis-cache.ts，测试里接真的 Redis 跑过。" />
+      <Note text="本库不带 Redis 驱动和 MQ 通知，后两种按自己的客户端实现接口。下面的完整示例在仓库的 packages/test/src/redis-cache.ts，测试里接真的 Redis 跑过。测试里不想接 MQ 时，`memoryTransport()` 是进程内的通知：同一个对象上的几个缓存互相收得到，用来模拟几个实例。" />
     </Section>
     <Section id="redis" title="多实例：只用 Redis">
       <CodeBlock code={store} lang="ts" />
