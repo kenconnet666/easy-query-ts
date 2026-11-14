@@ -66,6 +66,10 @@ export default _component(() => () => (
       <P text="表单里的子项没带主键时，`key` 指定按哪个业务列认出原来的行，对应 Java 版的 SaveKey。认出的更新，认不出的插入。" />
       <SqlExample example={saveByKey} title="按评论内容认：一条更新，一条新增，其余不动" />
     </Section>
+    <Section id="adopt" title="别的父行名下的子项">
+      <P text="子项带了主键、却不在这个父行名下时：库里没有这一行就插入；外键为空（没挂在谁名下）的直接挂过来；挂在别的父行名下的报错。表单数据常常直接交给 `save`，带上别人的主键不该就能改到、挪走别人的数据。" />
+      <P text="确实要在父行之间挪动子项的地方，给这个导航写 `adopt: true`：`include: { users: { adopt: true } }`。" />
+    </Section>
     <Section id="remove" title="删除一棵树">
       <P text="`db.remove` 按 `include` 先删子项，行不存在返回 false；逻辑删除的实体照常是逻辑删除。" />
       <SqlExample example={removeTree} title="删帖子，连同它的评论" />

@@ -11,6 +11,7 @@
  * })
  * ```
  * - 一对多、一对一（外键在对方）：子项按主键（没给时按 key 指定的列，对应 SaveKey）认出原来的行，按差异更新，否则插入；
+ *   带了主键却不在这个父行名下的行：外键为空的直接挂过来，挂在别的父行名下的报错，要挪就给这个导航写 adopt: true；
  *   不在输入里的按 removed 处理：'delete' 删除（沿 include 先删它的子项）、'unlink' 外键置空、'keep' 不动。
  *   没写 removed 时外键可空就置空，不可空且确实有要移除的行就报错（免得默认就删数据）
  * - 多对一（外键在本表）：先保存目标再设外键；给 null 时外键置空
@@ -43,6 +44,11 @@ export interface SaveNode<S extends AnySchema, T extends EntityKey<S>> {
   readonly include?: SaveInclude<S, T>;
   readonly removed?: RemovedPolicy;
   readonly key?: keyof S['entities'][T]['fields'] & string;
+  /**
+   * 子项带的主键是别的父行名下的行时，把它挪过来（默认报错）。输入多半来自表单：带上别人的主键不该就能改到、挪走别人的数据，
+   * 确实要在父行之间挪动子项的地方才打开
+   */
+  readonly adopt?: boolean;
 }
 
 /** 保存哪些导航（键由实体的关系推出） */
@@ -64,9 +70,7 @@ export type SaveValue<S extends AnySchema, K extends EntityKey<S>, I> = UpdateOf
 };
 
 type Row = Record<string, unknown>;
-type Include = Readonly<
-  Record<string, true | { include?: Include; removed?: RemovedPolicy; key?: string }>
->;
+type Include = Readonly<Record<string, true | NodeOptions>>;
 
 /** 一棵树的保存与删除（Db.save / Db.remove 在事务里调用） */
 export class AggregateSaver {
@@ -149,7 +153,7 @@ export class AggregateSaver {
     for (const child of list) {
       const flat = flattenRow(target, child);
       const before = hasKey(flat, pk)
-        ? byPk.get(rowKey(flat, pk))
+        ? (byPk.get(rowKey(flat, pk)) ?? (await this.claim(target, rel, flat, link, node)))
         : node.key && flat[node.key] !== undefined && flat[node.key] !== null
           ? byKey?.get(keyText([flat[node.key]]))
           : undefined;
@@ -174,6 +178,34 @@ export class AggregateSaver {
       .set(Object.fromEntries(rel.to.map((c) => [c, null])))
       .where((r: any) => keyIn(r, pk, removed))
       .execute();
+  }
+
+  /**
+   * 子项带了主键、却不在这个父行名下：库里没有这一行就照常插入（返回 undefined）；有的话看它挂在谁那里——
+   * 外键为空（没挂在谁名下）或本来就指向这个父行的，当作原来的行按差异更新；挂在别的父行名下的要 adopt 才挪
+   */
+  private async claim(
+    target: Entity,
+    rel: Relation,
+    child: Row,
+    link: Row,
+    node: NodeOptions,
+  ): Promise<Row | undefined> {
+    const pk = target.primaryKey;
+    const current = (await this.db
+      .queryable(target)
+      .where((r: any) => pk.map((k) => (r[k] as Expr<unknown>).eq(child[k] as never)))
+      .first()) as Row | undefined;
+    if (!current) return undefined;
+    const row = flattenRow(target, current);
+    const linked = rel.to.some((c) => row[c] !== null && row[c] !== undefined);
+    const here = rel.to.every((c) => keyText([row[c]]) === keyText([link[c]]));
+    if (linked && !here && !node.adopt)
+      throw new Error(
+        `save: ${rel.target} (${pk.map((k) => `${k} = ${String(child[k])}`).join(', ')}) belongs to another parent; ` +
+          `set adopt: true on this navigation to move it`,
+      );
+    return current;
   }
 
   private async links(parent: Row, rel: Many, list: readonly Row[], node: NodeOptions) {
@@ -340,6 +372,7 @@ interface NodeOptions {
   readonly include?: Include;
   readonly removed?: RemovedPolicy;
   readonly key?: string;
+  readonly adopt?: boolean;
 }
 
 function hasKey(row: Row, pk: readonly string[]): boolean {
