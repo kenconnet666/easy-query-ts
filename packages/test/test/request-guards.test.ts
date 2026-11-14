@@ -124,6 +124,52 @@ describe('list requests: malformed input is an InvalidRequestError', async () =>
     );
   });
 
+  it('日期时间列上只写了日期的值按整天比较：等于是这一天里，小于等于含这一整天，大于是这一天之后', async () => {
+    const where = (op: string, timeZone?: string) => {
+      const { sql, params } = db
+        .queryable(User)
+        .where((u) =>
+          conditionOf(
+            { field: 'createdAt', op, value: '2026-01-31' } as ConditionTree,
+            u,
+            timeZone ? { timeZone } : {},
+          ),
+        )
+        .toSQL();
+      return [sql.slice(sql.indexOf(' WHERE ') + 7), ...params];
+    };
+    const [day, next] = ['2026-01-31 00:00:00.000', '2026-02-01 00:00:00.000'];
+    assert.deepEqual(where('eq'), ['t0."created_at" >= ? AND t0."created_at" < ?', day, next]);
+    assert.deepEqual(where('ne'), ['(t0."created_at" < ? OR t0."created_at" >= ?)', day, next]);
+    assert.deepEqual(where('gte'), ['t0."created_at" >= ?', day]);
+    assert.deepEqual(where('gt'), ['t0."created_at" >= ?', next]);
+    assert.deepEqual(where('lt'), ['t0."created_at" < ?', day]);
+    assert.deepEqual(where('lte'), ['t0."created_at" < ?', next]);
+    // 一天从哪一刻开始看时区
+    assert.deepEqual(where('lte', 'Asia/Shanghai'), [
+      't0."created_at" < ?',
+      '2026-01-31 16:00:00.000',
+    ]);
+    // 搜索参数的区间走的是同一套：三个人都是 1 月 2 日 03:04 创建的，上限写 1 月 2 日要包含他们
+    const created = async (query: Record<string, string>) =>
+      (
+        await db
+          .queryable(User)
+          .select((u) => ({ id: u.id, createdAt: u.createdAt }))
+          .table(parseSearchRequest(query))
+      ).rows.length;
+    assert.equal(
+      await created({
+        'createdAt-1': '2026-01-01',
+        'createdAt-2': '2026-01-02',
+        'createdAt-op': 'rc',
+      }),
+      3,
+    );
+    assert.equal(await created({ createdAt: '2026-01-02', 'createdAt-op': 'gt' }), 0);
+    assert.equal(await created({ createdAt: '2026-01-02' }), 3);
+  });
+
   it('零点被夏令时跳过的时区：这一天从 01:00 开始，不带上前一天的 23:00', async () => {
     // 圣保罗 2018-11-04 00:00 拨到 01:00（UTC-3 → UTC-2）：这一天是 03:00Z 起
     const { sql, params } = db

@@ -18,8 +18,11 @@ import {
   text,
   createDb,
   defineSchema,
+  defineMigration,
   defineView,
   DatabaseError,
+  MigrationError,
+  type SqlTag,
   type CursorPage,
   ForeignKeyViolationError,
   NotNullViolationError,
@@ -71,6 +74,8 @@ export interface LiveSuiteOptions {
   readonly extraTables?: boolean;
   /** 是否测试递归 CTE；HANA 没有 WITH RECURSIVE，传 false */
   readonly recursiveCte?: boolean;
+  /** 在另一个 schema 里建表（libSQL 的客户端不保证 ATTACH 之后还是同一条连接，传 false） */
+  readonly secondSchema?: boolean;
   /** 是否测试只读事务；各库的拒绝写入报错不同，只断言"会失败"。HANA 未验证时可关 */
   readonly readOnlyTransactions?: boolean;
   /** 保存点（嵌套事务）；DuckDB 没有 */
@@ -2342,6 +2347,144 @@ export function liveSuite(
         assert.equal(await db.queryable(SyncA).count(), 1);
       } finally {
         await db.dropTables(SyncB, SyncA);
+      }
+    });
+
+    /** 执行一条现成的语句（建 schema 这类没有对应 API 的） */
+    const runSql = (db: { sql: SqlTag }, text: string) =>
+      db.sql.execute(Object.assign([text], { raw: [text] }) as unknown as TemplateStringsArray);
+
+    // 另一个 schema 怎么建、怎么删、叫什么（HANA、Db2 不加引号的名字是大写的）。Oracle、达梦的 schema 就是用户，读库结构只看当前用户，不在这里
+    const secondSchemas: Record<string, readonly [string, string, string] | undefined> = {
+      postgres: ['eqts_arch', 'CREATE SCHEMA eqts_arch', 'DROP SCHEMA eqts_arch CASCADE'],
+      opengauss: ['eqts_arch', 'CREATE SCHEMA eqts_arch', 'DROP SCHEMA eqts_arch CASCADE'],
+      mysql: ['eqts_arch', 'CREATE DATABASE eqts_arch', 'DROP DATABASE eqts_arch'],
+      mariadb: ['eqts_arch', 'CREATE DATABASE eqts_arch', 'DROP DATABASE eqts_arch'],
+      sqlite: ['eqts_arch', "ATTACH DATABASE ':memory:' AS eqts_arch", 'DETACH DATABASE eqts_arch'],
+      sqlserver: ['eqts_arch', 'CREATE SCHEMA eqts_arch', 'DROP SCHEMA eqts_arch'],
+      hana: ['EQTS_ARCH', 'CREATE SCHEMA EQTS_ARCH', 'DROP SCHEMA EQTS_ARCH CASCADE'],
+      db2: ['EQTS_ARCH', 'CREATE SCHEMA EQTS_ARCH', 'DROP SCHEMA EQTS_ARCH RESTRICT'],
+      duckdb: ['eqts_arch', 'CREATE SCHEMA eqts_arch', 'DROP SCHEMA eqts_arch CASCADE'],
+    };
+
+    it.skipIf(options.secondSchema === false)(
+      'creates, syncs and drops tables in another schema without mistaking same-named tables of the current one',
+      async ({ skip }) => {
+        const env = await seeded();
+        const second = secondSchemas[env.adapter.dialect.name];
+        if (!second) return skip();
+        const [schemaName, create, drop] = second;
+        const db = createDb({ schema: syncSchema, adapter: env.adapter });
+        await db.dropTables(SyncB, SyncA);
+        await runSql(db, drop).catch(() => undefined);
+        await runSql(db, create);
+        const arch = db.inSchema(schemaName);
+        try {
+          // 当前 schema 里有这两张表，另一个 schema 里还没有
+          await db.createTables();
+          assert.equal(await arch.tableExists(SyncA), false);
+          assert.ok((await arch.planSync()).statements.length > 0);
+          await arch.createTables();
+          assert.equal(await arch.tableExists(SyncA), true);
+          assert.equal(await arch.tableExists(SyncB), true);
+          assert.deepEqual((await arch.planSync()).statements, []);
+          assert.deepEqual(
+            (await db.introspect(schemaName)).map((t) => t.name.toLowerCase()).sort(),
+            ['t_sync_a', 't_sync_b'],
+          );
+          // 写进去的行在那个 schema 里
+          await arch.insert(SyncA).values({ name: 'archived' }).execute();
+          assert.equal(await arch.queryable(SyncA).count(), 1);
+          assert.equal(await db.queryable(SyncA).count(), 0);
+          // 删也只删那边的
+          await arch.dropTables(SyncB, SyncA);
+          assert.equal(await arch.tableExists(SyncA), false);
+          assert.equal(await db.tableExists(SyncA), true);
+        } finally {
+          await arch.dropTables(SyncB, SyncA).catch(() => undefined);
+          await runSql(db, drop).catch(() => undefined);
+          await db.dropTables(SyncB, SyncA);
+        }
+      },
+    );
+
+    it('says which statement of a migration failed and whether its changes were rolled back', async () => {
+      const { db, adapter } = await seeded();
+      const table = 'eqts_migrations_half';
+      const cleanup = async () => {
+        for (const name of ['t_half', table])
+          await runSql(db, adapter.dialect.dropTable(name)).catch(() => undefined);
+      };
+      await cleanup();
+      const exists = async () =>
+        (await db.introspect()).some((t) => t.name.toLowerCase() === 't_half');
+      // 名字都加引号：不加的话 Oracle、HANA、Db2 把它们折成大写，后面按名字删不掉
+      const d = adapter.dialect;
+      const half = defineMigration({
+        id: '001_half',
+        up: [
+          `CREATE TABLE ${d.table('t_half')} (${d.quote('id')} INT NOT NULL PRIMARY KEY)`,
+          `ALTER TABLE ${d.table('t_no_such_table')} ADD ${d.quote('note')} INT`,
+        ],
+      });
+      try {
+        const error = await db.migrate([half], { table }).then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        assert.ok(error instanceof MigrationError, String(error));
+        assert.equal(error.id, '001_half');
+        assert.equal(error.statement, 2);
+        assert.match(error.message, /'001_half' failed at statement 2 of 2/);
+        assert.ok(error.cause instanceof Error);
+        // DDL 能回滚的库什么都没留下；不能的库第一条语句的表还在，错误里说了
+        assert.equal(error.rolledBack, adapter.dialect.transactionalDdl);
+        assert.equal(await exists(), !adapter.dialect.transactionalDdl);
+        if (!adapter.dialect.transactionalDdl)
+          assert.match(error.message, /statements 1 to 1 stay applied/);
+        // 没有记进历史：修好之后重跑还会执行它
+        const fixed = defineMigration({
+          id: '001_half',
+          up: adapter.dialect.transactionalDdl ? [(half.up as readonly string[])[0]!] : [],
+        });
+        assert.deepEqual(await db.migrate([fixed], { table }), ['001_half']);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('runs each migration once when several instances migrate at the same time', async ({
+      skip,
+    }) => {
+      const { db, adapter } = await seeded();
+      // 没有锁的库不保证这一点：迁移由一个进程执行
+      if (!adapter.dialect.advisoryLocks && !adapter.dialect.sessionLockStatements('?'))
+        return skip();
+      const table = 'eqts_migrations_race';
+      const cleanup = async () => {
+        for (const name of ['t_race', table])
+          await runSql(db, adapter.dialect.dropTable(name)).catch(() => undefined);
+      };
+      await cleanup();
+      const d = adapter.dialect;
+      const migrations = [
+        defineMigration({
+          id: '001_race',
+          up: [`CREATE TABLE ${d.table('t_race')} (${d.quote('id')} INT NOT NULL PRIMARY KEY)`],
+        }),
+        defineMigration({
+          id: '002_race',
+          up: [`INSERT INTO ${d.table('t_race')} (${d.quote('id')}) VALUES (1)`],
+        }),
+      ];
+      try {
+        const ran = await Promise.all([1, 2, 3].map(() => db.migrate(migrations, { table })));
+        // 每条迁移只被其中一个实例执行；别的实例排到时发现已经执行过，跳过
+        assert.deepEqual(ran.flat().sort(), ['001_race', '002_race']);
+        const [row] = await db.sql`SELECT COUNT(*) FROM ${db.sql.ident('t_race')}`;
+        assert.equal(Number(Object.values(row!)[0]), 1);
+      } finally {
+        await cleanup();
       }
     });
 

@@ -33,6 +33,10 @@ export interface DorisOptions {
 /** Apache Doris 的方言：走 MySQL 协议，主键模型的表，分析型查询 */
 export class DorisDialect extends MySqlDialect {
   override readonly name: string = 'doris';
+  /** Doris 没有 GET_LOCK */
+  override sessionLockStatements(): undefined {
+    return undefined;
+  }
   /** 事务不能回滚，语句依次执行：没有保存点 */
   override readonly supportsSavepoints = false;
   override readonly commentStyle = 'inline';
@@ -144,20 +148,24 @@ export class DorisDialect extends MySqlDialect {
   }
 
   /** 主键模型的键列在 information_schema 里是 UNI */
-  override async introspect(run: QueryRunner): Promise<DbTable[]> {
-    const tables = await super.introspect(async (sql, params) =>
-      run(
-        sql.replace(
-          "COLUMN_KEY = 'PRI' AS primary_key",
-          "COLUMN_KEY IN ('PRI', 'UNI') AS primary_key",
+  override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
+    const tables = await super.introspect(
+      async (sql, params) =>
+        run(
+          sql.replace(
+            "COLUMN_KEY = 'PRI' AS primary_key",
+            "COLUMN_KEY IN ('PRI', 'UNI') AS primary_key",
+          ),
+          params,
         ),
-        params,
-      ),
+      schemaName,
     );
     // 倒排索引不在 information_schema.STATISTICS 里：逐表 SHOW INDEX
     return Promise.all(
       tables.map(async (t) => {
-        const rows = await run(`SHOW INDEX FROM ${this.quote(t.name)}`);
+        const rows = await run(
+          `SHOW INDEX FROM ${this.table(schemaName === undefined ? t.name : `${schemaName}.${t.name}`)}`,
+        );
         const indexes = new Map<string, string[]>();
         for (const r of rows) {
           const name = String(r['Key_name']);

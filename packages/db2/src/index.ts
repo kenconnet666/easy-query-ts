@@ -270,9 +270,11 @@ export class Db2Dialect extends Dialect {
     return `RENAME TABLE ${this.table(from)} TO ${this.quote(bareName(to))}`;
   }
 
+  override readonly introspectsSchemas = true;
+
   /** SYSCAT 目录（当前模式） */
-  override async introspect(run: QueryRunner): Promise<DbTable[]> {
-    const schema = 'TABSCHEMA = CURRENT SCHEMA';
+  override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
+    const schema = `TABSCHEMA = ${schemaName === undefined ? 'CURRENT SCHEMA' : sqlString(schemaName)}`;
     return assembleTables({
       tables: await run(
         `SELECT TABNAME AS "table_name", REMARKS AS "comment" FROM SYSCAT.TABLES WHERE ${schema} AND TYPE = 'T' ORDER BY TABNAME`,

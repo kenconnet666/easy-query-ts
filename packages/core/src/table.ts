@@ -316,7 +316,8 @@ export interface DayOptions {
 
 /**
  * 条件树转成条件：字段只认 shape 里的列（结果列，相当于白名单），值按列的类型读。
- * between 的任一端为空时不限；日期时间列上只写了日期的一端按整天算（起端是那天的零点，止端是"早于后一天的零点"）
+ * between 的任一端为空时不限。日期时间列上只写了日期的值（'2026-01-31'）一律按整天算，时区看 options.timeZone：
+ * 等于是"落在这一天里"，小于等于包含这一整天，大于是"这一天之后"；between 的两端同理。in / notIn 不按整天，要写出时刻
  */
 export function conditionOf(input: ConditionTree, shape: unknown, options: DayOptions = {}): Cond {
   const tree = checkedTree(input);
@@ -326,6 +327,26 @@ export function conditionOf(input: ConditionTree, shape: unknown, options: DayOp
   const { field, op, value } = tree;
   const column = resultColumn(shape, field, 'filter');
   const text = column as Expr<string | null>;
+  if (isDay(column, value)) {
+    const start = dayStart(value, options) as never;
+    const next = dayStart(nextDay(value), options) as never;
+    switch (op) {
+      case 'eq':
+        return and(column.ge(start), column.lt(next));
+      case 'ne':
+        return or(column.lt(start), column.ge(next));
+      case 'gt':
+        return column.ge(next);
+      case 'gte':
+        return column.ge(start);
+      case 'lt':
+        return column.lt(start);
+      case 'lte':
+        return column.lt(next);
+      default:
+      // 别的比较方式不认整天，照常往下走
+    }
+  }
   const read = (item: unknown) => {
     // 和 NULL 比用 isNull / notNull；对象、数组不是能比较的值
     if (
@@ -391,22 +412,27 @@ export function rangeOf(
   options: DayOptions = {},
 ): Cond {
   const blank = (item: unknown) => item === null || item === undefined || item === '';
-  const day = (item: unknown) =>
-    column.codec?.kind === 'datetime' &&
-    typeof item === 'string' &&
-    /^\d{4}-\d{2}-\d{2}$/.test(item);
   return [
     !blank(start) &&
       column.ge(
-        (day(start)
-          ? dayStart(start as string, options)
+        (isDay(column, start)
+          ? dayStart(start, options)
           : columnValue(column, start, field)) as never,
       ),
     !blank(end) &&
-      (day(end)
-        ? column.lt(dayStart(nextDay(end as string), options) as never)
+      (isDay(column, end)
+        ? column.lt(dayStart(nextDay(end), options) as never)
         : column.le(columnValue(column, end, field) as never)),
   ];
+}
+
+/** 日期时间列上只写了日期的值：按整天算 */
+function isDay(column: Expr<unknown>, item: unknown): item is string {
+  return (
+    column.codec?.kind === 'datetime' &&
+    typeof item === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(item)
+  );
 }
 
 /** JSON 里的值按列的类型读：文字交给 parseColumnText，decimal 列上的数字转成文字，其余原样 */

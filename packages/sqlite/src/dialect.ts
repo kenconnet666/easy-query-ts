@@ -14,6 +14,10 @@ import {
   type Node,
   type SqlWriter,
   type DatabaseErrorKind,
+  bareName,
+  schemaOf,
+  type ForeignKeySpec,
+  type TableIndex,
 } from '@zerodep-dev/easy-query-ts';
 /** SQLite 的日期时间是文字：用 strftime 取整，结果仍是 'YYYY-MM-DD HH:MM:SS' */
 /** LPAD / RPAD 的 SQLite 写法：比 length 长时截到 length，否则用 fill 补足（fill 重复 length 次再截取） */
@@ -88,10 +92,33 @@ export class SqliteDialect extends Dialect {
   override readonly inlineForeignKeys = true;
   override readonly transactionalDdl = true;
 
-  /** 读 sqlite_master 与 pragma_table_xinfo / index_list / foreign_key_list（外键没有名字，按列比较） */
-  override async introspect(run: QueryRunner): Promise<DbTable[]> {
+  override readonly introspectsSchemas = true;
+
+  /** 附加库里的表：schema 前缀写在索引名上（`CREATE INDEX 库.索引 ON 表`），ON 后面的表名不能带前缀 */
+  override createIndex(table: string, index: TableIndex, ifNotExists: boolean): string {
+    const schemaName = schemaOf(table);
+    const sql = super.createIndex(bareName(table), index, ifNotExists);
+    if (schemaName === undefined) return sql;
+    const name = this.quote(index.name);
+    return sql.replace(name, `${this.quote(schemaName)}.${name}`);
+  }
+
+  /** 外键引用的表只能在同一个库里，不能带 schema 前缀 */
+  protected override foreignKeyClause(fk: ForeignKeySpec): string {
+    return super.foreignKeyClause({ ...fk, references: bareName(fk.references) });
+  }
+
+  /**
+   * 读 sqlite_master 与 pragma_table_xinfo / index_list / foreign_key_list（外键没有名字，按列比较）。
+   * schemaName 是附加库的名字（ATTACH … AS 名字）：pragma 函数的最后一个参数指定在哪个库里找
+   */
+  override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
+    const master =
+      schemaName === undefined ? 'sqlite_master' : `${this.quote(schemaName)}.sqlite_master`;
+    const args = schemaName === undefined ? '?' : '?, ?';
+    const of = (name: unknown) => (schemaName === undefined ? [name] : [name, schemaName]);
     const tables = await run(
-      `SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
+      `SELECT name, sql FROM ${master} WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
     );
     const out: DbTable[] = [];
     for (const t of tables) {
@@ -99,17 +126,18 @@ export class SqliteDialect extends Dialect {
       const autoincrement = /\bAUTOINCREMENT\b/i.test(typeof t['sql'] === 'string' ? t['sql'] : '');
       const columns = await run(
         // table_xinfo 才列出生成列（hidden 2、3）；hidden 1 是虚拟表的隐藏列
-        `SELECT name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_xinfo(?) WHERE hidden <> 1 ORDER BY cid`,
-        [name],
+        `SELECT name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_xinfo(${args}) WHERE hidden <> 1 ORDER BY cid`,
+        of(name),
       );
       const indexes = [];
       for (const i of await run(
-        `SELECT name, "unique" AS is_unique FROM pragma_index_list(?) WHERE origin <> 'pk' ORDER BY name`,
-        [name],
+        `SELECT name, "unique" AS is_unique FROM pragma_index_list(${args}) WHERE origin <> 'pk' ORDER BY name`,
+        of(name),
       )) {
-        const parts = await run(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`, [
-          i['name'],
-        ]);
+        const parts = await run(
+          `SELECT name FROM pragma_index_info(${args}) ORDER BY seqno`,
+          of(i['name']),
+        );
         indexes.push({
           name: String(i['name']),
           columns: parts.map((p) => String(p['name'])),
@@ -118,8 +146,8 @@ export class SqliteDialect extends Dialect {
       }
       const keys = await run(
         `SELECT id, "table" AS referenced_table, "from" AS column_name, "to" AS referenced_column
-         FROM pragma_foreign_key_list(?) ORDER BY id, seq`,
-        [name],
+         FROM pragma_foreign_key_list(${args}) ORDER BY id, seq`,
+        of(name),
       );
       const foreignKeys = [...new Set(keys.map((k) => Number(k['id'])))].map((id) => {
         const list = keys.filter((k) => Number(k['id']) === id);

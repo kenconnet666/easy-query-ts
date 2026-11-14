@@ -42,7 +42,7 @@ import type { Ref } from './ref.ts';
 import type { DerivedEntity, Entity, KeyInput, Row } from './schema.ts';
 import { createSqlTag, type SqlTag } from './native.ts';
 import { checksum, historyEntity, ordered, type Migration } from './migrate.ts';
-import { databaseError, DeadlockError, SerializationError } from './errors.ts';
+import { databaseError, DeadlockError, MigrationError, SerializationError } from './errors.ts';
 import type {
   Capability,
   CapabilitiesOf,
@@ -52,9 +52,11 @@ import type {
 } from './capabilities.ts';
 import { AggregateSaver, type SaveInclude, type SaveValue } from './save.ts';
 import {
+  bareName,
   createStatements,
   findTable,
   planSync,
+  schemaOf,
   type DbTable,
   type QueryRunner,
   type SyncPlan,
@@ -444,14 +446,38 @@ export class Db<S extends AnySchema> {
    */
   createTables(this: Requires<S, 'write', Db<S>>, ...entities: Entity[]): Promise<void>;
   async createTables(...entities: Entity[]): Promise<void> {
-    const tables = await this.introspect();
-    const missing = this.targets(entities).filter((e) => !findTable(tables, e.table));
+    const targets = this.targets(entities);
+    const tables = await this.catalog(targets);
+    const missing = targets.filter((e) => !findTable(tables, e.table));
     await this.runDdl(createStatements(this.ctx.dialect, this.ctx.schema, missing, false));
   }
 
-  /** 读库里（当前 schema）的表结构：列、主键、索引、外键（syncTables、由表生成实体用） */
-  introspect(): Promise<DbTable[]> {
-    return this.ctx.dialect.introspect(this.catalogRunner());
+  /**
+   * 读库里的表结构：列、主键、索引、外键（syncTables、由表生成实体用）。不给 schema 读当前的；
+   * 给了读那一个（PG、MySQL、SQLite 的附加库、SQL Server、HANA、Db2、DuckDB、ClickHouse），别的方言报错
+   */
+  introspect(schema?: string): Promise<DbTable[]> {
+    if (schema !== undefined && !this.ctx.dialect.introspectsSchemas)
+      throw new Error(
+        `the ${this.ctx.dialect.name} dialect can only read the table structure of the current schema`,
+      );
+    return this.ctx.dialect.introspect(this.catalogRunner(), schema);
+  }
+
+  /**
+   * 这些实体所在的各个 schema 的表（createTables、planSync、dropTables 用）：表名带 schema 前缀的实体（inSchema 之后）
+   * 到它自己的 schema 里找，当前 schema 里有同名的表不算数
+   */
+  private async catalog(entities: readonly Entity[]): Promise<DbTable[]> {
+    const current = await this.introspect();
+    const tables = [...current];
+    for (const schema of new Set(entities.map((e) => schemaOf(e.table)))) {
+      if (schema === undefined) continue;
+      // 读不了别的 schema 的方言照旧只认表名：前缀就是当前 schema 时是对的
+      const found = this.ctx.dialect.introspectsSchemas ? await this.introspect(schema) : current;
+      tables.push(...found.map((t): DbTable => ({ ...t, schema })));
+    }
+    return tables;
   }
 
   /** 读系统表的查询：走主库（从库可能落后） */
@@ -461,8 +487,9 @@ export class Db<S extends AnySchema> {
   }
 
   async tableExists(entity: Entity): Promise<boolean> {
-    const tables = await this.introspect();
-    return this.targets([entity]).every((e) => findTable(tables, e.table) !== undefined);
+    const targets = this.targets([entity]);
+    const tables = await this.catalog(targets);
+    return targets.every((e) => findTable(tables, e.table) !== undefined);
   }
 
   /**
@@ -471,16 +498,16 @@ export class Db<S extends AnySchema> {
    * 类型、可空、注释不一致和库里多出来的列放进 differences，由人决定怎么迁移
    * ```ts
    * const plan = await db.planSync()
-   * console.log(plan.statements.join(';
-'), plan.differences)
+   * console.log(plan.statements.join(';\n'), plan.differences)
    * ```
    */
   async planSync(...entities: Entity[]): Promise<SyncPlan> {
+    const targets = this.targets(entities);
     return planSync(
       this.ctx.dialect,
       this.ctx.schema,
-      this.targets(entities),
-      await this.introspect(),
+      targets,
+      await this.catalog(targets),
       await this.ctx.dialect.introspectTypes(this.catalogRunner()),
     );
   }
@@ -496,9 +523,10 @@ export class Db<S extends AnySchema> {
   /** 删掉这些实体的表（库里没有的跳过） */
   dropTables(this: Requires<S, 'write', Db<S>>, ...entities: Entity[]): Promise<void>;
   async dropTables(...entities: Entity[]): Promise<void> {
-    const tables = await this.introspect();
+    const targets = this.targets(entities);
+    const tables = await this.catalog(targets);
     await this.runDdl(
-      this.targets(entities)
+      targets
         .filter((e) => findTable(tables, e.table))
         .map((e) => this.ctx.dialect.dropTable(e.table)),
     );
@@ -545,21 +573,63 @@ export class Db<S extends AnySchema> {
 
   /**
    * 执行还没执行过的迁移（按 id 的顺序），记进历史表（默认 eqts_migrations，没有就建），返回这次执行的 id。
-   * 每条迁移连同它的历史记录在一个事务里（DDL 能放进事务的库）；已经执行过的迁移被改了（校验和对不上）直接报错。见 migrate.ts
+   * 每条迁移连同它的历史记录在一个事务里（DDL 能放进事务的库）；已经执行过的迁移被改了（校验和对不上）直接报错。见 migrate.ts。
+   *
+   * 几个实例同时启动、同时迁移时排队，每条只执行一次：PostgreSQL、SQL Server 用事务级的咨询锁；MySQL、MariaDB 用
+   * GET_LOCK，锁拿在另一条连接上，所以迁移期间要占两条连接（连接池只有一条时传 `lock: false`，自己保证只有一个实例在迁移）。
+   * 别的库没有可用的锁，迁移放在发布流程里由一个进程执行。
+   *
+   * 某条迁移失败时抛 MigrationError：说明是哪一条的第几条语句、做过的改动有没有回滚
    */
   migrate(
     this: Requires<S, 'write', Db<S>>,
     migrations: readonly Migration[],
-    options?: { readonly table?: string },
+    options?: { readonly table?: string; readonly lock?: boolean },
   ): Promise<string[]>;
   async migrate(
     migrations: readonly Migration[],
-    options: { readonly table?: string } = {},
+    options: { readonly table?: string; readonly lock?: boolean } = {},
   ): Promise<string[]> {
     assertWritable(this.ctx);
     const history = historyEntity(options.table ?? 'eqts_migrations');
-    if (!findTable(await this.introspect(), history.table))
-      await this.runDdl([this.ctx.dialect.createTable(history, true)]);
+    const dialect = this.ctx.dialect;
+    const key = `eqts.migrate:${bareName(history.table)}`.slice(0, 64);
+    const locks =
+      options.lock === false || this.inTransaction ? undefined : dialect.sessionLockStatements('?');
+    if (!locks) return this.runMigrations(migrations, history);
+    // 会话级的锁：拿在一条专门的连接上（事务只是为了占住这条连接），迁移照常走连接池
+    return this.runInTransaction(async (holder) => {
+      const statement = (make: (key: string) => string): Statement => {
+        const w = new SqlWriter();
+        return { sql: make(dialect.bindParam(key, w)), params: w.params };
+      };
+      const pair = (name: 'acquire' | 'release') =>
+        statement((bound) => dialect.sessionLockStatements(bound)![name]);
+      const [row] = await query(holder.ctx, pair('acquire'));
+      if (!truthy(row?.['ok']))
+        throw new Error(`migrate: could not get the lock '${key}'; is another migration stuck?`);
+      try {
+        return await this.runMigrations(migrations, history);
+      } finally {
+        await query(holder.ctx, pair('release')).catch(() => undefined);
+      }
+    });
+  }
+
+  private async runMigrations(
+    migrations: readonly Migration[],
+    history: ReturnType<typeof historyEntity>,
+  ): Promise<string[]> {
+    // 建历史表也要排队：几个实例同时 CREATE TABLE IF NOT EXISTS，PG 会有一个报系统表的唯一键冲突
+    const ensure = async (db: Db<S>): Promise<void> => {
+      if (db.ctx.dialect.advisoryLocks && db.inTransaction)
+        await db.advisoryLock(`eqts.migrate:${history.table}`);
+      if (!findTable(await db.catalog([history]), history.table))
+        await execute(db.ctx, { sql: db.ctx.dialect.createTable(history, true), params: [] });
+    };
+    if (this.ctx.dialect.transactionalDdl && !this.inTransaction)
+      await this.runInTransaction(ensure);
+    else await ensure(this);
     const applied = new Map(
       (await this.usePrimary().queryable(history).toList()).map((row) => [row.id, row.checksum]),
     );
@@ -568,7 +638,9 @@ export class Db<S extends AnySchema> {
       const sum = checksum(migration);
       const before = applied.get(migration.id);
       if (before !== undefined) {
-        if (before !== sum) throw changed(migration.id, before, sum);
+        // 函数写的迁移不校验（见 migrate.ts）；以前的版本给它记过源码的校验和，也不拿来比
+        if (before !== sum && typeof migration.up !== 'function')
+          throw changed(migration.id, before, sum);
         continue;
       }
       const run = async (db: Db<S>): Promise<boolean> => {
@@ -580,12 +652,22 @@ export class Db<S extends AnySchema> {
             .where((h) => h.id.eq(migration.id))
             .toList();
           if (raced) {
-            if (raced.checksum !== sum) throw changed(migration.id, raced.checksum, sum);
+            if (raced.checksum !== sum && typeof migration.up !== 'function')
+              throw changed(migration.id, raced.checksum, sum);
             return false;
           }
         }
-        if (typeof migration.up === 'function') await migration.up(db);
-        else for (const sql of migration.up) await execute(db.ctx, { sql, params: [] });
+        const rolledBack = db.ctx.dialect.transactionalDdl && db.inTransaction;
+        if (typeof migration.up === 'function') {
+          await migration.up(db).catch((cause: unknown) => {
+            throw migrationFailed(migration, undefined, rolledBack, cause);
+          });
+        } else {
+          for (const [index, sql] of migration.up.entries())
+            await execute(db.ctx, { sql, params: [] }).catch((cause: unknown) => {
+              throw migrationFailed(migration, index, rolledBack, cause);
+            });
+        }
         await (db as unknown as Db<AnySchema>)
           .insert(history)
           .values({ id: migration.id, checksum: sum, appliedAt: new Date() })
@@ -890,7 +972,7 @@ export class Db<S extends AnySchema> {
   }
 
   /**
-   * 咨询锁（ROADMAP 19.10，PG）：按一个名字加锁直到事务结束——没有对应的行也能锁（"同一时间只有一个任务在生成月报"），
+   * 咨询锁（ROADMAP 19.10，PostgreSQL、SQL Server）：按一个名字加锁直到事务结束——没有对应的行也能锁（"同一时间只有一个任务在生成月报"），
    * 跨进程、跨机器都生效。`wait: false` 时拿不到立即返回 false（不排队），默认等到拿到为止返回 true
    * ```ts
    * await db.transaction(async (tx) => {
@@ -910,8 +992,7 @@ export class Db<S extends AnySchema> {
       options.wait !== false,
     );
     const [row] = await query(this.ctx, { sql, params: w.params });
-    const ok = row?.['ok'];
-    return ok === true || ok === 1 || ok === 't' || ok === '1';
+    return truthy(row?.['ok']);
   }
 
   /**
@@ -1028,6 +1109,36 @@ export class Db<S extends AnySchema> {
 }
 
 /** 已经执行过的迁移被改了：校验和对不上 */
+/** 驱动读出的"真"：各库给 true、1、't'、'1'，64 位整数的还会给 1n */
+function truthy(value: unknown): boolean {
+  return value === true || value === 1 || value === 1n || value === 't' || value === '1';
+}
+
+/** 一条迁移执行失败：说清是哪一条语句、做过的改动还在不在 */
+function migrationFailed(
+  migration: Migration,
+  index: number | undefined,
+  rolledBack: boolean,
+  cause: unknown,
+): MigrationError {
+  const reason = cause instanceof Error ? cause.message : String(cause);
+  const where = index === undefined ? '' : ` at statement ${index + 1} of ${migration.up.length}`;
+  const state = rolledBack
+    ? 'the migration was rolled back'
+    : index === undefined
+      ? 'this database does not roll DDL back: what the migration did before failing stays applied and it is not recorded'
+      : index === 0
+        ? 'nothing of this migration was applied'
+        : `this database does not roll DDL back: statements 1 to ${index} stay applied and the migration is not recorded; ` +
+          'fix the database by hand (or remove those statements from the migration) before running migrate again';
+  return new MigrationError(`migration '${migration.id}' failed${where}: ${reason} (${state})`, {
+    id: migration.id,
+    statement: index === undefined ? undefined : index + 1,
+    rolledBack: rolledBack || index === 0,
+    cause,
+  });
+}
+
 function changed(id: string, before: string, now: string): Error {
   return new Error(
     `migration '${id}' was changed after it was applied (checksum ${before} → ${now}); add a new migration instead`,

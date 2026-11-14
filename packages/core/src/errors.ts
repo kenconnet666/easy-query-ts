@@ -41,6 +41,31 @@ export class InvalidCursorError extends InvalidRequestError {
   override readonly name = 'InvalidCursorError';
 }
 
+/**
+ * 一条迁移执行失败（db.migrate）。DDL 能放进事务的库（PG、SQLite、SQL Server……）整条迁移已经回滚，改好再跑就行；
+ * 不能的库（MySQL、Oracle……）失败之前的语句留在库里，历史表里没有这条迁移的记录：照 statement 把库修好
+ * （或把执行过的语句从迁移里拿掉）之后再跑。驱动原来的错误在 cause 里
+ */
+export class MigrationError extends Error {
+  override readonly name = 'MigrationError';
+  /** 哪一条迁移 */
+  readonly id: string;
+  /** 失败的是第几条语句（从 1 起）；函数写的迁移没有 */
+  readonly statement: number | undefined;
+  /** 这条迁移做过的改动是不是都回滚了 */
+  readonly rolledBack: boolean;
+
+  constructor(
+    message: string,
+    detail: { id: string; statement: number | undefined; rolledBack: boolean; cause: unknown },
+  ) {
+    super(message, { cause: detail.cause });
+    this.id = detail.id;
+    this.statement = detail.statement;
+    this.rolledBack = detail.rolledBack;
+  }
+}
+
 /** save() 里子项带的主键是别的父行名下的行，而这个导航没写 adopt */
 export class ChildOwnershipError extends Error {
   override readonly name = 'ChildOwnershipError';

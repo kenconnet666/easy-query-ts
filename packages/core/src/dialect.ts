@@ -472,6 +472,15 @@ export abstract class Dialect {
     throw new Error(`advisoryLock() is not supported by the ${this.name} dialect`);
   }
 
+  /**
+   * 会话级的命名锁（MySQL 的 GET_LOCK）：给没有事务级咨询锁的库。锁跟着连接走、要自己释放，所以不对外当 advisoryLock 用；
+   * migrate 在一条专门的连接上拿着它，同时启动的几个实例排队。key 处是绑定参数；acquire 是返回一行一列 ok 的查询，
+   * 拿到为止（或超时返回假）。没有的方言返回 undefined
+   */
+  sessionLockStatements(_key: string): { acquire: string; release: string } | undefined {
+    return undefined;
+  }
+
   /** 通知（Db.notify）：在事务里时随提交发出；没有的方言报错 */
   notifyStatement(_channel: string, _payload: string): string {
     throw new Error(`notify() is not supported by the ${this.name} dialect`);
@@ -595,8 +604,14 @@ export abstract class Dialect {
     return Promise.resolve(new Map());
   }
 
-  /** 读当前 schema 里的表结构（syncTables、tableExists、由表生成实体用）；各方言实现 */
-  introspect(_run: QueryRunner): Promise<DbTable[]> {
+  /** introspect 能不能读别的 schema（第二个参数）；不能的方言，带 schema 前缀的实体只按表名在当前 schema 里找 */
+  readonly introspectsSchemas: boolean = false;
+
+  /**
+   * 读表结构（syncTables、tableExists、由表生成实体用）；各方言实现。schema 没给时读当前的 schema，
+   * 给了读那一个（introspectsSchemas 的方言）
+   */
+  introspect(_run: QueryRunner, _schema?: string): Promise<DbTable[]> {
     return Promise.reject(
       new Error(`reading the table structure is not supported by the ${this.name} dialect`),
     );

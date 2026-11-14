@@ -6,7 +6,9 @@
  * import m1 from './migrations/20261030083000_init.ts'
  * await db.migrate([m1, m2])   // 返回这次执行的 id
  * ```
- * 历史表记着每条迁移的校验和：已经执行过的迁移被改了，migrate 直接报错，免得库与代码对不上
+ * 历史表记着每条迁移的校验和：已经执行过的迁移被改了，migrate 直接报错，免得库与代码对不上。
+ * 函数写的迁移不校验（同 Flyway 对 Java 迁移的做法）：函数的源码文字随构建方式变（从 .ts 直接跑、编译、压缩各不相同），
+ * 拿它算校验和，同一份迁移换个跑法就会被当成"改过"
  */
 import type { SyncPlan } from './ddl.ts';
 import { col, entity } from './schema.ts';
@@ -46,10 +48,13 @@ export function historyEntity(table: string) {
   });
 }
 
-/** 迁移内容的校验和（FNV-1a 64 位，十六进制）：语句列表或函数的源码 */
+/** 函数写的迁移在历史表里记的校验和：一个固定的记号，不参与比较 */
+const UNCHECKED = 'function';
+
+/** 迁移内容的校验和（FNV-1a 64 位，十六进制）：语句列表的文字；函数写的迁移是固定的记号 */
 export function checksum(migration: Migration): string {
-  const text =
-    typeof migration.up === 'function' ? migration.up.toString() : migration.up.join(';\n');
+  if (typeof migration.up === 'function') return UNCHECKED;
+  const text = migration.up.join(';\n');
   let hash = 0xcbf29ce484222325n;
   for (const byte of new TextEncoder().encode(text)) {
     hash ^= BigInt(byte);

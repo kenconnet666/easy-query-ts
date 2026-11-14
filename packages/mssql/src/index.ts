@@ -43,6 +43,8 @@ import {
   type TransactionOptions,
   type UpdateNode,
   type DatabaseErrorKind,
+  sqlString,
+  schemaOf,
 } from '@zerodep-dev/easy-query-ts';
 import { msSqlFunctions } from './functions.ts';
 
@@ -86,6 +88,16 @@ export class MsSqlDialect extends Dialect {
   override readonly commentStyle = 'statement';
   override readonly indexIfNotExists = false;
   override readonly transactionalDdl = true;
+  override readonly advisoryLocks = true;
+
+  /** sp_getapplock：锁属于事务（提交、回滚时释放）；返回值 >= 0 是拿到了，@LockTimeout 0 是不等 */
+  override advisoryLockStatement(key: string, wait: boolean): string {
+    return (
+      `DECLARE @eq_lock int; EXEC @eq_lock = sp_getapplock @Resource = ${key}, @LockMode = 'Exclusive', ` +
+      `@LockOwner = 'Transaction', @LockTimeout = ${wait ? -1 : 0}; ` +
+      'SELECT CASE WHEN @eq_lock >= 0 THEN 1 ELSE 0 END AS ok'
+    );
+  }
   protected override readonly recursiveKeyword = '';
   protected override readonly ctesAtTop = true;
 
@@ -373,11 +385,13 @@ export class MsSqlDialect extends Dialect {
 
   // ---- 建表 ----
 
-  /** 表与列注释：sp_addextendedproperty 的 MS_Description（当前 schema） */
+  /** 表与列注释：sp_addextendedproperty 的 MS_Description；表名带 schema 前缀时用它，否则是当前 schema */
   override commentStatements(entity: Entity): string[] {
     const table = bareName(entity.table);
+    const named = schemaOf(entity.table);
+    const schema = named === undefined ? 'SCHEMA_NAME()' : `N${sqlString(named)}`;
     const add = (text: string, column?: string) =>
-      `DECLARE @eq_schema sysname = SCHEMA_NAME(); EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'${text.replaceAll("'", "''")}', @level0type = N'SCHEMA', @level0name = @eq_schema, @level1type = N'TABLE', @level1name = N'${table.replaceAll("'", "''")}'${column === undefined ? '' : `, @level2type = N'COLUMN', @level2name = N'${column.replaceAll("'", "''")}'`}`;
+      `DECLARE @eq_schema sysname = ${schema}; EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'${text.replaceAll("'", "''")}', @level0type = N'SCHEMA', @level0name = @eq_schema, @level1type = N'TABLE', @level1name = N'${table.replaceAll("'", "''")}'${column === undefined ? '' : `, @level2type = N'COLUMN', @level2name = N'${column.replaceAll("'", "''")}'`}`;
     const out = entity.comment !== undefined ? [add(entity.comment)] : [];
     for (const [prop, column] of Object.entries(entity.columns))
       if (column.options.comment !== undefined)
@@ -421,20 +435,27 @@ export class MsSqlDialect extends Dialect {
   }
 
   override renameTable(from: string, to: string): string {
-    return `EXEC sp_rename '${bareName(from).replaceAll("'", "''")}', '${bareName(to).replaceAll("'", "''")}'`;
+    // 旧名字没带 schema 时跟着新名字的（改名不换 schema）
+    const named = schemaOf(from) ?? schemaOf(to);
+    const owner = named === undefined ? '' : `${named.replaceAll("'", "''")}.`;
+    return `EXEC sp_rename '${owner}${bareName(from).replaceAll("'", "''")}', '${bareName(to).replaceAll("'", "''")}'`;
   }
 
   override renameColumn(table: string, from: string, to: string): string {
-    return `EXEC sp_rename '${bareName(table).replaceAll("'", "''")}.${from.replaceAll("'", "''")}', '${to.replaceAll("'", "''")}', 'COLUMN'`;
+    const named = schemaOf(table);
+    const owner = named === undefined ? '' : `${named.replaceAll("'", "''")}.`;
+    return `EXEC sp_rename '${owner}${bareName(table).replaceAll("'", "''")}.${from.replaceAll("'", "''")}', '${to.replaceAll("'", "''")}', 'COLUMN'`;
   }
 
   override addColumn(table: string, name: string, kind: string, o: ColumnOptions): string {
     return `ALTER TABLE ${this.table(table)} ADD ${this.columnDefinition(name, kind, o)}`;
   }
 
+  override readonly introspectsSchemas = true;
+
   /** sys 目录视图（当前库的 dbo / 默认 schema） */
-  override async introspect(run: QueryRunner): Promise<DbTable[]> {
-    const schema = 's.name = SCHEMA_NAME()';
+  override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
+    const schema = `s.name = ${schemaName === undefined ? 'SCHEMA_NAME()' : `N${sqlString(schemaName)}`}`;
     return assembleTables({
       tables: await run(
         `SELECT t.name AS table_name, CAST(p.value AS NVARCHAR(4000)) AS comment FROM sys.tables t

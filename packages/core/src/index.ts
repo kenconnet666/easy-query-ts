@@ -50,7 +50,7 @@ export { checksum, defineMigration, migrationSource } from './migrate.ts';
 export type { Migration, MigrationDb } from './migrate.ts';
 export type { EntityValidators, Issue } from './validate.ts';
 export type { MergedEntities, MergedSchema } from './relations.ts';
-export { assembleTables, bareName } from './ddl.ts';
+export { assembleTables, bareName, schemaOf } from './ddl.ts';
 export { byDay, byMod, byMonth, byTime, byYear } from './sharding.ts';
 export { shardDatabases, ShardedDb, ShardedQuery } from './shards.ts';
 export type { ShardOptions } from './shards.ts';
@@ -135,6 +135,7 @@ export {
   ForeignKeyViolationError,
   InvalidCursorError,
   InvalidRequestError,
+  MigrationError,
   NotFoundError,
   NotNullViolationError,
   OptimisticLockError,

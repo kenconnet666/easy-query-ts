@@ -36,9 +36,11 @@ export interface DbForeignKey {
   readonly referencedColumns: readonly string[];
 }
 
-/** 库里的一张表（当前 schema） */
+/** 库里的一张表 */
 export interface DbTable {
   readonly name: string;
+  /** 所在的 schema；从当前 schema 读出来的没有 */
+  readonly schema?: string;
   readonly comment: string | null;
   readonly columns: readonly DbColumn[];
   readonly primaryKey: readonly string[];
@@ -132,7 +134,13 @@ export function planSync(
   for (const entity of entities) {
     let table = findTable(tables, entity.table);
     if (!table && entity.renamedFrom) {
-      table = findTable(tables, entity.renamedFrom);
+      // 旧名字没写 schema 时，在这个实体自己的 schema 里找
+      const schemaName = schemaOf(entity.table);
+      const from =
+        schemaName !== undefined && schemaOf(entity.renamedFrom) === undefined
+          ? `${schemaName}.${entity.renamedFrom}`
+          : entity.renamedFrom;
+      table = findTable(tables, from);
       if (table) renames.push(dialect.renameTable(entity.renamedFrom, entity.table));
     }
     if (!table) {
@@ -229,13 +237,23 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((x, i) => x.toLowerCase() === b[i]!.toLowerCase());
 }
 
-/** 库里叫这个名字的表（去掉 schema 前缀；大小写不同也认，MySQL 在 Windows 上会把表名转成小写） */
+/**
+ * 库里叫这个名字的表：带 schema 前缀的名字只在那个 schema 的表里找（当前 schema 里有同名的表不算），不带的在当前 schema 里找。
+ * 表名大小写不同也认（MySQL 在 Windows 上会把表名转成小写）
+ */
 export function findTable(tables: readonly DbTable[], name: string): DbTable | undefined {
   const bare = bareName(name);
+  const schema = schemaOf(name);
+  const candidates = tables.filter((t) => t.schema === schema);
   return (
-    tables.find((t) => t.name === bare) ??
-    tables.find((t) => t.name.toLowerCase() === bare.toLowerCase())
+    candidates.find((t) => t.name === bare) ??
+    candidates.find((t) => t.name.toLowerCase() === bare.toLowerCase())
   );
+}
+
+/** 表名里的 schema 前缀（`archive.t_post` 的 archive）；没有前缀时 undefined */
+export function schemaOf(table: string): string | undefined {
+  return table.split('@')[0]!.split('.').at(-2);
 }
 
 /** 表名去掉跨库链接与 schema 前缀 */

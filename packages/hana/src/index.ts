@@ -27,6 +27,7 @@ import {
   type TransactionOptions,
   type UpdateNode,
   type DatabaseErrorKind,
+  sqlString,
 } from '@zerodep-dev/easy-query-ts';
 
 export { Hana } from './functions.ts';
@@ -124,9 +125,11 @@ export class HanaDialect extends Dialect {
     return `ALTER TABLE ${this.table(table)} ADD (${this.columnDefinition(name, kind, o)})`;
   }
 
+  override readonly introspectsSchemas = true;
+
   /** 读 SYS 系统视图（CURRENT_SCHEMA） */
-  override async introspect(run: QueryRunner): Promise<DbTable[]> {
-    const schema = 'SCHEMA_NAME = CURRENT_SCHEMA';
+  override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
+    const schema = `SCHEMA_NAME = ${schemaName === undefined ? 'CURRENT_SCHEMA' : sqlString(schemaName)}`;
     return assembleTables({
       tables: await run(
         `SELECT TABLE_NAME AS "table_name", COMMENTS AS "comment" FROM SYS.TABLES WHERE ${schema} ORDER BY TABLE_NAME`,

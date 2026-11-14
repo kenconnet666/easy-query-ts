@@ -33,6 +33,7 @@ import {
   type Session,
   type TransactionOptions,
   type DatabaseErrorKind,
+  sqlString,
 } from '@zerodep-dev/easy-query-ts';
 
 /** DuckDB 的方言 */
@@ -185,23 +186,26 @@ export class DuckDbDialect extends Dialect {
     );
   }
 
+  override readonly introspectsSchemas = true;
+
   /** information_schema 与 duckdb_* 系统函数 */
-  override async introspect(run: QueryRunner): Promise<DbTable[]> {
+  override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
+    const of = schemaName === undefined ? 'current_schema()' : sqlString(schemaName);
     return assembleTables({
       tables: await run(
-        `SELECT table_name, comment FROM duckdb_tables() WHERE schema_name = current_schema() ORDER BY table_name`,
+        `SELECT table_name, comment FROM duckdb_tables() WHERE schema_name = ${of} ORDER BY table_name`,
       ),
       columns: await run(
         `SELECT c.table_name, c.column_name, c.data_type AS column_type, c.is_nullable AS is_nullable,
            c.column_default, c.comment, COALESCE(c.column_default LIKE 'nextval(%', false) AS is_generated,
            EXISTS (SELECT 1 FROM duckdb_constraints() k WHERE k.table_name = c.table_name AND k.schema_name = c.schema_name
              AND k.constraint_type = 'PRIMARY KEY' AND list_contains(k.constraint_column_names, c.column_name)) AS primary_key
-         FROM duckdb_columns() c WHERE c.schema_name = current_schema() ORDER BY c.table_name, c.column_index`,
+         FROM duckdb_columns() c WHERE c.schema_name = ${of} ORDER BY c.table_name, c.column_index`,
       ),
       // expressions 是 '[a, "b"]' 这样的文字
       indexes: (
         await run(
-          `SELECT table_name, index_name, is_unique, expressions FROM duckdb_indexes() WHERE schema_name = current_schema()`,
+          `SELECT table_name, index_name, is_unique, expressions FROM duckdb_indexes() WHERE schema_name = ${of}`,
         )
       ).flatMap((i) =>
         String(i['expressions'] as string)
@@ -214,7 +218,7 @@ export class DuckDbDialect extends Dialect {
          FROM duckdb_constraints() k,
            unnest(k.constraint_column_names) WITH ORDINALITY AS u(column_name, ord),
            unnest(k.referenced_column_names) WITH ORDINALITY AS r(referenced_column, rord)
-         WHERE k.constraint_type = 'FOREIGN KEY' AND k.schema_name = current_schema() AND u.ord = r.rord
+         WHERE k.constraint_type = 'FOREIGN KEY' AND k.schema_name = ${of} AND u.ord = r.rord
          ORDER BY k.table_name, k.constraint_name, u.ord`,
       ),
     });

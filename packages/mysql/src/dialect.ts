@@ -44,6 +44,14 @@ const MYSQL_MINIMUM: Record<string, string> = {
 };
 
 export class MySqlDialect extends Dialect {
+  /** GET_LOCK：会话级的命名锁，等一小时还拿不到就返回 0（负数在 MariaDB 上不是"一直等"） */
+  override sessionLockStatements(key: string): { acquire: string; release: string } | undefined {
+    return {
+      acquire: `SELECT GET_LOCK(${key}, 3600) AS ok`,
+      release: `SELECT RELEASE_LOCK(${key}) AS ok`,
+    };
+  }
+
   /** mysql2 的 errno：1062 唯一键，1451 / 1452（旧写法 1216 / 1217）外键，1048 / 1364 非空，1213 死锁 */
   override errorKind(error: unknown): DatabaseErrorKind | undefined {
     switch (errorField(error, 'errno')) {
@@ -210,9 +218,11 @@ export class MySqlDialect extends Dialect {
     return t.replace(/^(tinyint|smallint|mediumint|int|bigint)\(\d+\)/, '$1');
   }
 
+  override readonly introspectsSchemas = true;
+
   /** 读 information_schema（当前库） */
-  override async introspect(run: QueryRunner): Promise<DbTable[]> {
-    const schema = 'TABLE_SCHEMA = DATABASE()';
+  override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
+    const schema = `TABLE_SCHEMA = ${schemaName === undefined ? 'DATABASE()' : sqlString(schemaName)}`;
     return assembleTables({
       tables: await run(
         `SELECT TABLE_NAME AS table_name, TABLE_COMMENT AS comment FROM information_schema.TABLES

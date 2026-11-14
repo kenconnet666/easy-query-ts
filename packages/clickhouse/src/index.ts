@@ -272,23 +272,26 @@ export class ClickHouseDialect extends Dialect {
     return `ALTER TABLE ${this.table(table)} ADD COLUMN ${this.columnDefinition(name, kind, o)}`;
   }
 
+  override readonly introspectsSchemas = true;
+
   /** system.tables / system.columns / system.data_skipping_indices（当前库） */
-  override async introspect(run: QueryRunner): Promise<DbTable[]> {
+  override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
+    const of = schemaName === undefined ? 'currentDatabase()' : sqlString(schemaName);
     return assembleTables({
       tables: await run(
         `SELECT name AS table_name, comment FROM system.tables
-         WHERE database = currentDatabase() AND NOT is_temporary AND engine NOT LIKE '%View' ORDER BY name`,
+         WHERE database = ${of} AND NOT is_temporary AND engine NOT LIKE '%View' ORDER BY name`,
       ),
       columns: await run(
         `SELECT table AS table_name, name AS column_name, replaceRegexpOne(type, '^Nullable\\\\((.*)\\\\)$', '\\\\1') AS column_type,
            startsWith(type, 'Nullable(') AS is_nullable, if(default_kind = '', NULL, default_expression) AS column_default,
            if(comment = '', NULL, comment) AS comment, 0 AS is_generated, is_in_sorting_key AS primary_key
-         FROM system.columns WHERE database = currentDatabase() ORDER BY table, position`,
+         FROM system.columns WHERE database = ${of} ORDER BY table, position`,
       ),
       indexes: await run(
         `SELECT table AS table_name, name AS index_name, 0 AS is_unique, trim(BOTH ' ' FROM column_name) AS column_name
          FROM system.data_skipping_indices ARRAY JOIN splitByChar(',', expr) AS column_name
-         WHERE database = currentDatabase() ORDER BY table, name`,
+         WHERE database = ${of} ORDER BY table, name`,
       ),
       foreignKeys: [],
     });

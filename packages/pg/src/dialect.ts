@@ -209,10 +209,12 @@ export class PostgresDialect extends Dialect {
   /** 读库结构时判断自增列（pg_attribute 别名 a、pg_attrdef 别名 d）：IDENTITY 列或默认值取序列 */
   protected readonly introspectedIdentity: string = `a.attidentity <> '' OR coalesce(pg_get_expr(d.adbin, d.adrelid), '') LIKE 'nextval(%'`;
 
+  override readonly introspectsSchemas = true;
+
   /** 读系统目录（current_schema() 里的普通表与分区表） */
-  override async introspect(run: QueryRunner): Promise<DbTable[]> {
+  override async introspect(run: QueryRunner, schemaName?: string): Promise<DbTable[]> {
     const tables = `SELECT c.oid, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')`;
+      WHERE n.nspname = ${schemaName === undefined ? 'current_schema()' : sqlString(schemaName)} AND c.relkind IN ('r', 'p')`;
     return assembleTables({
       tables: await run(
         `SELECT t.relname AS table_name, obj_description(t.oid, 'pg_class') AS comment
