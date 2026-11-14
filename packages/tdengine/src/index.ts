@@ -42,6 +42,8 @@ function literal(text: string): string {
 
 export class TdengineDialect extends Dialect {
   readonly name = 'tdengine';
+  /** 没有事务，也就没有保存点 */
+  override readonly supportsSavepoints = false;
   override readonly indexIfNotExists = true;
 
   /** 删除时列名不带别名 */

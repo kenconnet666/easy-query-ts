@@ -372,7 +372,7 @@ export class Db<S extends AnySchema> {
         )
         .firstOrThrow() as Promise<Row<E>>;
     };
-    return this.inTransaction ? run(this) : this.runInTransaction(run);
+    return this.atomically(run);
   }
 
   /**
@@ -407,7 +407,16 @@ export class Db<S extends AnySchema> {
       );
       return true;
     };
-    return this.inTransaction ? run(this) : this.runInTransaction(run);
+    return this.atomically(run);
+  }
+
+  /**
+   * save / remove 要么全做要么全不做：不在事务里就开一个；已经在事务里就包一层保存点——
+   * 中途失败时只撤掉它自己写的那部分，调用方接住错误继续用外层事务也不会留下半截数据。没有保存点的库直接执行
+   */
+  private atomically<T>(work: (db: Db<S>) => Promise<T>): Promise<T> {
+    if (this.inTransaction && !this.ctx.dialect.supportsSavepoints) return work(this);
+    return this.runInTransaction(work);
   }
 
   /** 按实体定义生成建表语句（列、主键、唯一约束、MySQL 的注释），不执行。类型规则见各方言的 columnType */
@@ -545,31 +554,42 @@ export class Db<S extends AnySchema> {
     if (!findTable(await this.introspect(), history.table))
       await this.runDdl([this.ctx.dialect.createTable(history, true)]);
     const applied = new Map(
-      (await this.queryable(history).toList()).map((row) => [row.id, row.checksum]),
+      (await this.usePrimary().queryable(history).toList()).map((row) => [row.id, row.checksum]),
     );
     const done: string[] = [];
     for (const migration of ordered(migrations)) {
       const sum = checksum(migration);
       const before = applied.get(migration.id);
       if (before !== undefined) {
-        if (before !== sum)
-          throw new Error(
-            `migration '${migration.id}' was changed after it was applied (checksum ${before} → ${sum}); add a new migration instead`,
-          );
+        if (before !== sum) throw changed(migration.id, before, sum);
         continue;
       }
-      const run = async (db: Db<S>) => {
+      const run = async (db: Db<S>): Promise<boolean> => {
+        // 几个实例同时启动、同时迁移：有咨询锁的库按历史表排队，轮到自己时再看一眼是不是已经被别人执行了
+        if (db.ctx.dialect.advisoryLocks && db.inTransaction) {
+          await db.advisoryLock(`eqts.migrate:${history.table}`);
+          const [raced] = await db
+            .queryable(history)
+            .where((h) => h.id.eq(migration.id))
+            .toList();
+          if (raced) {
+            if (raced.checksum !== sum) throw changed(migration.id, raced.checksum, sum);
+            return false;
+          }
+        }
         if (typeof migration.up === 'function') await migration.up(db);
         else for (const sql of migration.up) await execute(db.ctx, { sql, params: [] });
         await (db as unknown as Db<AnySchema>)
           .insert(history)
           .values({ id: migration.id, checksum: sum, appliedAt: new Date() })
           .execute();
+        return true;
       };
-      if (this.ctx.dialect.transactionalDdl && !this.inTransaction)
-        await this.runInTransaction(run);
-      else await run(this);
-      done.push(migration.id);
+      const ran =
+        this.ctx.dialect.transactionalDdl && !this.inTransaction
+          ? await this.runInTransaction(run)
+          : await run(this);
+      if (ran) done.push(migration.id);
     }
     return done;
   }
@@ -970,6 +990,13 @@ export class Db<S extends AnySchema> {
       throw new Error(`entity for table '${entity.table}' is not part of the schema`);
     return key as K;
   }
+}
+
+/** 已经执行过的迁移被改了：校验和对不上 */
+function changed(id: string, before: string, now: string): Error {
+  return new Error(
+    `migration '${id}' was changed after it was applied (checksum ${before} → ${now}); add a new migration instead`,
+  );
 }
 
 /** begin() 里用来表示"回滚"的哨兵：让驱动的回调抛出它，驱动据此回滚，再被吞掉 */

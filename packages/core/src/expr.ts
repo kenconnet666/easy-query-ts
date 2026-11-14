@@ -859,13 +859,16 @@ export class Expr<T> {
         text.node,
         after && toNode(after, codecs.string),
       ];
-      return pred({
+      const like: Node = {
         k: 'like',
         e: this.node,
         pattern: { k: 'fn', name: 'concat', args: parts.filter((p): p is Node => !!p) },
         not,
         ...ci,
-      });
+      };
+      // 模式为 NULL 时不匹配。不加这一条的话，拼接跳过 NULL 的库（PG、SQL Server、Oracle、DuckDB）
+      // 得到的模式是 '%%'，每一行都匹配；拼接遇 NULL 得 NULL 的库则一行都不匹配
+      return pred({ k: 'and', items: [{ k: 'null', e: text.node, not: true }, like] });
     }
     const encryption = this.codec?.encryption;
     if (encryption && options?.ignoreCase)

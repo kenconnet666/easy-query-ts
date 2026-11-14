@@ -31,6 +31,8 @@ export interface DorisOptions {
 
 export class DorisDialect extends MySqlDialect {
   override readonly name: string = 'doris';
+  /** 事务不能回滚，语句依次执行：没有保存点 */
+  override readonly supportsSavepoints = false;
   override readonly commentStyle = 'inline';
   private readonly replication: number | undefined;
 

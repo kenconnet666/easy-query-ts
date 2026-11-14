@@ -451,6 +451,9 @@ export abstract class Dialect {
    * 事务级的咨询锁（ROADMAP 19.10，Db.advisoryLock）：按一个名字加锁、事务结束自动释放；wait 为 false 时拿不到立即返回假。
    * 名字是绑定参数（key 处）。返回一行一列（ok）的查询；没有的方言报错
    */
+  /** 有没有事务级的咨询锁（advisoryLockStatement）：有的话 migrate 用它让同时启动的几个实例排队 */
+  readonly advisoryLocks: boolean = false;
+
   advisoryLockStatement(_key: string, _wait: boolean): string {
     throw new Error(`advisoryLock() is not supported by the ${this.name} dialect`);
   }
@@ -690,6 +693,9 @@ export abstract class Dialect {
   groupByKeys(keys: string[], mode: 'rollup' | 'cube' | undefined): string {
     return mode ? `${mode.toUpperCase()}(${keys.join(', ')})` : keys.join(', ');
   }
+
+  /** 有没有保存点（嵌套事务）。没有事务的库、DuckDB 没有：已在事务里的 save / remove 就不另包一层 */
+  readonly supportsSavepoints: boolean = true;
 
   /** 嵌套事务用的保存点语句；保存点名字由核心生成（只含字母数字下划线） */
   savepoint(name: string): string {

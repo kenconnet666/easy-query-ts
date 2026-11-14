@@ -113,6 +113,11 @@ describe('sqlite: Queryable.table', async () => {
       posts.table(parseTableRequest({ sort: 'constructor.name' })),
       /not a column of the result/,
     );
+    // __proto__ 也是普通的键：要报错，而不是把这个筛选悄悄丢掉
+    await assert.rejects(
+      posts.table(parseTableRequest(new URLSearchParams('filter.__proto__=x'))),
+      /cannot filter by '__proto__'/,
+    );
   });
 
   it('toPage 的页码、条数必须是正整数', async () => {

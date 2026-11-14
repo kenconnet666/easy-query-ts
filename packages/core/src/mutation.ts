@@ -642,8 +642,12 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
       throw new Error(`returnEntity() needs a primary key on ${this.entity.table}`);
     // sqlConvert 的列 RETURNING 拿不到转换后的值：插入后再按主键查回
     const converted = Object.values(this.entity.columns).some((c) => c.options.sqlRead);
-    if (this.ctx.dialect.supportsReturning && !converted)
-      return (await this.returningColumns([]).execute())[0] as Row<EntityOf<S, K>>;
+    if (this.ctx.dialect.supportsReturning && !converted) {
+      const [inserted] = await this.returningColumns([]).execute();
+      if (inserted) return inserted as Row<EntityOf<S, K>>;
+      // onConflict(..).ignore() 撞上已有的行：RETURNING 什么都不返回，按冲突的列把已有的那一行查回来
+      return this.conflicting();
+    }
     const values: Record<string, unknown> = { ...this.filled()[0] };
     const generated = this.entity.primaryKey.filter((k) => values[k] === undefined);
     if (generated.length > 1)
@@ -659,6 +663,28 @@ export class InsertValues<S extends AnySchema, K extends EntityKey<S>> {
     if (!found)
       throw new Error(
         `returnEntity(): the inserted row of ${this.entity.table} is not visible to the current interceptors`,
+      );
+    return found as Row<EntityOf<S, K>>;
+  }
+
+  /** onConflict 的目标列等于这次要插入的值的那一行（已经在库里的） */
+  private async conflicting(): Promise<Row<EntityOf<S, K>>> {
+    const target = this.conflict?.target ?? [];
+    const row = this.filled()[0]!;
+    const props = Object.keys(this.entity.columns).filter((p) =>
+      target.includes(this.entity.columnNames[p]!),
+    );
+    const found =
+      props.length > 0 && props.every((p) => row[p] !== undefined && row[p] !== null)
+        ? await newQueryable(this.ctx, this.key)
+            .where((r: any) =>
+              props.map((p) => (refColumn(r, p) as Expr<unknown>).eq(row[p] as never)),
+            )
+            .first()
+        : undefined;
+    if (!found)
+      throw new Error(
+        `returnEntity(): the insert into ${this.entity.table} returned no row and the existing one is not visible`,
       );
     return found as Row<EntityOf<S, K>>;
   }
@@ -841,6 +867,22 @@ function nextVersion(column: AnyColumn, current: unknown): unknown {
   const next = column.options.version!.next;
   if (next) return next(current);
   return typeof current === 'bigint' ? current + 1n : Number(current) + 1;
+}
+
+/** 不知道当前版本时把版本列换成下一个：有规则用规则，没有就在库里加 1 */
+function nextVersionSet(
+  entity: Entity,
+  version: string,
+  alias: string,
+): { column: string; e: Node } {
+  const column = entity.columns[version]!;
+  const name = entity.columnNames[version]!;
+  return {
+    column: name,
+    e: column.options.version!.next
+      ? columnValue(column, nextVersion(column, undefined))
+      : { k: 'op', op: '+', l: { k: 'col', alias, name }, r: { k: 'lit', sql: '1' } },
+  };
 }
 
 /**
@@ -1345,21 +1387,8 @@ export class Updatable<S extends AnySchema, K extends EntityKey<S>> extends Filt
         return { column: entity.columnNames[p]!, e: columnValue(column, v) };
       });
     // 乐观锁列：没带版本条件的更新（表达式更新、批量更新）也换成下一个版本，别人手里的旧版本就会失效
-    if (version !== undefined && values[version] === undefined) {
-      const column = entity.columns[version]!;
-      const name = entity.columnNames[version]!;
-      set.push({
-        column: name,
-        e: column.options.version!.next
-          ? columnValue(column, nextVersion(column, undefined))
-          : {
-              k: 'op',
-              op: '+',
-              l: { k: 'col', alias: root[REF].alias, name },
-              r: { k: 'lit', sql: '1' },
-            },
-      });
-    }
+    if (version !== undefined && values[version] === undefined)
+      set.push(nextVersionSet(entity, version, root[REF].alias));
     if (set.length === 0) throw new Error(`update of ${entity.table} sets no columns`);
     const node = { ...this.target(scope, root), set, ...this.limited(scope, root, where) };
     checkAliases(node);
@@ -1500,6 +1529,9 @@ export class Deletable<S extends AnySchema, K extends EntityKey<S>> extends Filt
         column: entity.columnNames[p]!,
         e: columnValue(entity.columns[p]!, v),
       }));
+      // 逻辑删除是一次更新：没带版本条件时也换成下一个版本（同 Updatable），别人手里的旧版本才会失效
+      if (version !== undefined && softSet[version] === undefined)
+        set.push(nextVersionSet(entity, version, root[REF].alias));
       const update = { ...target, set, ...this.limited(scope, root, where) };
       checkAliases(update);
       const w = new SqlWriter();

@@ -49,6 +49,8 @@ function paramType(value: unknown): string {
 
 export class ClickHouseDialect extends Dialect {
   readonly name = 'clickhouse';
+  /** 没有事务，也就没有保存点 */
+  override readonly supportsSavepoints = false;
   override readonly commentStyle = 'inline' as const;
   override readonly indexIfNotExists = true;
 

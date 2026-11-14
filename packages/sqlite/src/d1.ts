@@ -71,6 +71,11 @@ export type D1Adapter = Adapter<
   Without<'transactions' | 'lock' | 'forUpdate' | 'skipLocked' | 'noWait'>
 >;
 
+/** D1 没有交互式事务，SAVEPOINT 也发不了 */
+class D1Dialect extends SqliteDialect {
+  override readonly supportsSavepoints = false;
+}
+
 export function d1(binding: D1Binding): D1Adapter {
-  return { dialect: new SqliteDialect(), driver: new D1Driver(binding) };
+  return { dialect: new D1Dialect(), driver: new D1Driver(binding) };
 }

@@ -32,6 +32,7 @@ export default _component(() => () => (
           ['`set(...)`（表达式、批量）', '没有', '有：别人手里的旧版本随之失效'],
           ['`set(...).ignoreVersion()`', '没有', '没有'],
           ['`delete(X).withVersion(v)`、`entity(row)`', '有', '逻辑删除时有'],
+          ['`delete(X).where(...)`（逻辑删除）', '没有', '有：逻辑删除是一次更新'],
         ]}
       />
     </Section>

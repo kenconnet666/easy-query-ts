@@ -261,6 +261,8 @@ export class PostgresDialect extends Dialect {
   override readonly indexFeatures = { using: true, partial: true, expressions: true };
 
   /** 名字先哈希成 64 位整数（hashtextextended，PG 11+）；try 版本拿不到就返回假 */
+  override readonly advisoryLocks = true;
+
   override advisoryLockStatement(key: string, wait: boolean): string {
     return wait
       ? // pg_advisory_xact_lock 返回 void：拿到锁之后才会产出这一行

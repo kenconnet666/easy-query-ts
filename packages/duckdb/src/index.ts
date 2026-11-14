@@ -76,6 +76,8 @@ export class DuckDbDialect extends Dialect {
     return value === null || value === undefined ? 'NULL' : super.bindParam(value, w);
   }
 
+  override readonly supportsSavepoints = false;
+
   override savepoint(): string {
     throw new Error('nested transactions are not supported by the duckdb dialect (no SAVEPOINT)');
   }

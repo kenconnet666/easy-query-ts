@@ -47,6 +47,7 @@ export default _component(() => () => (
   <DocPage>
     <Section id="why" title="什么时候用">
       <P text="`syncTables` 适合开发阶段；生产环境要有记录、能审查、能手改的迁移。执行过的迁移记进历史表，下次跳过。" />
+      <P text="几个实例同时启动、同时执行迁移时：PostgreSQL 系按历史表的名字加咨询锁排队，每条迁移只执行一次。别的库没有这种锁，迁移要由一个实例（或部署流程里单独的一步）来跑。" />
       <SimpleTable
         head={['阶段', '做法']}
         rows={[

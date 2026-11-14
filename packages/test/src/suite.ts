@@ -123,6 +123,28 @@ export function liveSuite(
       );
     });
 
+    it('a NULL pattern column matches nothing, with like and with notLike', async () => {
+      const { db } = await seeded();
+      // carol 没有公司，模式是 NULL：不能因为拼出来的是 '%%' 就匹配上
+      assert.deepEqual(
+        await db
+          .queryable(User)
+          .where((u) => u.name.like(u.company.name))
+          .select((u) => u.name)
+          .toList(),
+        [],
+      );
+      assert.deepEqual(
+        await db
+          .queryable(User)
+          .where((u) => u.name.notLike(u.company.name))
+          .orderBy((u) => u.id)
+          .select((u) => u.name)
+          .toList(),
+        ['alice', 'bob'],
+      );
+    });
+
     it('escapes LIKE wildcards in the searched text', async () => {
       const { db } = await seeded();
       const titles = await db
@@ -1638,6 +1660,50 @@ export function liveSuite(
       assert.deepEqual((await users())[1], { name: 'bobby', companyId: 2 });
     });
 
+    it(
+      'a failed save inside a transaction leaves nothing behind in it',
+      { skip: options.savepoints === false },
+      async () => {
+        const { db } = await seeded();
+        await db.transaction(async (tx) => {
+          // 第二个子行缺标题：接住错误，外层事务照常提交
+          await tx
+            .save(
+              User,
+              { ...dave, posts: [{ title: 'ok', amount: '1.00' }, { amount: '1.00' }] },
+              { include: { posts: true } },
+            )
+            .catch(() => undefined);
+          await tx.insert(Company).values({ name: 'kept' }).execute();
+        });
+        assert.equal(
+          await db
+            .queryable(User)
+            .where((u) => u.name.eq('dave'))
+            .count(),
+          0,
+        );
+        assert.equal(
+          await db
+            .queryable(Company)
+            .where((c) => c.name.eq('kept'))
+            .count(),
+          1,
+        );
+      },
+    );
+
+    it('returnEntity gives the existing row when an ignored upsert hits it', async () => {
+      const { db } = await seeded();
+      const existing = await db
+        .insert(Company)
+        .values({ id: 1, name: 'other' })
+        .onConflict((c) => c.id)
+        .ignore()
+        .returnEntity();
+      assert.deepEqual([Number(existing.id), existing.name], [1, 'acme']);
+    });
+
     it('rolls the whole save back when a child fails', async () => {
       const { db } = await seeded();
       // 第二个子行缺必填的标题：整个 save 在一个事务里，父行也不该留下
@@ -2948,18 +3014,18 @@ export function liveSuite(
         1,
       );
       assert.equal(await db.queryable(Doc).count(), 2);
-      // 单条语句关掉过滤，能看到被逻辑删除的行
+      // 单条语句关掉过滤，能看到被逻辑删除的行；逻辑删除是一次更新，版本跟着换
       const all = await db
         .queryable(Doc)
         .noInterceptor('softDelete')
         .orderBy((d) => d.id)
         .toList();
       assert.deepEqual(
-        all.map((d) => [d.title, d.deleted]),
+        all.map((d) => [d.title, d.deleted, d.version]),
         [
-          ['a', true],
-          ['b', false],
-          ['c', false],
+          ['a', true, 1],
+          ['b', false, 0],
+          ['c', false, 0],
         ],
       );
       // 已经删除的行读不到，再删一次什么也没做；更新也碰不到它

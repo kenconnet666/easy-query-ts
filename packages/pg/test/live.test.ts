@@ -6,7 +6,7 @@
 import { afterAll, describe, it } from 'vitest';
 import pg from 'pg';
 import assert from 'node:assert/strict';
-import { createDb, sql, type Statement } from '@zerodep-dev/easy-query-ts';
+import { createDb, defineMigration, sql, type Statement } from '@zerodep-dev/easy-query-ts';
 import { Post, schema, seed, User, type TestEnv } from '@zerodep-dev/easy-query-ts-test/fixture';
 import { liveSuite } from '@zerodep-dev/easy-query-ts-test/suite';
 import { listen, Pg, postgres } from '../src/index.ts';
@@ -51,6 +51,28 @@ for (const url of urls) {
   arraySuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
   bulkSuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
   enumSuite(`postgres ${new URL(url).port}`, async () => postgres(pool));
+
+  describe(`postgres ${new URL(url).port}: migrations started by several instances`, () => {
+    it('queue on an advisory lock so each migration runs once', async () => {
+      const db = createDb({ schema, adapter: postgres(pool) });
+      const table = 'eqts_migrations_race';
+      await pool.query(`DROP TABLE IF EXISTS ${table}`);
+      await pool.query('DROP TABLE IF EXISTS t_race');
+      const migrations = [
+        defineMigration({ id: '001_race', up: ['CREATE TABLE t_race (id INT PRIMARY KEY)'] }),
+        defineMigration({ id: '002_race', up: ['INSERT INTO t_race (id) VALUES (1)'] }),
+      ];
+      try {
+        const ran = await Promise.all([1, 2, 3].map(() => db.migrate(migrations, { table })));
+        // 每条迁移只被其中一个实例执行；别的实例排到时发现已经执行过，跳过
+        assert.deepEqual(ran.flat().sort(), ['001_race', '002_race']);
+        assert.equal((await pool.query('SELECT COUNT(*) AS n FROM t_race')).rows[0].n, '1');
+      } finally {
+        await pool.query(`DROP TABLE IF EXISTS ${table}`);
+        await pool.query('DROP TABLE IF EXISTS t_race');
+      }
+    });
+  });
 
   describe(`postgres ${new URL(url).port}: advisory locks and notifications`, () => {
     it('serializes by lock name until the transaction ends; notify reaches listeners after commit', async () => {

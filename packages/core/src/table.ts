@@ -69,18 +69,20 @@ export function parseTableRequest(input: TableRequestInput): TableRequest {
     totalText === undefined || totalText === '' ? undefined : nonNegativeInt(totalText, 'total');
   const sorts = parseSort(one('sort') ?? '');
 
-  const filters: Record<string, string[]> = {};
-  const searches: Record<string, string> = {};
-  const params: Record<string, string[]> = {};
+  // 键来自请求：攒成键值对再 Object.fromEntries，'__proto__' 这类键也是普通的自有属性
+  // （直接赋值会改掉对象的原型，这个筛选就被悄悄丢掉了）
+  const filters: [string, string[]][] = [];
+  const searches: [string, string][] = [];
+  const params: [string, string[]][] = [];
   for (const [key, values] of all) {
     if (key.startsWith('filter.')) {
       const kept = values.filter((value) => value.trim() !== '');
-      if (kept.length) filters[key.slice('filter.'.length)] = kept;
+      if (kept.length) filters.push([key.slice('filter.'.length), kept]);
     } else if (key.startsWith('search.')) {
       const text = values[0]?.trim() ?? '';
-      if (text) searches[key.slice('search.'.length)] = text;
+      if (text) searches.push([key.slice('search.'.length), text]);
     } else if (!['page', 'pageSize', 'sort', 'total', 'condition'].includes(key))
-      params[key] = values;
+      params.push([key, values]);
   }
   const conditionText = one('condition');
   let condition: ConditionTree | undefined;
@@ -91,7 +93,16 @@ export function parseTableRequest(input: TableRequestInput): TableRequest {
       throw new Error('condition must be JSON (the value of ConditionBuilder)');
     }
   }
-  return { page, pageSize, sorts, total, filters, searches, condition, params };
+  return {
+    page,
+    pageSize,
+    sorts,
+    total,
+    filters: Object.fromEntries(filters),
+    searches: Object.fromEntries(searches),
+    condition,
+    params: Object.fromEntries(params),
+  };
 }
 
 function positiveInt(text: string, name: string): number {
